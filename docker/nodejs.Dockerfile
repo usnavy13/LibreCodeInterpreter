@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.4
 # Node.js execution environment with BuildKit optimizations
-FROM node:20-alpine
+FROM node:25-alpine
 
 # Install common build tools
 RUN apk add --no-cache \
