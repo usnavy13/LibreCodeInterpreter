@@ -24,7 +24,7 @@ docker==7.1.0
 requests-unixsocket==0.3.0
 
 # Date/time parsing utilities
-python-dateutil==2.8.2
+python-dateutil==2.9.0.post0
 
 
 # Testing framework
