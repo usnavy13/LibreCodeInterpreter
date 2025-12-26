@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.4
 # Java execution environment with BuildKit optimizations
-FROM eclipse-temurin:17-jdk
+FROM eclipse-temurin:25-jdk
 
 # Install common tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
