@@ -32,7 +32,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./logs:/app/logs
-      - ./data:/app/data
+      - app-data:/app/data
       - ${SSL_CERTS_PATH:-./ssl}:/app/ssl
     depends_on:
       - redis
@@ -131,6 +131,8 @@ volumes:
   redis-data:
     driver: local
   minio-data:
+    driver: local
+  app-data:
     driver: local
 
 networks:
