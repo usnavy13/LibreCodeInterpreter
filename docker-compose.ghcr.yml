@@ -140,7 +140,7 @@ networks:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.20.0.0/16
+        - subnet: 172.22.0.0/16
 
   # WAN-only network for execution containers that need internet access
   # This network is only created when ENABLE_WAN_ACCESS=true
