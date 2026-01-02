@@ -17,7 +17,7 @@ redis==5.1.0
 aiosqlite>=0.19.0
 
 # MinIO/S3 client
-minio==7.2.15
+minio==7.2.20
 
 # Docker client for container management
 docker==7.1.0
