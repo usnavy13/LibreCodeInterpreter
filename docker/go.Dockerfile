@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.4
 # Go execution environment with BuildKit optimizations
-FROM golang:1.23-alpine
+FROM golang:1.25-alpine
 
 # Install common tools
 RUN apk add --no-cache \
