@@ -10,6 +10,7 @@ from docker.errors import DockerException
 from docker.models.containers import Container
 
 from ...config import settings
+from .utils import wait_for_container_ready, receive_socket_output, run_in_executor
 
 logger = structlog.get_logger(__name__)
 
@@ -74,35 +75,7 @@ class ContainerExecutor:
             exec_config["workdir"] = working_dir
 
         try:
-            exec_instance = self.client.api.exec_create(container.id, **exec_config)
-            exec_id = exec_instance["Id"]
-
-            sock = self.client.api.exec_start(exec_id, socket=True)
-            raw_sock = sock._sock
-            raw_sock.settimeout(timeout)
-
-            if stdin_payload:
-                raw_sock.sendall(stdin_payload.encode("utf-8"))
-                raw_sock.shutdown(1)
-
-            output_chunks = []
-            while True:
-                try:
-                    chunk = raw_sock.recv(4096)
-                    if not chunk:
-                        break
-                    output_chunks.append(chunk)
-                except (TimeoutError, OSError):
-                    break
-
-            output = b"".join(output_chunks)
-            exec_info = self.client.api.exec_inspect(exec_id)
-            exit_code = exec_info["ExitCode"]
-
-            output_str = self._sanitize_output(output) if output else ""
-            stdout, stderr = self._separate_output_streams(output_str, exit_code)
-
-            return exit_code, stdout, stderr
+            return self._execute_via_socket(container, exec_config, stdin_payload, timeout)
 
         except DockerException as e:
             error_text = str(e)
@@ -111,7 +84,7 @@ class ContainerExecutor:
             if "is not running" in error_text.lower():
                 try:
                     await self._start_container(container)
-                    return await self._retry_execution(
+                    return self._execute_via_socket(
                         container, exec_config, stdin_payload, timeout
                     )
                 except Exception as retry_err:
@@ -122,42 +95,17 @@ class ContainerExecutor:
             logger.error(f"Unexpected error during command execution: {e}")
             return 1, "", f"Unexpected execution error: {str(e)}"
 
-    async def _start_container(self, container: Container) -> bool:
-        """Start a container and wait for running state."""
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, container.start)
-
-        stable_checks = 0
-        max_wait = 2.0
-        interval = 0.05
-        total_wait = 0.0
-
-        while total_wait < max_wait:
-            try:
-                container.reload()
-                if getattr(container, "status", "") == "running":
-                    stable_checks += 1
-                    if stable_checks >= 3:
-                        return True
-                else:
-                    stable_checks = 0
-            except Exception:
-                stable_checks = 0
-            await asyncio.sleep(interval)
-            total_wait += interval
-
-        return getattr(container, "status", "") == "running"
-
-    async def _retry_execution(
+    def _execute_via_socket(
         self,
         container: Container,
         exec_config: Dict[str, Any],
         stdin_payload: Optional[str],
         timeout: int,
     ) -> Tuple[int, str, str]:
-        """Retry execution after container start."""
+        """Execute command and collect output via socket."""
         exec_instance = self.client.api.exec_create(container.id, **exec_config)
         exec_id = exec_instance["Id"]
+
         sock = self.client.api.exec_start(exec_id, socket=True)
         raw_sock = sock._sock
         raw_sock.settimeout(timeout)
@@ -166,22 +114,19 @@ class ContainerExecutor:
             raw_sock.sendall(stdin_payload.encode("utf-8"))
             raw_sock.shutdown(1)
 
-        output_chunks = []
-        while True:
-            try:
-                chunk = raw_sock.recv(4096)
-                if not chunk:
-                    break
-                output_chunks.append(chunk)
-            except (TimeoutError, OSError):
-                break
-
-        output = b"".join(output_chunks)
+        output = receive_socket_output(raw_sock)
         exec_info = self.client.api.exec_inspect(exec_id)
         exit_code = exec_info["ExitCode"]
+
         output_str = self._sanitize_output(output) if output else ""
         stdout, stderr = self._separate_output_streams(output_str, exit_code)
+
         return exit_code, stdout, stderr
+
+    async def _start_container(self, container: Container) -> bool:
+        """Start a container and wait for running state."""
+        await run_in_executor(container.start)
+        return await wait_for_container_ready(container)
 
     def _build_sanitized_env(self, language: Optional[str]) -> Dict[str, str]:
         """Build environment whitelist for execution."""

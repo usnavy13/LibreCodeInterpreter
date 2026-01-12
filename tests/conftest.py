@@ -110,7 +110,7 @@ async def session_service(mock_redis):
 @pytest.fixture
 def execution_service():
     """Create CodeExecutionService instance with mocked dependencies."""
-    with patch('src.services.execution.ContainerManager') as mock_container_manager:
+    with patch('src.services.execution.runner.ContainerManager') as mock_container_manager:
         mock_manager = MagicMock()
         mock_container_manager.return_value = mock_manager
         

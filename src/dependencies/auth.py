@@ -70,26 +70,3 @@ async def verify_api_key_optional(
         raise  # Invalid API key provided, which is not OK
 
 
-class AuthenticatedUser:
-    """Represents an authenticated API user."""
-
-    def __init__(self, api_key: str):
-        self.api_key = api_key
-        self.key_prefix = api_key[:8] + "..." if len(api_key) > 8 else api_key
-
-    def __str__(self):
-        return f"AuthenticatedUser(key={self.key_prefix})"
-
-
-async def get_current_user(api_key: str = Depends(verify_api_key)) -> AuthenticatedUser:
-    """Get the current authenticated user."""
-    return AuthenticatedUser(api_key)
-
-
-async def get_current_user_optional(
-    api_key: Optional[str] = Depends(verify_api_key_optional),
-) -> Optional[AuthenticatedUser]:
-    """Get the current authenticated user (optional)."""
-    if api_key:
-        return AuthenticatedUser(api_key)
-    return None

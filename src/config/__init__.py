@@ -590,20 +590,11 @@ class Settings(BaseSettings):
 
     def get_redis_url(self) -> str:
         """Get Redis connection URL."""
-        if self.redis_url:
-            return self.redis_url
-        password_part = f":{self.redis_password}@" if self.redis_password else ""
-        return f"redis://{password_part}{self.redis_host}:{self.redis_port}/{self.redis_db}"
+        return self.redis.get_url()
 
     def get_valid_api_keys(self) -> List[str]:
         """Get all valid API keys including the primary key."""
-        keys = [self.api_key]
-        if self.api_keys:
-            if isinstance(self.api_keys, list):
-                keys.extend(self.api_keys)
-            elif isinstance(self.api_keys, str):
-                keys.extend([k.strip() for k in self.api_keys.split(",") if k.strip()])
-        return list(set(keys))
+        return self.security.get_valid_api_keys()
 
     def get_language_config(self, language: str) -> Dict[str, Any]:
         """Get configuration for a specific language."""
