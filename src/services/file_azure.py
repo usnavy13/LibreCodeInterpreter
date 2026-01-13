@@ -13,6 +13,7 @@ import structlog
 from azure.storage.blob import (
     BlobServiceClient,
     ContainerClient,
+    ContentSettings,
     generate_blob_sas,
     BlobSasPermissions,
 )
@@ -595,9 +596,9 @@ class AzureFileService(FileServiceInterface):
                 lambda: blob_client.upload_blob(
                     io.BytesIO(content),
                     overwrite=True,
-                    content_settings={
-                        'content_type': content_type or 'application/octet-stream'
-                    } if content_type else None
+                    content_settings=ContentSettings(
+                        content_type=content_type or 'application/octet-stream'
+                    )
                 )
             )
 

@@ -35,7 +35,7 @@ class SessionService(SessionServiceInterface):
         self._execution_service = execution_service
         self._file_service = file_service
         self._redis_available = False
-        logger.info("Redis client created", url=settings.get_redis_url().split("@")[-1])
+        logger.info("Session service initialized with Redis client")
 
     async def _check_redis_connectivity(self) -> bool:
         """Check if Redis is available and working."""

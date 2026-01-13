@@ -108,7 +108,7 @@ LANGUAGES: Dict[str, LanguageConfig] = {
         code="r",
         name="R",
         file_extension="r",
-        execution_command="Rscript /dev/stdin",
+        execution_command="Rscript -",
         uses_stdin=True,
         timeout_multiplier=1.5,
     ),

@@ -4,6 +4,7 @@ This module provides centralized connection pools for external services,
 allowing efficient resource sharing across the application.
 """
 
+import os
 from typing import Optional
 import redis.asyncio as redis
 import structlog
@@ -11,6 +12,21 @@ import structlog
 from ..config import settings
 
 logger = structlog.get_logger(__name__)
+
+
+def _get_redis_url() -> str:
+    """Get Redis URL, preferring Azure Redis in Azure deployment mode."""
+    # Check for Azure deployment mode
+    deployment_mode = os.environ.get("DEPLOYMENT_MODE", "docker").lower()
+    if deployment_mode == "azure":
+        from ..config.azure import azure_settings
+        azure_url = azure_settings.get_redis_url()
+        if azure_url:
+            logger.info("Using Azure Redis connection")
+            return azure_url
+
+    # Fall back to standard Redis configuration
+    return settings.get_redis_url()
 
 
 class RedisPool:
@@ -35,7 +51,7 @@ class RedisPool:
             return
 
         try:
-            redis_url = settings.get_redis_url()
+            redis_url = _get_redis_url()
             self._pool = redis.ConnectionPool.from_url(
                 redis_url,
                 max_connections=20,  # Shared across all services
@@ -46,17 +62,24 @@ class RedisPool:
             )
             self._client = redis.Redis(connection_pool=self._pool)
             self._initialized = True
+            # Don't log password - extract host part only
+            safe_url = redis_url.split("@")[-1] if "@" in redis_url else redis_url
             logger.info(
                 "Redis connection pool initialized",
                 max_connections=20,
-                url=redis_url.split("@")[-1],  # Don't log password
+                url=safe_url,
             )
         except Exception as e:
             logger.error("Failed to initialize Redis pool", error=str(e))
-            # Create a fallback client
-            self._client = redis.from_url(
-                "redis://localhost:6379/0", decode_responses=True
-            )
+            # Create a fallback client - but in Azure mode, don't fallback to localhost
+            deployment_mode = os.environ.get("DEPLOYMENT_MODE", "docker").lower()
+            if deployment_mode != "azure":
+                self._client = redis.from_url(
+                    "redis://localhost:6379/0", decode_responses=True
+                )
+            else:
+                # Re-raise in Azure mode - localhost won't work
+                raise
             self._initialized = True
 
     def get_client(self) -> redis.Redis:

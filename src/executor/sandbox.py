@@ -172,11 +172,30 @@ async def run_sandboxed(
             working_dir=working_dir,
             network_access=network_access,
         )
+        exec_env = None  # bwrap sets its own environment
     else:
         # Fallback to direct execution (less secure, but OK in Azure since ACA provides isolation)
         if not IS_AZURE_DEPLOYMENT:
             logger.warning("bubblewrap not available, running without sandbox")
         full_command = command
+        # Build environment with proper PATH for all language runtimes
+        exec_env = {
+            "PATH": "/usr/local/go/bin:/usr/local/cargo/bin:/usr/local/bin:/usr/bin:/bin",
+            "HOME": "/tmp",
+            "TMPDIR": "/tmp",
+            "LANG": "C.UTF-8",
+            # Go-specific
+            "GOPATH": "/tmp/go",
+            "GOCACHE": "/tmp/go-cache",
+            # Rust-specific
+            "CARGO_HOME": "/usr/local/cargo",
+            "RUSTUP_HOME": "/usr/local/rustup",
+            # Java-specific
+            "JAVA_HOME": "/usr/lib/jvm/temurin-21-jdk-amd64",
+        }
+        # Merge with language-specific environment
+        if environment:
+            exec_env.update(environment)
 
     logger.debug(f"Executing: {' '.join(full_command[:10])}...")
 
@@ -187,7 +206,7 @@ async def run_sandboxed(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=working_dir if not USE_SANDBOX else None,
-            env=environment if not USE_SANDBOX else None,
+            env=exec_env,
         )
 
         try:
@@ -232,7 +251,11 @@ async def run_with_file(
     """
     # Create a temporary file for the code
     extension = language_config.file_extension
-    filename = f"code.{extension}"
+    # Java requires filename to match public class name (Code)
+    if language_config.code == "java":
+        filename = f"Code.{extension}"
+    else:
+        filename = f"code.{extension}"
     filepath = os.path.join(working_dir, filename)
 
     # Write code to file

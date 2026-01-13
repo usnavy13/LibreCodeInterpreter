@@ -2,6 +2,7 @@
 
 # Standard library imports
 import asyncio
+import os
 import time
 from datetime import datetime, timezone
 from enum import Enum
@@ -19,6 +20,9 @@ from ..config import settings
 
 
 logger = structlog.get_logger(__name__)
+
+# Check if running in Azure deployment mode
+IS_AZURE_DEPLOYMENT = os.environ.get("DEPLOYMENT_MODE", "docker").lower() == "azure"
 
 
 class HealthStatus(str, Enum):
@@ -102,17 +106,26 @@ class HealthCheckService:
         logger.info("Performing health checks on all services")
 
         # Run all health checks concurrently
-        tasks = [
-            self.check_redis(),
-            self.check_minio(),
-            self.check_docker(),
-        ]
-        service_names = ["redis", "minio", "docker"]
+        # In Azure mode, skip Docker and MinIO checks (use Azure services instead)
+        if IS_AZURE_DEPLOYMENT:
+            tasks = [
+                self.check_redis(),
+                self.check_azure_storage(),
+                self.check_executor_service(),
+            ]
+            service_names = ["redis", "azure_storage", "executor"]
+        else:
+            tasks = [
+                self.check_redis(),
+                self.check_minio(),
+                self.check_docker(),
+            ]
+            service_names = ["redis", "minio", "docker"]
 
-        # Add container pool check if pool is configured
-        if self._container_pool and settings.container_pool_enabled:
-            tasks.append(self.check_container_pool())
-            service_names.append("container_pool")
+            # Add container pool check if pool is configured (Docker mode only)
+            if self._container_pool and settings.container_pool_enabled:
+                tasks.append(self.check_container_pool())
+                service_names.append("container_pool")
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -499,6 +512,140 @@ class HealthCheckService:
 
             return HealthCheckResult(
                 service="container_pool",
+                status=HealthStatus.UNHEALTHY,
+                response_time_ms=response_time,
+                error=str(e),
+            )
+
+    async def check_azure_storage(self) -> HealthCheckResult:
+        """Check Azure Blob Storage connectivity (Azure deployment mode only)."""
+        start_time = time.time()
+
+        try:
+            from ..config.azure import azure_settings
+            from azure.storage.blob import BlobServiceClient
+
+            if not azure_settings.azure_storage_connection_string:
+                return HealthCheckResult(
+                    service="azure_storage",
+                    status=HealthStatus.UNKNOWN,
+                    error="Azure Storage not configured",
+                )
+
+            # Create client and test connectivity
+            loop = asyncio.get_event_loop()
+            blob_service = BlobServiceClient.from_connection_string(
+                azure_settings.azure_storage_connection_string
+            )
+
+            # Test connectivity by getting service properties
+            await loop.run_in_executor(
+                None, blob_service.get_service_properties
+            )
+
+            # Check if our container exists
+            container_client = blob_service.get_container_client(
+                azure_settings.azure_storage_container
+            )
+            container_exists = await loop.run_in_executor(
+                None, container_client.exists
+            )
+
+            response_time = (time.time() - start_time) * 1000
+
+            status = HealthStatus.HEALTHY
+            if response_time > 2000:
+                status = HealthStatus.DEGRADED
+
+            details = {
+                "container": azure_settings.azure_storage_container,
+                "container_exists": container_exists,
+            }
+
+            return HealthCheckResult(
+                service="azure_storage",
+                status=status,
+                response_time_ms=response_time,
+                details=details,
+            )
+
+        except Exception as e:
+            response_time = (time.time() - start_time) * 1000
+            logger.error(
+                "Azure Storage health check failed",
+                error=str(e),
+                response_time_ms=response_time,
+            )
+
+            return HealthCheckResult(
+                service="azure_storage",
+                status=HealthStatus.UNHEALTHY,
+                response_time_ms=response_time,
+                error=str(e),
+            )
+
+    async def check_executor_service(self) -> HealthCheckResult:
+        """Check executor service connectivity (Azure deployment mode only)."""
+        start_time = time.time()
+
+        try:
+            from ..config.azure import azure_settings
+            import httpx
+
+            if not azure_settings.executor_url:
+                return HealthCheckResult(
+                    service="executor",
+                    status=HealthStatus.UNKNOWN,
+                    error="Executor URL not configured",
+                )
+
+            # Check executor health endpoint
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.get(f"{azure_settings.executor_url}/health")
+
+            response_time = (time.time() - start_time) * 1000
+
+            if response.status_code == 200:
+                status = HealthStatus.HEALTHY
+                if response_time > 1000:
+                    status = HealthStatus.DEGRADED
+
+                details = {
+                    "url": azure_settings.executor_url,
+                    "status_code": response.status_code,
+                }
+
+                # Try to parse response for more details
+                try:
+                    health_data = response.json()
+                    details.update(health_data)
+                except Exception:
+                    pass
+
+                return HealthCheckResult(
+                    service="executor",
+                    status=status,
+                    response_time_ms=response_time,
+                    details=details,
+                )
+            else:
+                return HealthCheckResult(
+                    service="executor",
+                    status=HealthStatus.UNHEALTHY,
+                    response_time_ms=response_time,
+                    error=f"Executor returned status {response.status_code}",
+                )
+
+        except Exception as e:
+            response_time = (time.time() - start_time) * 1000
+            logger.error(
+                "Executor health check failed",
+                error=str(e),
+                response_time_ms=response_time,
+            )
+
+            return HealthCheckResult(
+                service="executor",
                 status=HealthStatus.UNHEALTHY,
                 response_time_ms=response_time,
                 error=str(e),

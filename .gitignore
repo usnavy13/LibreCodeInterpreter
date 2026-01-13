@@ -200,3 +200,4 @@ config/local.py
 *.db-shm
 
 DEPLOYMENT_STATUS.md
+.venv-test
