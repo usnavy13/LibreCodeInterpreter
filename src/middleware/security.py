@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 # Local application imports
 from ..config import settings
 from ..services.auth import get_auth_service
+from ..utils.request_helpers import extract_api_key, get_client_ip
 
 
 logger = structlog.get_logger(__name__)
@@ -22,7 +23,6 @@ class SecurityMiddleware:
 
     def __init__(self, app: Callable):
         self.app = app
-        self.max_request_size = settings.max_file_size_mb * 1024 * 1024
         self.excluded_paths = {
             "/health",
             "/docs",
@@ -152,14 +152,14 @@ class SecurityMiddleware:
 
     async def _authenticate_request(self, request: Request, scope: dict):
         """Handle API key authentication with rate limiting."""
-        # Extract API key
-        api_key = self._extract_api_key(request)
+        # Extract API key using shared utility
+        api_key = extract_api_key(request)
 
         # Get authentication service
         auth_service = await get_auth_service()
 
         # Check IP-based rate limiting for auth failures
-        client_ip = self._get_client_ip(request)
+        client_ip = get_client_ip(request)
         if not await auth_service.check_rate_limit(client_ip):
             raise HTTPException(
                 status_code=429,
@@ -220,36 +220,6 @@ class SecurityMiddleware:
             await auth_service.record_usage(
                 result.key_hash, is_env_key=result.is_env_key
             )
-
-    def _extract_api_key(self, request: Request) -> Optional[str]:
-        """Extract API key from request headers."""
-        # Check x-api-key header first
-        api_key = request.headers.get("x-api-key")
-        if api_key:
-            return api_key
-
-        # Check Authorization header
-        auth_header = request.headers.get("authorization")
-        if auth_header:
-            if auth_header.startswith("Bearer "):
-                return auth_header[7:]
-            elif auth_header.startswith("ApiKey "):
-                return auth_header[7:]
-
-        return None
-
-    def _get_client_ip(self, request: Request) -> str:
-        """Get client IP address."""
-        # Check forwarded headers
-        forwarded_for = request.headers.get("x-forwarded-for")
-        if forwarded_for:
-            return forwarded_for.split(",")[0].strip()
-
-        real_ip = request.headers.get("x-real-ip")
-        if real_ip:
-            return real_ip
-
-        return request.client.host if request.client else "unknown"
 
 
 class RequestLoggingMiddleware:

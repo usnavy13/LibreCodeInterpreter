@@ -7,6 +7,8 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 import structlog
 
+from ..config import settings
+
 logger = structlog.get_logger(__name__)
 
 
@@ -30,56 +32,18 @@ class SecurityValidator:
         r"raw_input\s*\(",
     ]
 
-    # File extensions that are allowed for upload
-    ALLOWED_FILE_EXTENSIONS = {
-        ".txt",
-        ".csv",
-        ".json",
-        ".xml",
-        ".yaml",
-        ".yml",
-        ".py",
-        ".js",
-        ".ts",
-        ".go",
-        ".java",
-        ".c",
-        ".cpp",
-        ".h",
-        ".hpp",
-        ".rs",
-        ".php",
-        ".rb",
-        ".r",
-        ".f90",
-        ".d",
-        ".md",
-        ".rst",
-        ".html",
-        ".css",
-        ".png",
-        ".jpg",
-        ".jpeg",
-        ".gif",
-        ".svg",
-        ".pdf",
-        ".doc",
-        ".docx",
-        ".xls",
-        ".xlsx",
-    }
-
-    # Maximum filename length
-    MAX_FILENAME_LENGTH = 255
-
     @classmethod
     def validate_filename(cls, filename: str) -> bool:
-        """Validate uploaded filename for security."""
+        """Validate uploaded filename for security.
+
+        Uses settings.is_file_allowed() for extension checking and
+        settings.max_filename_length for length validation.
+        """
         if not filename:
             return False
 
-        # Check length
-        if len(filename) > cls.MAX_FILENAME_LENGTH:
+        # Check length using settings
+        if len(filename) > settings.max_filename_length:
             logger.warning("Filename too long", filename=filename, length=len(filename))
             return False
 
@@ -93,12 +57,9 @@ class SecurityValidator:
             logger.warning("Null byte in filename", filename=filename)
             return False
 
-        # Check file extension
-        file_ext = cls._get_file_extension(filename)
-        if file_ext not in cls.ALLOWED_FILE_EXTENSIONS:
-            logger.warning(
-                "Disallowed file extension", filename=filename, extension=file_ext
-            )
+        # Check file extension using settings (consolidated validation)
+        if not settings.is_file_allowed(filename):
+            logger.warning("Disallowed file", filename=filename)
             return False
 
         # Check for suspicious characters
@@ -171,13 +132,6 @@ class SecurityValidator:
     def hash_sensitive_data(cls, data: str) -> str:
         """Hash sensitive data for logging/storage."""
         return hashlib.sha256(data.encode()).hexdigest()[:16]
-
-    @classmethod
-    def _get_file_extension(cls, filename: str) -> str:
-        """Get file extension in lowercase."""
-        if "." not in filename:
-            return ""
-        return "." + filename.split(".")[-1].lower()
 
 
 class RateLimiter:

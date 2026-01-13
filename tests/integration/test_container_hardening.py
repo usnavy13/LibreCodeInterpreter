@@ -110,7 +110,10 @@ class TestContainerHardening:
             assert response.status_code == 200
             data = response.json()
             # Hostname should be 'sandbox', not contain Azure or host info
-            assert "sandbox" in data.get("stdout", "").lower() or response.status_code == 200
+            assert (
+                "sandbox" in data.get("stdout", "").lower()
+                or response.status_code == 200
+            )
         finally:
             app.dependency_overrides.clear()
 

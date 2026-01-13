@@ -337,7 +337,7 @@ class CodeExecutionRunner:
                     name = f.get("filename") or f.get("name")
                     if name:
                         mounted.add(name)
-                        mounted.add(OutputProcessor.normalize_filename(name))
+                        mounted.add(OutputProcessor.sanitize_filename(name))
             except Exception:
                 pass
         return mounted
@@ -578,7 +578,7 @@ class CodeExecutionRunner:
 
                     if file_content is not None:
                         # Direct memory-to-container transfer (no tempfiles)
-                        normalized_filename = OutputProcessor.normalize_filename(
+                        normalized_filename = OutputProcessor.sanitize_filename(
                             filename
                         )
                         dest_path = f"/mnt/data/{normalized_filename}"
@@ -612,7 +612,7 @@ class CodeExecutionRunner:
     ) -> None:
         """Create a placeholder file when content cannot be retrieved."""
         try:
-            normalized_filename = OutputProcessor.normalize_filename(filename)
+            normalized_filename = OutputProcessor.sanitize_filename(filename)
             create_command = f"""cat > /mnt/data/{normalized_filename} << 'EOF'
 # File: {filename}
 # This is a placeholder - original file could not be retrieved
@@ -630,7 +630,7 @@ EOF"""
         try:
             exit_code, stdout, stderr = await self.container_manager.execute_command(
                 container,
-                "find /mnt/data -type f -name '*' ! -name 'code.*' ! -name 'Code.*' -exec ls -la {} \\;",
+                "find /mnt/data -maxdepth 1 -type f -name '*' ! -name 'code' ! -name 'code.*' ! -name 'Code.*' -exec ls -la {} \\;",
                 timeout=5,
             )
 
@@ -664,38 +664,6 @@ EOF"""
         except Exception as e:
             logger.error(f"Failed to detect generated files: {e}")
             return []
-
-    def get_container_by_session(self, session_id: str) -> Optional[Container]:
-        """Get container for a session.
-
-        DEPRECATED: Container is now returned directly from execute() method.
-        This method is kept for backward compatibility only.
-        """
-        # First check the pool if available
-        if self.container_pool and settings.container_pool_enabled:
-            try:
-                # Use synchronous wrapper since this may be called from sync context
-                import asyncio
-
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # We're in an async context, use the pool's method directly
-                    # The pool stores containers in _session_containers
-                    if session_id in self.container_pool._session_containers:
-                        sc = self.container_pool._session_containers[session_id]
-                        try:
-                            container = self.container_pool._container_manager.client.containers.get(
-                                sc.container_id
-                            )
-                            if container.status == "running":
-                                return container
-                        except Exception:
-                            pass
-            except Exception as e:
-                logger.debug("Error getting container from pool", error=str(e))
-
-        # Fall back to runner's local container dict
-        return self.session_containers.get(session_id)
 
     async def get_execution(self, execution_id: str) -> Optional[CodeExecution]:
         """Retrieve an execution by ID."""

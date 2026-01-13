@@ -17,9 +17,6 @@ from ..models.errors import (
     ErrorResponse,
     ErrorType,
     ErrorDetail,
-    ValidationError,
-    AuthenticationError,
-    ServiceUnavailableError,
 )
 
 logger = structlog.get_logger(__name__)
@@ -190,69 +187,3 @@ async def general_exception_handler(request: Request, exc: Exception) -> JSONRes
     )
 
     return JSONResponse(status_code=500, content=error_response.model_dump())
-
-
-# Utility functions for common error scenarios
-
-
-def create_validation_error(
-    field: str, message: str, code: str = None
-) -> ValidationError:
-    """Create a validation error with details."""
-    details = [ErrorDetail(field=field, message=message, code=code)]
-    return ValidationError(
-        message=f"Validation failed for field '{field}'", details=details
-    )
-
-
-def create_resource_error(
-    resource_type: str, resource_id: str = None, operation: str = "access"
-):
-    """Create a resource not found error."""
-    from ..models.errors import ResourceNotFoundError
-
-    return ResourceNotFoundError(resource=resource_type, resource_id=resource_id)
-
-
-def create_service_error(service_name: str, original_error: Exception = None):
-    """Create a service unavailable error."""
-    message = f"{service_name} service is currently unavailable"
-    if original_error:
-        message += f": {str(original_error)}"
-
-    return ServiceUnavailableError(service=service_name, message=message)
-
-
-def handle_docker_error(error: Exception, operation: str = "container operation"):
-    """Convert Docker errors to appropriate CodeInterpreter exceptions."""
-    from docker.errors import DockerException, APIError, ContainerError, ImageNotFound
-    from ..models.errors import (
-        ExecutionError,
-        ResourceNotFoundError,
-        ServiceUnavailableError,
-    )
-
-    if isinstance(error, ImageNotFound):
-        return ResourceNotFoundError(resource="Docker image", resource_id=str(error))
-    elif isinstance(error, ContainerError):
-        return ExecutionError(message=f"Container execution failed: {str(error)}")
-    elif isinstance(error, APIError):
-        if error.status_code == 409:
-            from ..models.errors import ResourceConflictError
-
-            return ResourceConflictError(
-                message=f"Docker API conflict: {error.explanation}"
-            )
-        else:
-            return ServiceUnavailableError(
-                service="Docker", message=f"Docker API error: {error.explanation}"
-            )
-    elif isinstance(error, DockerException):
-        return ServiceUnavailableError(
-            service="Docker", message=f"Docker service error: {str(error)}"
-        )
-    else:
-        return ServiceUnavailableError(
-            service="Docker",
-            message=f"Unknown Docker error during {operation}: {str(error)}",
-        )

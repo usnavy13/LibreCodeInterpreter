@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.4
 # R execution environment with BuildKit optimizations
-FROM r-base:4.3.0
+FROM r-base:4.4.3
 
 # Install system dependencies for R packages (including Cairo)
 RUN apt-get update && apt-get install -y --no-install-recommends \

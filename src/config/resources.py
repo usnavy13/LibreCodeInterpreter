@@ -16,9 +16,6 @@ class ResourcesConfig(BaseSettings):
         le=16.0,
         description="Maximum CPU cores available to execution containers",
     )
-    max_cpu_quota: int = Field(
-        default=50000, ge=10000, le=100000
-    )  # Deprecated, use max_cpus
     max_pids: int = Field(
         default=512,
         ge=64,

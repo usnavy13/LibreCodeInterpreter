@@ -2,7 +2,7 @@
 
 from .logging import setup_logging, get_logger
 from .security import SecurityValidator, RateLimiter, SecurityAudit, get_rate_limiter
-from .containers import ContainerManager
+from ..services.container import ContainerManager
 
 __all__ = [
     "setup_logging",

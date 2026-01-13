@@ -20,6 +20,7 @@ from ...config.languages import (
 )
 from .client import DockerClientFactory
 from .executor import ContainerExecutor
+from .utils import wait_for_container_ready, run_in_executor
 
 logger = structlog.get_logger(__name__)
 
@@ -331,34 +332,8 @@ class ContainerManager:
     async def start_container(self, container: Container) -> bool:
         """Start a Docker container."""
         try:
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, container.start)
-
-            stable_checks = 0
-            max_wait = 2.0
-            interval = 0.05
-            total_wait = 0.0
-
-            while total_wait < max_wait:
-                try:
-                    container.reload()
-                    if getattr(container, "status", "") == "running":
-                        stable_checks += 1
-                        if stable_checks >= 3:
-                            return True
-                    else:
-                        stable_checks = 0
-                except Exception:
-                    stable_checks = 0
-                await asyncio.sleep(interval)
-                total_wait += interval
-
-            try:
-                container.reload()
-                return getattr(container, "status", "") == "running"
-            except Exception:
-                return False
-
+            await run_in_executor(container.start)
+            return await wait_for_container_ready(container)
         except DockerException as e:
             logger.error(f"Failed to start container {container.id[:12]}: {e}")
             return False
