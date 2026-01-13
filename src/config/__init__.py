@@ -143,9 +143,6 @@ class Settings(BaseSettings):
         le=16.0,
         description="Maximum CPU cores available to execution containers",
     )
-    max_cpu_quota: int = Field(
-        default=50000, ge=10000, le=100000
-    )  # Deprecated, use max_cpus
     max_pids: int = Field(
         default=512,
         ge=64,
@@ -178,16 +175,6 @@ class Settings(BaseSettings):
     # Container Pool Configuration
     container_pool_enabled: bool = Field(default=True)
     container_pool_warmup_on_startup: bool = Field(default=True)
-
-    # Session Container Reuse - DEPRECATED
-    # These settings are no longer used. Containers are now stateless:
-    # - Each execution gets a fresh container from pool
-    # - Containers are destroyed immediately after execution
-    # Kept for backward compatibility with existing configs
-    session_container_reuse_enabled: bool = Field(default=False)  # Deprecated, not used
-    session_container_ttl_seconds: int = Field(
-        default=0, ge=0, le=1800
-    )  # Deprecated, not used
 
     # Per-language pool sizes (0 = on-demand only, no pre-warming)
     container_pool_py: int = Field(
@@ -365,7 +352,48 @@ class Settings(BaseSettings):
     # Security Configuration
     allowed_file_extensions: List[str] = Field(
         default_factory=lambda: [
+            # Text and documentation
             ".txt",
+            ".md",
+            ".rtf",
+            ".pdf",
+            # Microsoft Office
+            ".doc",
+            ".docx",
+            ".dotx",
+            ".xls",
+            ".xlsx",
+            ".xltx",
+            ".ppt",
+            ".pptx",
+            ".potx",
+            ".ppsx",
+            # OpenDocument formats
+            ".odt",
+            ".ods",
+            ".odp",
+            ".odg",
+            # Data formats
+            ".json",
+            ".csv",
+            ".xml",
+            ".yaml",
+            ".yml",
+            ".sql",
+            # Images
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".gif",
+            ".svg",
+            ".bmp",
+            ".webp",
+            ".ico",
+            # Web
+            ".html",
+            ".htm",
+            ".css",
+            # Code files
             ".py",
             ".js",
             ".ts",
@@ -380,18 +408,24 @@ class Settings(BaseSettings):
             ".r",
             ".f90",
             ".d",
-            ".json",
-            ".csv",
-            ".xml",
-            ".yaml",
-            ".yml",
-            ".md",
-            ".sql",
+            # Scripts and config
             ".sh",
             ".bat",
             ".ps1",
             ".dockerfile",
             ".makefile",
+            ".ini",
+            ".cfg",
+            ".conf",
+            ".log",
+            # Archives
+            ".zip",
+            # Email and calendar
+            ".eml",
+            ".msg",
+            ".mbox",
+            ".ics",
+            ".vcf",
         ]
     )
     blocked_file_patterns: List[str] = Field(
@@ -532,8 +566,6 @@ class Settings(BaseSettings):
             api_keys=self.api_keys if isinstance(self.api_keys, str) else None,
             api_key_header=self.api_key_header,
             api_key_cache_ttl=self.api_key_cache_ttl,
-            allowed_file_extensions=self.allowed_file_extensions,
-            blocked_file_patterns=self.blocked_file_patterns,
             enable_network_isolation=self.enable_network_isolation,
             enable_filesystem_isolation=self.enable_filesystem_isolation,
             enable_security_logs=self.enable_security_logs,
@@ -546,7 +578,6 @@ class Settings(BaseSettings):
             max_execution_time=self.max_execution_time,
             max_memory_mb=self.max_memory_mb,
             max_cpus=self.max_cpus,
-            max_cpu_quota=self.max_cpu_quota,
             max_pids=self.max_pids,
             max_open_files=self.max_open_files,
             max_file_size_mb=self.max_file_size_mb,
@@ -590,20 +621,11 @@ class Settings(BaseSettings):
 
     def get_redis_url(self) -> str:
         """Get Redis connection URL."""
-        if self.redis_url:
-            return self.redis_url
-        password_part = f":{self.redis_password}@" if self.redis_password else ""
-        return f"redis://{password_part}{self.redis_host}:{self.redis_port}/{self.redis_db}"
+        return self.redis.get_url()
 
     def get_valid_api_keys(self) -> List[str]:
         """Get all valid API keys including the primary key."""
-        keys = [self.api_key]
-        if self.api_keys:
-            if isinstance(self.api_keys, list):
-                keys.extend(self.api_keys)
-            elif isinstance(self.api_keys, str):
-                keys.extend([k.strip() for k in self.api_keys.split(",") if k.strip()])
-        return list(set(keys))
+        return self.security.get_valid_api_keys()
 
     def get_language_config(self, language: str) -> Dict[str, Any]:
         """Get configuration for a specific language."""

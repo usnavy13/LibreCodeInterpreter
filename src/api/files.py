@@ -103,6 +103,14 @@ async def upload_file(
                 detail=f"Too many files. Maximum {settings.max_files_per_session} files allowed",
             )
 
+        # Check file type restrictions
+        for file in upload_files:
+            if not settings.is_file_allowed(file.filename or ""):
+                raise HTTPException(
+                    status_code=415,
+                    detail=f"File type not allowed: {file.filename}",
+                )
+
         uploaded_files = []
 
         # Create a session ID for this upload

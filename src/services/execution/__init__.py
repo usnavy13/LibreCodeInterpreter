@@ -45,7 +45,7 @@ class CodeExecutionService(_Runner, ExecutionServiceInterface):
 
     def _normalize_container_filename(self, filename):
         """Backward compatibility alias."""
-        return OutputProcessor.normalize_filename(filename)
+        return OutputProcessor.sanitize_filename(filename)
 
     def _sanitize_execution_output(self, output):
         """Backward compatibility alias."""

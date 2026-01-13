@@ -27,7 +27,7 @@ def mock_redis_client():
 @pytest.fixture
 def state_service(mock_redis_client):
     """Create StateService with mocked Redis."""
-    with patch('src.services.state.redis_pool') as mock_pool:
+    with patch("src.services.state.redis_pool") as mock_pool:
         mock_pool.get_client.return_value = mock_redis_client
         service = StateService(redis_client=mock_redis_client)
         return service
@@ -69,11 +69,13 @@ class TestSaveState:
     """Tests for save_state method."""
 
     @pytest.mark.asyncio
-    async def test_save_state_stores_hash_and_metadata(self, state_service, mock_redis_client):
+    async def test_save_state_stores_hash_and_metadata(
+        self, state_service, mock_redis_client
+    ):
         """Test that save_state stores state, hash, and metadata."""
         session_id = "test-session-123"
         raw_bytes = b"\x02test state data"  # Version 2 prefix
-        state_b64 = base64.b64encode(raw_bytes).decode('utf-8')
+        state_b64 = base64.b64encode(raw_bytes).decode("utf-8")
 
         # Setup mock pipeline
         mock_pipe = AsyncMock()
@@ -88,11 +90,13 @@ class TestSaveState:
         assert mock_pipe.setex.call_count == 3
 
     @pytest.mark.asyncio
-    async def test_save_state_with_upload_marker(self, state_service, mock_redis_client):
+    async def test_save_state_with_upload_marker(
+        self, state_service, mock_redis_client
+    ):
         """Test that from_upload=True sets upload marker."""
         session_id = "test-session-upload"
         raw_bytes = b"\x02uploaded state"
-        state_b64 = base64.b64encode(raw_bytes).decode('utf-8')
+        state_b64 = base64.b64encode(raw_bytes).decode("utf-8")
 
         mock_pipe = AsyncMock()
         mock_pipe.setex = MagicMock()
@@ -121,7 +125,7 @@ class TestGetStateRaw:
         """Test that get_state_raw returns decoded bytes."""
         session_id = "test-session"
         raw_bytes = b"\x02raw binary state data"
-        state_b64 = base64.b64encode(raw_bytes).decode('utf-8')
+        state_b64 = base64.b64encode(raw_bytes).decode("utf-8")
 
         mock_redis_client.get.return_value = state_b64
 
@@ -130,7 +134,9 @@ class TestGetStateRaw:
         assert result == raw_bytes
 
     @pytest.mark.asyncio
-    async def test_get_state_raw_returns_none_when_no_state(self, state_service, mock_redis_client):
+    async def test_get_state_raw_returns_none_when_no_state(
+        self, state_service, mock_redis_client
+    ):
         """Test that get_state_raw returns None when no state exists."""
         mock_redis_client.get.return_value = None
 
@@ -143,7 +149,9 @@ class TestSaveStateRaw:
     """Tests for save_state_raw method."""
 
     @pytest.mark.asyncio
-    async def test_save_state_raw_encodes_to_base64(self, state_service, mock_redis_client):
+    async def test_save_state_raw_encodes_to_base64(
+        self, state_service, mock_redis_client
+    ):
         """Test that save_state_raw encodes bytes to base64."""
         session_id = "test-session"
         raw_bytes = b"\x02raw data to save"
@@ -162,17 +170,21 @@ class TestGetStateHash:
     """Tests for get_state_hash method."""
 
     @pytest.mark.asyncio
-    async def test_get_state_hash_returns_string(self, state_service, mock_redis_client):
+    async def test_get_state_hash_returns_string(
+        self, state_service, mock_redis_client
+    ):
         """Test that get_state_hash returns hash string."""
         expected_hash = "abc123def456"
-        mock_redis_client.get.return_value = expected_hash.encode('utf-8')
+        mock_redis_client.get.return_value = expected_hash.encode("utf-8")
 
         result = await state_service.get_state_hash("session-id")
 
         assert result == expected_hash
 
     @pytest.mark.asyncio
-    async def test_get_state_hash_returns_none_when_missing(self, state_service, mock_redis_client):
+    async def test_get_state_hash_returns_none_when_missing(
+        self, state_service, mock_redis_client
+    ):
         """Test that get_state_hash returns None when no hash."""
         mock_redis_client.get.return_value = None
 
@@ -185,7 +197,9 @@ class TestUploadMarker:
     """Tests for upload marker methods."""
 
     @pytest.mark.asyncio
-    async def test_has_recent_upload_true_when_marker_exists(self, state_service, mock_redis_client):
+    async def test_has_recent_upload_true_when_marker_exists(
+        self, state_service, mock_redis_client
+    ):
         """Test that has_recent_upload returns True when marker exists."""
         mock_redis_client.get.return_value = "1"
 
@@ -194,7 +208,9 @@ class TestUploadMarker:
         assert result is True
 
     @pytest.mark.asyncio
-    async def test_has_recent_upload_false_when_no_marker(self, state_service, mock_redis_client):
+    async def test_has_recent_upload_false_when_no_marker(
+        self, state_service, mock_redis_client
+    ):
         """Test that has_recent_upload returns False when no marker."""
         mock_redis_client.get.return_value = None
 
@@ -203,7 +219,9 @@ class TestUploadMarker:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_clear_upload_marker_deletes_key(self, state_service, mock_redis_client):
+    async def test_clear_upload_marker_deletes_key(
+        self, state_service, mock_redis_client
+    ):
         """Test that clear_upload_marker deletes the marker key."""
         await state_service.clear_upload_marker("session-id")
 
@@ -214,7 +232,9 @@ class TestDeleteState:
     """Tests for delete_state method."""
 
     @pytest.mark.asyncio
-    async def test_delete_state_removes_all_keys(self, state_service, mock_redis_client):
+    async def test_delete_state_removes_all_keys(
+        self, state_service, mock_redis_client
+    ):
         """Test that delete_state removes state, hash, meta, and marker keys."""
         session_id = "session-to-delete"
 
@@ -231,14 +251,16 @@ class TestGetFullStateInfo:
     """Tests for get_full_state_info method."""
 
     @pytest.mark.asyncio
-    async def test_get_full_state_info_returns_metadata(self, state_service, mock_redis_client):
+    async def test_get_full_state_info_returns_metadata(
+        self, state_service, mock_redis_client
+    ):
         """Test that get_full_state_info returns complete metadata."""
         session_id = "session-with-state"
         meta = {
             "size_bytes": 1024,
             "hash": "abc123",
             "created_at": "2025-12-21T10:00:00+00:00",
-            "from_upload": False
+            "from_upload": False,
         }
 
         mock_pipe = AsyncMock()
@@ -256,7 +278,9 @@ class TestGetFullStateInfo:
         assert result["expires_at"] is not None
 
     @pytest.mark.asyncio
-    async def test_get_full_state_info_returns_none_when_no_state(self, state_service, mock_redis_client):
+    async def test_get_full_state_info_returns_none_when_no_state(
+        self, state_service, mock_redis_client
+    ):
         """Test that get_full_state_info returns None when no state."""
         mock_pipe = AsyncMock()
         mock_pipe.execute = AsyncMock(return_value=[0, -1, None])

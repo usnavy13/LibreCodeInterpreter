@@ -32,9 +32,6 @@ class OutputProcessor:
         ".zip": "application/zip",
     }
 
-    # Dangerous extensions that should be blocked
-    DANGEROUS_EXTENSIONS = [".exe", ".bat", ".cmd", ".sh", ".ps1", ".scr", ".com"]
-
     @classmethod
     def sanitize_output(cls, output: str, max_size: int = 64 * 1024) -> str:
         """Sanitize execution output for security and display.
@@ -96,10 +93,10 @@ class OutputProcessor:
                 logger.warning(f"Generated file {file_path} has suspicious path")
                 return False
 
-            # Check for dangerous file extensions
-            file_extension = Path(file_path).suffix.lower()
-            if file_extension in cls.DANGEROUS_EXTENSIONS:
-                logger.warning(f"Generated file {file_path} has dangerous extension")
+            # Check file using centralized settings validation
+            filename = Path(file_path).name
+            if not settings.is_file_allowed(filename):
+                logger.warning(f"Generated file {file_path} has blocked extension")
                 return False
 
             return True
@@ -266,12 +263,3 @@ class OutputProcessor:
         except Exception as e:
             logger.error(f"Failed to sanitize filename: {e}")
             return "_"
-
-    @classmethod
-    def normalize_filename(cls, filename: str) -> str:
-        """Deprecated: Use sanitize_filename instead.
-
-        This method is kept for backward compatibility but delegates to
-        sanitize_filename which matches LibreChat's sanitization logic.
-        """
-        return cls.sanitize_filename(filename)
