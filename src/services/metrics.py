@@ -118,7 +118,7 @@ class MetricsCollector:
             self._redis_client = redis_pool.get_client()
 
             # Test Redis connection with timeout
-            await asyncio.wait_for(self._redis_client.ping(), timeout=3.0)
+            await asyncio.wait_for(self._redis_client.ping(), timeout=3.0)  # type: ignore[arg-type]
 
             # Load existing metrics from Redis
             await self._load_metrics_from_redis()

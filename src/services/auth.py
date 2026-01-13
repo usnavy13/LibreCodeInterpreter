@@ -294,7 +294,7 @@ async def get_auth_service() -> AuthenticationService:
 
             redis_client = redis_pool.get_client()
             # Test connection
-            await redis_client.ping()
+            await redis_client.ping()  # type: ignore[misc]
             logger.info("Redis connection established for authentication service")
         except Exception as e:
             logger.warning(
