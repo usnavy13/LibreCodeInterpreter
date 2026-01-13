@@ -198,6 +198,3 @@ config/local.py
 *.db-journal
 *.db-wal
 *.db-shm
-
-DEPLOYMENT_STATUS.md
-.venv-test
