@@ -209,6 +209,55 @@ class TestFileDelete:
         assert response.status_code == 404
 
 
+class TestFileTypeRestrictions:
+    """Test file type upload restrictions."""
+
+    def test_upload_blocked_exe_file(self, client, auth_headers):
+        """Test that .exe files are blocked with 415 status."""
+        files = {"files": ("malware.exe", io.BytesIO(b"MZ...fake exe"), "application/octet-stream")}
+
+        response = client.post("/upload", files=files, headers=auth_headers)
+
+        assert response.status_code == 415
+        assert "File type not allowed" in response.json()["detail"]
+
+    def test_upload_blocked_dll_file(self, client, auth_headers):
+        """Test that .dll files are blocked with 415 status."""
+        files = {"files": ("library.dll", io.BytesIO(b"fake dll content"), "application/octet-stream")}
+
+        response = client.post("/upload", files=files, headers=auth_headers)
+
+        assert response.status_code == 415
+        assert "File type not allowed" in response.json()["detail"]
+
+    def test_upload_blocked_bin_file(self, client, auth_headers):
+        """Test that .bin files are blocked with 415 status."""
+        files = {"files": ("binary.bin", io.BytesIO(b"binary content"), "application/octet-stream")}
+
+        response = client.post("/upload", files=files, headers=auth_headers)
+
+        assert response.status_code == 415
+        assert "File type not allowed" in response.json()["detail"]
+
+    def test_upload_allowed_txt_file(self, client, auth_headers):
+        """Test that allowed file types still work."""
+        files = {"files": ("readme.txt", io.BytesIO(b"Hello world"), "text/plain")}
+
+        response = client.post("/upload", files=files, headers=auth_headers)
+
+        assert response.status_code == 200
+        assert response.json()["message"] == "success"
+
+    def test_upload_allowed_python_file(self, client, auth_headers):
+        """Test that Python files are allowed."""
+        files = {"files": ("script.py", io.BytesIO(b"print('hello')"), "text/x-python")}
+
+        response = client.post("/upload", files=files, headers=auth_headers)
+
+        assert response.status_code == 200
+        assert response.json()["message"] == "success"
+
+
 class TestFileAuthentication:
     """Test authentication for file endpoints."""
 
