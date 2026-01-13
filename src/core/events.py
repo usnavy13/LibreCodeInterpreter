@@ -165,28 +165,10 @@ class EventBus:
 
 # Predefined events for service communication
 @dataclass
-class SessionCreated(Event):
-    """Emitted when a new session is created."""
-
-    session_id: str
-    entity_id: str | None = None
-    user_id: str | None = None
-
-
-@dataclass
 class SessionDeleted(Event):
     """Emitted when a session is deleted or expired."""
 
     session_id: str
-
-
-@dataclass
-class ExecutionStarted(Event):
-    """Emitted when code execution starts."""
-
-    execution_id: str
-    session_id: str
-    language: str
 
 
 @dataclass
@@ -197,40 +179,6 @@ class ExecutionCompleted(Event):
     session_id: str
     success: bool
     execution_time_ms: int | None = None
-
-
-@dataclass
-class FileUploaded(Event):
-    """Emitted when a file is uploaded."""
-
-    file_id: str
-    session_id: str
-    filename: str
-
-
-@dataclass
-class FileDeleted(Event):
-    """Emitted when a file is deleted."""
-
-    file_id: str
-    session_id: str
-
-
-@dataclass
-class ContainerCreated(Event):
-    """Emitted when a container is created."""
-
-    container_id: str
-    session_id: str
-    language: str
-
-
-@dataclass
-class ContainerDestroyed(Event):
-    """Emitted when a container is destroyed."""
-
-    container_id: str
-    session_id: str
 
 
 # Container Pool Events

@@ -10,6 +10,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 # Local application imports
 from ..services.auth import get_auth_service
+from ..utils.request_helpers import extract_api_key
 
 
 logger = structlog.get_logger(__name__)
@@ -28,15 +29,8 @@ async def verify_api_key(
     if hasattr(request.state, "authenticated") and request.state.authenticated:
         return getattr(request.state, "api_key", "")
 
-    # Extract API key from various sources
-    api_key = None
-
-    # Check x-api-key header (preferred method)
-    api_key = request.headers.get("x-api-key")
-
-    # Check Authorization header as fallback
-    if not api_key and credentials:
-        api_key = credentials.credentials
+    # Extract API key using shared utility
+    api_key = extract_api_key(request)
 
     if not api_key:
         logger.warning("No API key provided in request")
@@ -68,5 +62,3 @@ async def verify_api_key_optional(
         if "required" in e.detail:
             return None  # No API key provided, which is OK for optional endpoints
         raise  # Invalid API key provided, which is not OK
-
-

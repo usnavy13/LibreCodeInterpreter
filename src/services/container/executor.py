@@ -75,7 +75,9 @@ class ContainerExecutor:
             exec_config["workdir"] = working_dir
 
         try:
-            return self._execute_via_socket(container, exec_config, stdin_payload, timeout)
+            return self._execute_via_socket(
+                container, exec_config, stdin_payload, timeout
+            )
 
         except DockerException as e:
             error_text = str(e)

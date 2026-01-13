@@ -1,32 +1,11 @@
 """Integration tests for file management API endpoints.
 
 These tests use real infrastructure (MinIO, Redis) - requires docker-compose up.
+Fixtures (client, auth_headers, unique_session_id) are defined in conftest.py.
 """
 
 import pytest
-from fastapi.testclient import TestClient
 import io
-import uuid
-
-from src.main import app
-
-
-@pytest.fixture
-def client():
-    """Create test client."""
-    return TestClient(app)
-
-
-@pytest.fixture
-def auth_headers():
-    """Provide authentication headers for tests."""
-    return {"x-api-key": "test-api-key-for-testing-12345"}
-
-
-@pytest.fixture
-def unique_session_id():
-    """Generate unique session ID for test isolation."""
-    return f"test-session-{uuid.uuid4().hex[:8]}"
 
 
 class TestFileUpload:
@@ -56,7 +35,7 @@ class TestFileUpload:
         """Test uploading multiple files."""
         files = [
             ("files", ("file1.txt", io.BytesIO(b"Content 1"), "text/plain")),
-            ("files", ("file2.txt", io.BytesIO(b"Content 2"), "text/plain"))
+            ("files", ("file2.txt", io.BytesIO(b"Content 2"), "text/plain")),
         ]
         data = {"entity_id": unique_session_id}
 
@@ -125,7 +104,9 @@ class TestFileList:
         session_id = upload_response.json()["session_id"]
 
         # List with simple detail
-        response = client.get(f"/files/{session_id}?detail=simple", headers=auth_headers)
+        response = client.get(
+            f"/files/{session_id}?detail=simple", headers=auth_headers
+        )
 
         assert response.status_code == 200
         files_list = response.json()
@@ -155,7 +136,7 @@ class TestFileDownload:
         download_response = client.get(
             f"/download/{session_id}/{file_id}",
             headers=auth_headers,
-            follow_redirects=False
+            follow_redirects=False,
         )
 
         # Should redirect to MinIO presigned URL
@@ -165,8 +146,7 @@ class TestFileDownload:
     def test_download_nonexistent_file(self, client, auth_headers, unique_session_id):
         """Test downloading a file that doesn't exist."""
         response = client.get(
-            f"/download/{unique_session_id}/nonexistent-file-id",
-            headers=auth_headers
+            f"/download/{unique_session_id}/nonexistent-file-id", headers=auth_headers
         )
 
         assert response.status_code == 404
@@ -188,8 +168,7 @@ class TestFileDelete:
 
         # Delete the file
         delete_response = client.delete(
-            f"/files/{session_id}/{file_id}",
-            headers=auth_headers
+            f"/files/{session_id}/{file_id}", headers=auth_headers
         )
 
         assert delete_response.status_code == 200
@@ -202,8 +181,7 @@ class TestFileDelete:
     def test_delete_nonexistent_file(self, client, auth_headers, unique_session_id):
         """Test deleting a file that doesn't exist."""
         response = client.delete(
-            f"/files/{unique_session_id}/nonexistent-file-id",
-            headers=auth_headers
+            f"/files/{unique_session_id}/nonexistent-file-id", headers=auth_headers
         )
 
         assert response.status_code == 404
@@ -214,7 +192,13 @@ class TestFileTypeRestrictions:
 
     def test_upload_blocked_exe_file(self, client, auth_headers):
         """Test that .exe files are blocked with 415 status."""
-        files = {"files": ("malware.exe", io.BytesIO(b"MZ...fake exe"), "application/octet-stream")}
+        files = {
+            "files": (
+                "malware.exe",
+                io.BytesIO(b"MZ...fake exe"),
+                "application/octet-stream",
+            )
+        }
 
         response = client.post("/upload", files=files, headers=auth_headers)
 
@@ -223,7 +207,13 @@ class TestFileTypeRestrictions:
 
     def test_upload_blocked_dll_file(self, client, auth_headers):
         """Test that .dll files are blocked with 415 status."""
-        files = {"files": ("library.dll", io.BytesIO(b"fake dll content"), "application/octet-stream")}
+        files = {
+            "files": (
+                "library.dll",
+                io.BytesIO(b"fake dll content"),
+                "application/octet-stream",
+            )
+        }
 
         response = client.post("/upload", files=files, headers=auth_headers)
 
@@ -232,7 +222,13 @@ class TestFileTypeRestrictions:
 
     def test_upload_blocked_bin_file(self, client, auth_headers):
         """Test that .bin files are blocked with 415 status."""
-        files = {"files": ("binary.bin", io.BytesIO(b"binary content"), "application/octet-stream")}
+        files = {
+            "files": (
+                "binary.bin",
+                io.BytesIO(b"binary content"),
+                "application/octet-stream",
+            )
+        }
 
         response = client.post("/upload", files=files, headers=auth_headers)
 

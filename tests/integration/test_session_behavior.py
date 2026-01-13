@@ -29,7 +29,9 @@ def auth_headers():
     return {"x-api-key": "test-api-key-for-testing-12345"}
 
 
-def create_session(session_id: str, entity_id: str = None, metadata: dict = None) -> Session:
+def create_session(
+    session_id: str, entity_id: str = None, metadata: dict = None
+) -> Session:
     """Helper to create a session with specific properties."""
     meta = metadata or {}
     if entity_id:
@@ -41,7 +43,7 @@ def create_session(session_id: str, entity_id: str = None, metadata: dict = None
         created_at=datetime.now(timezone.utc),
         last_activity=datetime.now(timezone.utc),
         expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
-        metadata=meta
+        metadata=meta,
     )
 
 
@@ -59,15 +61,16 @@ def create_execution(session_id: str, stdout: str = "output") -> CodeExecution:
             ExecutionOutput(
                 type=OutputType.STDOUT,
                 content=stdout,
-                timestamp=datetime.now(timezone.utc)
+                timestamp=datetime.now(timezone.utc),
             )
-        ]
+        ],
     )
 
 
 # =============================================================================
 # SESSION CREATION BEHAVIOR
 # =============================================================================
+
 
 class TestSessionCreation:
     """Test session creation behavior."""
@@ -83,21 +86,33 @@ class TestSessionCreation:
 
         mock_execution_service = AsyncMock()
         # execute_code returns (execution, container, new_state, state_errors, container_source)
-        mock_execution_service.execute_code.return_value = (mock_execution, None, None, [], "pool_hit")
+        mock_execution_service.execute_code.return_value = (
+            mock_execution,
+            None,
+            None,
+            [],
+            "pool_hit",
+        )
 
         mock_file_service = AsyncMock()
         mock_file_service.list_files.return_value = []
 
-        from src.dependencies.services import get_session_service, get_execution_service, get_file_service
+        from src.dependencies.services import (
+            get_session_service,
+            get_execution_service,
+            get_file_service,
+        )
+
         app.dependency_overrides[get_session_service] = lambda: mock_session_service
         app.dependency_overrides[get_execution_service] = lambda: mock_execution_service
         app.dependency_overrides[get_file_service] = lambda: mock_file_service
 
         try:
-            response = client.post("/exec", json={
-                "code": "print('hello')",
-                "lang": "py"
-            }, headers=auth_headers)
+            response = client.post(
+                "/exec",
+                json={"code": "print('hello')", "lang": "py"},
+                headers=auth_headers,
+            )
 
             assert response.status_code == 200
             data = response.json()
@@ -123,27 +138,41 @@ class TestSessionCreation:
 
         mock_execution_service = AsyncMock()
         # execute_code returns (execution, container, new_state, state_errors, container_source)
-        mock_execution_service.execute_code.return_value = (mock_execution, None, None, [], "pool_hit")
+        mock_execution_service.execute_code.return_value = (
+            mock_execution,
+            None,
+            None,
+            [],
+            "pool_hit",
+        )
 
         mock_file_service = AsyncMock()
         mock_file_service.list_files.return_value = []
 
-        from src.dependencies.services import get_session_service, get_execution_service, get_file_service
+        from src.dependencies.services import (
+            get_session_service,
+            get_execution_service,
+            get_file_service,
+        )
+
         app.dependency_overrides[get_session_service] = lambda: mock_session_service
         app.dependency_overrides[get_execution_service] = lambda: mock_execution_service
         app.dependency_overrides[get_file_service] = lambda: mock_file_service
 
         try:
-            response = client.post("/exec", json={
-                "code": "print('hello')",
-                "lang": "py",
-                "entity_id": entity_id
-            }, headers=auth_headers)
+            response = client.post(
+                "/exec",
+                json={"code": "print('hello')", "lang": "py", "entity_id": entity_id},
+                headers=auth_headers,
+            )
 
             assert response.status_code == 200
 
             # Verify session was created (entity_id is used for lookup, not stored in metadata)
-            assert mock_session_service.create_session.called or mock_session_service.get_session.called
+            assert (
+                mock_session_service.create_session.called
+                or mock_session_service.get_session.called
+            )
             # Response should contain a session_id
             assert "session_id" in response.json()
         finally:
@@ -161,22 +190,33 @@ class TestSessionCreation:
 
         mock_execution_service = AsyncMock()
         # execute_code returns (execution, container, new_state, state_errors, container_source)
-        mock_execution_service.execute_code.return_value = (mock_execution, None, None, [], "pool_hit")
+        mock_execution_service.execute_code.return_value = (
+            mock_execution,
+            None,
+            None,
+            [],
+            "pool_hit",
+        )
 
         mock_file_service = AsyncMock()
         mock_file_service.list_files.return_value = []
 
-        from src.dependencies.services import get_session_service, get_execution_service, get_file_service
+        from src.dependencies.services import (
+            get_session_service,
+            get_execution_service,
+            get_file_service,
+        )
+
         app.dependency_overrides[get_session_service] = lambda: mock_session_service
         app.dependency_overrides[get_execution_service] = lambda: mock_execution_service
         app.dependency_overrides[get_file_service] = lambda: mock_file_service
 
         try:
-            response = client.post("/exec", json={
-                "code": "print('hello')",
-                "lang": "py",
-                "user_id": user_id
-            }, headers=auth_headers)
+            response = client.post(
+                "/exec",
+                json={"code": "print('hello')", "lang": "py", "user_id": user_id},
+                headers=auth_headers,
+            )
 
             assert response.status_code == 200
         finally:
@@ -186,6 +226,7 @@ class TestSessionCreation:
 # =============================================================================
 # SESSION REUSE BEHAVIOR
 # =============================================================================
+
 
 class TestSessionReuse:
     """Test session reuse behavior."""
@@ -203,30 +244,41 @@ class TestSessionReuse:
 
         mock_execution_service = AsyncMock()
         # execute_code returns (execution, container, new_state, state_errors, container_source)
-        mock_execution_service.execute_code.return_value = (mock_execution, None, None, [], "pool_hit")
+        mock_execution_service.execute_code.return_value = (
+            mock_execution,
+            None,
+            None,
+            [],
+            "pool_hit",
+        )
 
         mock_file_service = AsyncMock()
         mock_file_service.list_files.return_value = []
 
-        from src.dependencies.services import get_session_service, get_execution_service, get_file_service
+        from src.dependencies.services import (
+            get_session_service,
+            get_execution_service,
+            get_file_service,
+        )
+
         app.dependency_overrides[get_session_service] = lambda: mock_session_service
         app.dependency_overrides[get_execution_service] = lambda: mock_execution_service
         app.dependency_overrides[get_file_service] = lambda: mock_file_service
 
         try:
             # First execution
-            response1 = client.post("/exec", json={
-                "code": "x = 1",
-                "lang": "py",
-                "entity_id": entity_id
-            }, headers=auth_headers)
+            response1 = client.post(
+                "/exec",
+                json={"code": "x = 1", "lang": "py", "entity_id": entity_id},
+                headers=auth_headers,
+            )
 
             # Second execution with same entity
-            response2 = client.post("/exec", json={
-                "code": "print(x)",
-                "lang": "py",
-                "entity_id": entity_id
-            }, headers=auth_headers)
+            response2 = client.post(
+                "/exec",
+                json={"code": "print(x)", "lang": "py", "entity_id": entity_id},
+                headers=auth_headers,
+            )
 
             assert response1.status_code == 200
             assert response2.status_code == 200
@@ -251,29 +303,34 @@ class TestSessionReuse:
         # execute_code returns (execution, container, new_state, state_errors, container_source)
         mock_execution_service.execute_code.side_effect = [
             (create_execution("session-1"), None, None, [], "pool_hit"),
-            (create_execution("session-2"), None, None, [], "pool_hit")
+            (create_execution("session-2"), None, None, [], "pool_hit"),
         ]
 
         mock_file_service = AsyncMock()
         mock_file_service.list_files.return_value = []
 
-        from src.dependencies.services import get_session_service, get_execution_service, get_file_service
+        from src.dependencies.services import (
+            get_session_service,
+            get_execution_service,
+            get_file_service,
+        )
+
         app.dependency_overrides[get_session_service] = lambda: mock_session_service
         app.dependency_overrides[get_execution_service] = lambda: mock_execution_service
         app.dependency_overrides[get_file_service] = lambda: mock_file_service
 
         try:
-            response1 = client.post("/exec", json={
-                "code": "print('1')",
-                "lang": "py",
-                "entity_id": "entity-1"
-            }, headers=auth_headers)
+            response1 = client.post(
+                "/exec",
+                json={"code": "print('1')", "lang": "py", "entity_id": "entity-1"},
+                headers=auth_headers,
+            )
 
-            response2 = client.post("/exec", json={
-                "code": "print('2')",
-                "lang": "py",
-                "entity_id": "entity-2"
-            }, headers=auth_headers)
+            response2 = client.post(
+                "/exec",
+                json={"code": "print('2')", "lang": "py", "entity_id": "entity-2"},
+                headers=auth_headers,
+            )
 
             assert response1.status_code == 200
             assert response2.status_code == 200
@@ -288,10 +345,13 @@ class TestSessionReuse:
 # FILE PERSISTENCE BEHAVIOR
 # =============================================================================
 
+
 class TestFilePersistence:
     """Test file persistence across executions."""
 
-    @pytest.mark.skip(reason="Requires full integration testing with real services - complex multi-step file flow")
+    @pytest.mark.skip(
+        reason="Requires full integration testing with real services - complex multi-step file flow"
+    )
     def test_uploaded_file_available_in_execution(self, client, auth_headers):
         """Test that uploaded files are available during execution."""
         session_id = "file-test-session"
@@ -306,7 +366,13 @@ class TestFilePersistence:
 
         mock_execution_service = AsyncMock()
         # execute_code returns (execution, container, new_state, state_errors, container_source)
-        mock_execution_service.execute_code.return_value = (mock_execution, None, None, [], "pool_hit")
+        mock_execution_service.execute_code.return_value = (
+            mock_execution,
+            None,
+            None,
+            [],
+            "pool_hit",
+        )
 
         mock_file_service = AsyncMock()
         mock_file_service.store_uploaded_file.return_value = file_id
@@ -317,7 +383,7 @@ class TestFilePersistence:
                 size=100,
                 content_type="text/plain",
                 created_at=datetime.utcnow(),
-                path="/data.txt"
+                path="/data.txt",
             )
         ]
         mock_file_service.get_file_info.return_value = FileInfo(
@@ -326,11 +392,16 @@ class TestFilePersistence:
             size=100,
             content_type="text/plain",
             created_at=datetime.utcnow(),
-            path="/data.txt"
+            path="/data.txt",
         )
         mock_file_service.get_file_content.return_value = b"test content"
 
-        from src.dependencies.services import get_session_service, get_execution_service, get_file_service
+        from src.dependencies.services import (
+            get_session_service,
+            get_execution_service,
+            get_file_service,
+        )
+
         app.dependency_overrides[get_session_service] = lambda: mock_session_service
         app.dependency_overrides[get_execution_service] = lambda: mock_execution_service
         app.dependency_overrides[get_file_service] = lambda: mock_file_service
@@ -340,21 +411,29 @@ class TestFilePersistence:
             files = {"files": ("data.txt", io.BytesIO(b"test content"), "text/plain")}
             data = {"entity_id": "file-test-entity"}
 
-            upload_response = client.post("/files/upload", files=files, data=data, headers=auth_headers)
+            upload_response = client.post(
+                "/files/upload", files=files, data=data, headers=auth_headers
+            )
             assert upload_response.status_code == 200
             uploaded_file = upload_response.json()["files"][0]
 
             # Execute code that references the file
-            exec_response = client.post("/exec", json={
-                "code": "with open('data.txt') as f: print(f.read())",
-                "lang": "py",
-                "entity_id": "file-test-entity",
-                "files": [{
-                    "id": uploaded_file["id"],
-                    "session_id": uploaded_file["session_id"],
-                    "name": "data.txt"
-                }]
-            }, headers=auth_headers)
+            exec_response = client.post(
+                "/exec",
+                json={
+                    "code": "with open('data.txt') as f: print(f.read())",
+                    "lang": "py",
+                    "entity_id": "file-test-entity",
+                    "files": [
+                        {
+                            "id": uploaded_file["id"],
+                            "session_id": uploaded_file["session_id"],
+                            "name": "data.txt",
+                        }
+                    ],
+                },
+                headers=auth_headers,
+            )
 
             assert exec_response.status_code == 200
 
@@ -365,7 +444,9 @@ class TestFilePersistence:
         finally:
             app.dependency_overrides.clear()
 
-    @pytest.mark.skip(reason="Requires full integration testing with real services - complex multi-step file flow")
+    @pytest.mark.skip(
+        reason="Requires full integration testing with real services - complex multi-step file flow"
+    )
     def test_generated_file_downloadable(self, client, auth_headers):
         """Test that files generated during execution can be downloaded."""
         session_id = "gen-file-session"
@@ -387,9 +468,9 @@ class TestFilePersistence:
                     content="/workspace/output.txt",
                     mime_type="text/plain",
                     size=50,
-                    timestamp=datetime.now(timezone.utc)
+                    timestamp=datetime.now(timezone.utc),
                 )
-            ]
+            ],
         )
 
         mock_session_service = AsyncMock()
@@ -398,7 +479,13 @@ class TestFilePersistence:
 
         mock_execution_service = AsyncMock()
         # execute_code returns (execution, container, new_state, state_errors, container_source)
-        mock_execution_service.execute_code.return_value = (execution_with_file, None, None, [], "pool_hit")
+        mock_execution_service.execute_code.return_value = (
+            execution_with_file,
+            None,
+            None,
+            [],
+            "pool_hit",
+        )
 
         mock_file_service = AsyncMock()
         mock_file_service.list_files.return_value = [
@@ -408,22 +495,31 @@ class TestFilePersistence:
                 size=50,
                 content_type="text/plain",
                 created_at=datetime.utcnow(),
-                path="/output.txt"
+                path="/output.txt",
             )
         ]
         mock_file_service.download_file.return_value = "https://minio.test/download"
 
-        from src.dependencies.services import get_session_service, get_execution_service, get_file_service
+        from src.dependencies.services import (
+            get_session_service,
+            get_execution_service,
+            get_file_service,
+        )
+
         app.dependency_overrides[get_session_service] = lambda: mock_session_service
         app.dependency_overrides[get_execution_service] = lambda: mock_execution_service
         app.dependency_overrides[get_file_service] = lambda: mock_file_service
 
         try:
             # Execute code that generates a file
-            exec_response = client.post("/exec", json={
-                "code": "with open('output.txt', 'w') as f: f.write('generated')",
-                "lang": "py"
-            }, headers=auth_headers)
+            exec_response = client.post(
+                "/exec",
+                json={
+                    "code": "with open('output.txt', 'w') as f: f.write('generated')",
+                    "lang": "py",
+                },
+                headers=auth_headers,
+            )
 
             assert exec_response.status_code == 200
             generated_files = exec_response.json()["files"]
@@ -434,7 +530,7 @@ class TestFilePersistence:
             download_response = client.get(
                 f"/files/download/{session_id}/{file_ref['id']}",
                 headers=auth_headers,
-                follow_redirects=False
+                follow_redirects=False,
             )
 
             assert download_response.status_code == 302
@@ -445,6 +541,7 @@ class TestFilePersistence:
 # =============================================================================
 # SESSION ISOLATION BEHAVIOR
 # =============================================================================
+
 
 class TestSessionIsolation:
     """Test session isolation between different users/entities."""
@@ -458,10 +555,11 @@ class TestSessionIsolation:
         mock_session_service = AsyncMock()
         mock_session_service.list_sessions_by_entity.side_effect = [
             [session1],  # For entity-1
-            [session2]   # For entity-2
+            [session2],  # For entity-2
         ]
 
         from src.dependencies.services import get_session_service
+
         app.dependency_overrides[get_session_service] = lambda: mock_session_service
 
         try:
@@ -477,13 +575,13 @@ class TestSessionIsolation:
         mock_file_service.get_file_info.return_value = None  # Not found
 
         from src.dependencies.services import get_file_service
+
         app.dependency_overrides[get_file_service] = lambda: mock_file_service
 
         try:
             # Try to access file from different session
             response = client.get(
-                "/files/download/other-session/some-file-id",
-                headers=auth_headers
+                "/files/download/other-session/some-file-id", headers=auth_headers
             )
 
             # Should not find the file
@@ -495,6 +593,7 @@ class TestSessionIsolation:
 # =============================================================================
 # SESSION ID STABILITY
 # =============================================================================
+
 
 class TestSessionIdStability:
     """Test that session IDs remain stable across requests."""
@@ -512,12 +611,23 @@ class TestSessionIdStability:
 
         mock_execution_service = AsyncMock()
         # execute_code returns (execution, container, new_state, state_errors, container_source)
-        mock_execution_service.execute_code.return_value = (execution, None, None, [], "pool_hit")
+        mock_execution_service.execute_code.return_value = (
+            execution,
+            None,
+            None,
+            [],
+            "pool_hit",
+        )
 
         mock_file_service = AsyncMock()
         mock_file_service.list_files.return_value = []
 
-        from src.dependencies.services import get_session_service, get_execution_service, get_file_service
+        from src.dependencies.services import (
+            get_session_service,
+            get_execution_service,
+            get_file_service,
+        )
+
         app.dependency_overrides[get_session_service] = lambda: mock_session_service
         app.dependency_overrides[get_execution_service] = lambda: mock_execution_service
         app.dependency_overrides[get_file_service] = lambda: mock_file_service
@@ -526,11 +636,15 @@ class TestSessionIdStability:
             # Multiple executions
             responses = []
             for i in range(3):
-                response = client.post("/exec", json={
-                    "code": f"print({i})",
-                    "lang": "py",
-                    "entity_id": "stable-entity"
-                }, headers=auth_headers)
+                response = client.post(
+                    "/exec",
+                    json={
+                        "code": f"print({i})",
+                        "lang": "py",
+                        "entity_id": "stable-entity",
+                    },
+                    headers=auth_headers,
+                )
                 responses.append(response)
 
             # All should return the same session_id
@@ -539,7 +653,9 @@ class TestSessionIdStability:
         finally:
             app.dependency_overrides.clear()
 
-    @pytest.mark.skip(reason="Requires full integration testing with real services - complex file ID stability verification")
+    @pytest.mark.skip(
+        reason="Requires full integration testing with real services - complex file ID stability verification"
+    )
     def test_file_ids_stable_across_requests(self, client, auth_headers):
         """Test that file IDs remain stable."""
         stable_file_id = "stable-file-xyz789"
@@ -553,7 +669,7 @@ class TestSessionIdStability:
                 size=100,
                 content_type="text/plain",
                 created_at=datetime.utcnow(),
-                path="/stable.txt"
+                path="/stable.txt",
             )
         ]
         mock_file_service.get_file_info.return_value = FileInfo(
@@ -562,21 +678,26 @@ class TestSessionIdStability:
             size=100,
             content_type="text/plain",
             created_at=datetime.utcnow(),
-            path="/stable.txt"
+            path="/stable.txt",
         )
 
         from src.dependencies.services import get_file_service
+
         app.dependency_overrides[get_file_service] = lambda: mock_file_service
 
         try:
             # Upload a file
             files = {"files": ("stable.txt", io.BytesIO(b"content"), "text/plain")}
-            upload_response = client.post("/files/upload", files=files, headers=auth_headers)
+            upload_response = client.post(
+                "/files/upload", files=files, headers=auth_headers
+            )
 
             uploaded_id = upload_response.json()["files"][0]["id"]
 
             # List files - should show same ID
-            list_response = client.get("/files/files/temp-session", headers=auth_headers)
+            list_response = client.get(
+                "/files/files/temp-session", headers=auth_headers
+            )
             listed_id = list_response.json()[0]["id"]
 
             assert uploaded_id == listed_id

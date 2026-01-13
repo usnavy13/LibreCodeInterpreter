@@ -102,18 +102,3 @@ class TestSanitizeFilename:
         assert result.endswith(".txt")
         # Should have a random suffix before extension
         assert "-" in result
-
-
-class TestNormalizeFilename:
-    """Tests for the deprecated normalize_filename method."""
-
-    def test_delegates_to_sanitize_filename(self):
-        """Test that normalize_filename delegates to sanitize_filename."""
-        result = OutputProcessor.normalize_filename("file with spaces.txt")
-        expected = OutputProcessor.sanitize_filename("file with spaces.txt")
-        assert result == expected
-
-    def test_parentheses_now_replaced(self):
-        """Test that normalize_filename now also replaces parentheses."""
-        result = OutputProcessor.normalize_filename("file (v2).xlsx")
-        assert result == "file__v2_.xlsx"

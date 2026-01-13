@@ -143,9 +143,6 @@ class Settings(BaseSettings):
         le=16.0,
         description="Maximum CPU cores available to execution containers",
     )
-    max_cpu_quota: int = Field(
-        default=50000, ge=10000, le=100000
-    )  # Deprecated, use max_cpus
     max_pids: int = Field(
         default=512,
         ge=64,
@@ -178,16 +175,6 @@ class Settings(BaseSettings):
     # Container Pool Configuration
     container_pool_enabled: bool = Field(default=True)
     container_pool_warmup_on_startup: bool = Field(default=True)
-
-    # Session Container Reuse - DEPRECATED
-    # These settings are no longer used. Containers are now stateless:
-    # - Each execution gets a fresh container from pool
-    # - Containers are destroyed immediately after execution
-    # Kept for backward compatibility with existing configs
-    session_container_reuse_enabled: bool = Field(default=False)  # Deprecated, not used
-    session_container_ttl_seconds: int = Field(
-        default=0, ge=0, le=1800
-    )  # Deprecated, not used
 
     # Per-language pool sizes (0 = on-demand only, no pre-warming)
     container_pool_py: int = Field(
@@ -593,7 +580,6 @@ class Settings(BaseSettings):
             max_execution_time=self.max_execution_time,
             max_memory_mb=self.max_memory_mb,
             max_cpus=self.max_cpus,
-            max_cpu_quota=self.max_cpu_quota,
             max_pids=self.max_pids,
             max_open_files=self.max_open_files,
             max_file_size_mb=self.max_file_size_mb,
