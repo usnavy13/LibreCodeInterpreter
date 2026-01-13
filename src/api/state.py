@@ -12,7 +12,7 @@ import structlog
 from fastapi import APIRouter, HTTPException, Header, Request, Response
 
 from ..config import settings
-from ..dependencies.services import StateServiceDep, StateArchivalServiceDep
+from ..dependencies import StateServiceDep, StateArchivalServiceDep
 from ..models.state import StateInfo, StateUploadResponse
 
 logger = structlog.get_logger(__name__)

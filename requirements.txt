@@ -16,8 +16,11 @@ redis==5.1.0
 # SQLite async support for metrics
 aiosqlite>=0.19.0
 
-# MinIO/S3 client
+# MinIO/S3 client (Docker mode)
 minio==7.2.15
+
+# Azure Storage (Azure mode)
+azure-storage-blob>=12.19.0
 
 # Docker client for container management
 docker==7.1.0

@@ -1,0 +1,44 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "namePrefix": {
+      "value": "codeinterp"
+    },
+    "environment": {
+      "value": "prod"
+    },
+    "containerRegistry": {
+      "value": "your-acr-name.azurecr.io"
+    },
+    "apiImageTag": {
+      "value": "v1.0.0"
+    },
+    "executorImageTag": {
+      "value": "v1.0.0"
+    },
+    "apiKeys": {
+      "reference": {
+        "keyVault": {
+          "id": "/subscriptions/{subscription-id}/resourceGroups/{rg-name}/providers/Microsoft.KeyVault/vaults/{vault-name}"
+        },
+        "secretName": "code-interpreter-api-keys"
+      }
+    },
+    "apiMinReplicas": {
+      "value": 2
+    },
+    "apiMaxReplicas": {
+      "value": 10
+    },
+    "executorMinReplicas": {
+      "value": 3
+    },
+    "executorMaxReplicas": {
+      "value": 20
+    },
+    "enableStateArchival": {
+      "value": true
+    }
+  }
+}

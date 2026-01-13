@@ -9,7 +9,7 @@ from fastapi import APIRouter, Request
 
 from ..models import ExecRequest, ExecResponse
 from ..services.orchestrator import ExecutionOrchestrator
-from ..dependencies.services import (
+from ..dependencies import (
     SessionServiceDep,
     FileServiceDep,
     ExecutionServiceDep,

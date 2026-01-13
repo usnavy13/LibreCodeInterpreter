@@ -41,8 +41,16 @@ logger = structlog.get_logger()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
+    # Check deployment mode
+    from .dependencies import is_azure_deployment
+    azure_mode = is_azure_deployment()
+
     # Startup
-    logger.info("Starting Code Interpreter API", version="1.0.0")
+    logger.info(
+        "Starting Code Interpreter API",
+        version="1.0.0",
+        deployment_mode="azure" if azure_mode else "docker",
+    )
 
     # Setup graceful shutdown callbacks (uvicorn handles signals)
     setup_graceful_shutdown()
@@ -97,7 +105,7 @@ async def lifespan(app: FastAPI):
     # Start session cleanup task
     try:
         logger.info("Starting session cleanup task...")
-        from .dependencies.services import get_session_service
+        from .dependencies import get_session_service
 
         session_service = get_session_service()
         await session_service.start_cleanup_task()
@@ -110,7 +118,7 @@ async def lifespan(app: FastAPI):
     try:
         logger.info("Starting cleanup scheduler...")
         from .services.cleanup import cleanup_scheduler
-        from .dependencies.services import (
+        from .dependencies import (
             get_execution_service,
             get_file_service,
             get_state_archival_service,
@@ -134,7 +142,8 @@ async def lifespan(app: FastAPI):
 
     # Initialize WAN network for container internet access if enabled
     # IMPORTANT: This must happen BEFORE the container pool starts
-    if settings.enable_wan_access:
+    # Skip in Azure mode - no Docker networking needed
+    if settings.enable_wan_access and not azure_mode:
         try:
             logger.info("Initializing WAN network for container internet access...")
             from .services.container.network import WANNetworkManager
@@ -160,9 +169,9 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("WAN network access disabled (containers have no network access)")
 
-    # Start container pool if enabled
+    # Start container pool if enabled (skip in Azure mode - uses HTTP executor)
     container_pool = None
-    if settings.container_pool_enabled:
+    if settings.container_pool_enabled and not azure_mode:
         try:
             logger.info("Starting container pool...")
             from .services.container.pool import ContainerPool
@@ -198,6 +207,10 @@ async def lifespan(app: FastAPI):
             logger.error("Failed to start container pool", error=str(e))
             # Don't fail startup if container pool fails
             container_pool = None
+    elif azure_mode:
+        logger.info(
+            "Azure deployment mode - using HTTP executor service instead of Docker"
+        )
     else:
         logger.info("Container pool disabled by configuration")
 

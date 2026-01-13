@@ -62,7 +62,7 @@ async def cleanup_services() -> None:
 
     # Stop session service cleanup tasks with timeout
     try:
-        from ..dependencies.services import get_session_service
+        from ..dependencies import get_session_service
 
         session_service = get_session_service()
         await asyncio.wait_for(session_service.close(), timeout=3.0)
@@ -99,7 +99,7 @@ async def cleanup_active_containers() -> None:
 
     try:
         # Import here to avoid circular imports and handle import errors
-        from ..dependencies.services import get_execution_service
+        from ..dependencies import get_execution_service
 
         # Get the execution service instance with timeout
         execution_service = get_execution_service()

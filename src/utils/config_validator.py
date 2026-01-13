@@ -1,15 +1,17 @@
 """Configuration validation utilities."""
 
 import logging
+import os
 from typing import List, Dict, Any
-import docker
-import redis
-from minio import Minio
-from minio.error import S3Error
 
 from ..config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def is_azure_deployment() -> bool:
+    """Check if running in Azure deployment mode."""
+    return os.environ.get("DEPLOYMENT_MODE", "docker").lower() == "azure"
 
 
 class ConfigurationError(Exception):
@@ -36,10 +38,14 @@ class ConfigValidator:
         self._validate_resource_limits()
         self._validate_file_config()
 
-        # Validate external services
-        self._validate_redis_connection()
-        self._validate_minio_connection()
-        self._validate_docker_connection()
+        # Validate external services (skip in Azure mode - uses Azure services)
+        if is_azure_deployment():
+            logger.info("Azure deployment mode - skipping Docker/MinIO/Redis validation")
+            self._validate_azure_services()
+        else:
+            self._validate_redis_connection()
+            self._validate_minio_connection()
+            self._validate_docker_connection()
 
         # Log results
         if self.warnings:
@@ -52,6 +58,27 @@ class ConfigValidator:
             return False
 
         return True
+
+    def _validate_azure_services(self):
+        """Validate Azure services configuration."""
+        from ..config.azure import azure_settings
+
+        # Check Azure Storage
+        if not azure_settings.has_azure_storage():
+            self.warnings.append("Azure Storage not configured - file operations may fail")
+
+        # Check Azure Redis
+        if not azure_settings.has_azure_redis():
+            self.warnings.append("Azure Redis not configured - using default Redis settings")
+
+        # Check Executor URL
+        if not azure_settings.has_executor_service():
+            self.errors.append("Executor URL not configured for Azure deployment")
+
+        logger.info(
+            f"Azure services validation complete: storage={azure_settings.has_azure_storage()}, "
+            f"redis={azure_settings.has_azure_redis()}, executor={azure_settings.has_executor_service()}"
+        )
 
     def _validate_api_config(self):
         """Validate API configuration."""
@@ -103,6 +130,7 @@ class ConfigValidator:
 
     def _validate_redis_connection(self):
         """Validate Redis connection."""
+        import redis  # Import here to avoid dependency in Azure mode
         try:
             # Use Redis URL from settings
             client = redis.from_url(
@@ -132,6 +160,8 @@ class ConfigValidator:
 
     def _validate_minio_connection(self):
         """Validate MinIO/S3 connection."""
+        from minio import Minio  # Import here to avoid dependency in Azure mode
+        from minio.error import S3Error
         try:
             client = Minio(
                 settings.minio_endpoint,
@@ -168,6 +198,7 @@ class ConfigValidator:
 
     def _validate_docker_connection(self):
         """Validate Docker connection (non-blocking)."""
+        import docker  # Import here to avoid dependency in Azure mode
         try:
             # Try to create Docker client with very short timeout to avoid blocking
             try:
