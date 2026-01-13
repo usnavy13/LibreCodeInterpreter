@@ -630,7 +630,7 @@ EOF"""
         try:
             exit_code, stdout, stderr = await self.container_manager.execute_command(
                 container,
-                "find /mnt/data -type f -name '*' ! -name 'code.*' ! -name 'Code.*' -exec ls -la {} \\;",
+                "find /mnt/data -maxdepth 1 -type f -name '*' ! -name 'code' ! -name 'code.*' ! -name 'Code.*' -exec ls -la {} \\;",
                 timeout=5,
             )
 
