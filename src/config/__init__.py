@@ -566,8 +566,6 @@ class Settings(BaseSettings):
             api_keys=self.api_keys if isinstance(self.api_keys, str) else None,
             api_key_header=self.api_key_header,
             api_key_cache_ttl=self.api_key_cache_ttl,
-            allowed_file_extensions=self.allowed_file_extensions,
-            blocked_file_patterns=self.blocked_file_patterns,
             enable_network_isolation=self.enable_network_isolation,
             enable_filesystem_isolation=self.enable_filesystem_isolation,
             enable_security_logs=self.enable_security_logs,
