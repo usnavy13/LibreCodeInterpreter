@@ -8,22 +8,11 @@
     "environment": {
       "value": "prod"
     },
-    "containerRegistry": {
-      "value": "your-acr-name.azurecr.io"
-    },
     "apiImageTag": {
-      "value": "v1.0.0"
+      "value": "latest"
     },
     "executorImageTag": {
-      "value": "v1.0.0"
-    },
-    "apiKeys": {
-      "reference": {
-        "keyVault": {
-          "id": "/subscriptions/{subscription-id}/resourceGroups/{rg-name}/providers/Microsoft.KeyVault/vaults/{vault-name}"
-        },
-        "secretName": "code-interpreter-api-keys"
-      }
+      "value": "latest"
     },
     "apiMinReplicas": {
       "value": 2

@@ -23,6 +23,18 @@ param apiImageTag string = 'latest'
 @description('Executor container image tag')
 param executorImageTag string = 'latest'
 
+@description('Use placeholder images for initial deployment (before ACR images are built)')
+param usePlaceholderImages bool = true
+
+@description('Existing ACR name (if ACR was created separately before this deployment)')
+param existingAcrName string = ''
+
+// Placeholder image that works on Container Apps (used for initial deployment)
+var placeholderImage = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
+
+// Use existing ACR if provided, otherwise create new one
+var useExistingAcr = !empty(existingAcrName)
+
 @description('API keys (comma-separated)')
 @secure()
 param apiKeys string
@@ -47,8 +59,9 @@ param executorMaxReplicas int = 20
 param enableStateArchival bool = true
 
 // Generate unique suffix for resources (use shorter suffix for name-length-limited resources)
+// Container App names max 32 chars: namePrefix(10) + env(4) + suffix(6) + -executor(9) = 31
 var uniqueSuffix = uniqueString(resourceGroup().id, namePrefix)
-var shortSuffix = substring(uniqueSuffix, 0, 8)
+var shortSuffix = substring(uniqueSuffix, 0, 6)
 var resourceName = '${namePrefix}-${environment}-${shortSuffix}'
 
 // Log Analytics workspace for Container Apps
@@ -92,8 +105,12 @@ resource blobContainer 'Microsoft.Storage/storageAccounts/blobServices/container
   }
 }
 
-// Azure Container Registry (max 50 chars, alphanumeric only)
-resource acr 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
+// Azure Container Registry - use existing or create new
+resource existingAcr 'Microsoft.ContainerRegistry/registries@2023-07-01' existing = if (useExistingAcr) {
+  name: existingAcrName
+}
+
+resource newAcr 'Microsoft.ContainerRegistry/registries@2023-07-01' = if (!useExistingAcr) {
   name: '${namePrefix}${shortSuffix}acr'
   location: location
   sku: {
@@ -104,6 +121,10 @@ resource acr 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
     publicNetworkAccess: 'Enabled'
   }
 }
+
+// Reference to the ACR (either existing or new)
+var acrName = useExistingAcr ? existingAcrName : newAcr.name
+var acrLoginServer = useExistingAcr ? existingAcr.properties.loginServer : newAcr.properties.loginServer
 
 // Azure Cache for Redis
 resource redis 'Microsoft.Cache/redis@2023-08-01' = {
@@ -170,9 +191,9 @@ resource apiContainerApp 'Microsoft.App/containerApps@2023-05-01' = {
           value: 'DefaultEndpointsProtocol=https;AccountName=${storageAccount.name};AccountKey=${storageAccount.listKeys().keys[0].value};EndpointSuffix=core.windows.net'
         }
       ]
-      registries: [
+      registries: usePlaceholderImages ? [] : [
         {
-          server: acr.properties.loginServer
+          server: acrLoginServer
           identity: 'system'
         }
       ]
@@ -181,7 +202,7 @@ resource apiContainerApp 'Microsoft.App/containerApps@2023-05-01' = {
       containers: [
         {
           name: 'api'
-          image: '${acr.properties.loginServer}/code-interpreter-api:${apiImageTag}'
+          image: usePlaceholderImages ? placeholderImage : '${acrLoginServer}/code-interpreter-api:${apiImageTag}'
           resources: {
             cpu: json('1.0')
             memory: '2Gi'
@@ -260,9 +281,9 @@ resource executorContainerApp 'Microsoft.App/containerApps@2023-05-01' = {
         targetPort: 8001
         transport: 'auto'
       }
-      registries: [
+      registries: usePlaceholderImages ? [] : [
         {
-          server: acr.properties.loginServer
+          server: acrLoginServer
           identity: 'system'
         }
       ]
@@ -271,7 +292,7 @@ resource executorContainerApp 'Microsoft.App/containerApps@2023-05-01' = {
       containers: [
         {
           name: 'executor'
-          image: '${acr.properties.loginServer}/code-interpreter-executor:${executorImageTag}'
+          image: usePlaceholderImages ? placeholderImage : '${acrLoginServer}/code-interpreter-executor:${executorImageTag}'
           resources: {
             cpu: json('2.0')
             memory: '4Gi'
@@ -317,10 +338,10 @@ resource executorContainerApp 'Microsoft.App/containerApps@2023-05-01' = {
   }
 }
 
-// Role assignment for API container app to pull from ACR
-resource apiAcrPullRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(acr.id, apiContainerApp.id, 'acrpull')
-  scope: acr
+// Role assignment for API container app to pull from ACR (only if using new ACR)
+resource apiAcrPullRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!useExistingAcr) {
+  name: guid(newAcr.id, apiContainerApp.id, 'acrpull')
+  scope: newAcr
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
     principalId: apiContainerApp.identity.principalId
@@ -328,10 +349,32 @@ resource apiAcrPullRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   }
 }
 
-// Role assignment for Executor container app to pull from ACR
-resource executorAcrPullRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(acr.id, executorContainerApp.id, 'acrpull')
-  scope: acr
+// Role assignment for API container app to pull from existing ACR
+resource apiAcrPullRoleExisting 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (useExistingAcr) {
+  name: guid(existingAcr.id, apiContainerApp.id, 'acrpull')
+  scope: existingAcr
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
+    principalId: apiContainerApp.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+// Role assignment for Executor container app to pull from ACR (only if using new ACR)
+resource executorAcrPullRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!useExistingAcr) {
+  name: guid(newAcr.id, executorContainerApp.id, 'acrpull')
+  scope: newAcr
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
+    principalId: executorContainerApp.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+// Role assignment for Executor container app to pull from existing ACR
+resource executorAcrPullRoleExisting 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (useExistingAcr) {
+  name: guid(existingAcr.id, executorContainerApp.id, 'acrpull')
+  scope: existingAcr
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
     principalId: executorContainerApp.identity.principalId
@@ -345,5 +388,5 @@ output executorInternalUrl string = 'http://${executorContainerApp.name}'
 output redisHostname string = redis.properties.hostName
 output storageAccountName string = storageAccount.name
 output containerAppsEnvironmentId string = containerAppsEnv.id
-output acrLoginServer string = acr.properties.loginServer
-output acrName string = acr.name
+output acrLoginServer string = acrLoginServer
+output acrName string = acrName

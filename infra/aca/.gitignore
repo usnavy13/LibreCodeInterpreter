@@ -1,2 +1,5 @@
 # Credentials files (contain API keys)
 .credentials.*
+
+# Setup script log files
+setup-*.log
