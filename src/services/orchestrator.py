@@ -477,7 +477,11 @@ class ExecutionOrchestrator:
         return execution
 
     async def _handle_generated_files(self, ctx: ExecutionContext) -> List[FileRef]:
-        """Handle files generated during execution."""
+        """Handle files generated during execution.
+
+        In Azure mode (ctx.container is None), file content is passed in output.metadata.
+        In Docker mode, file content is retrieved from the container.
+        """
         generated = []
 
         for output in ctx.execution.outputs:
@@ -491,10 +495,42 @@ class ExecutionOrchestrator:
                 continue
 
             try:
-                # Get file content from container (use ctx.container directly, no session lookup)
-                file_content = await self._get_file_from_container(
-                    ctx.container, file_path
-                )
+                file_content = None
+
+                # Azure mode: get content from output metadata (no container access)
+                if ctx.container is None:
+                    if hasattr(output, 'metadata') and output.metadata:
+                        content_b64 = output.metadata.get('content_b64')
+                        if content_b64:
+                            file_content = base64.b64decode(content_b64)
+                            logger.debug(
+                                "Got file content from metadata",
+                                filename=filename,
+                                size=len(file_content),
+                            )
+
+                    if not file_content:
+                        logger.warning(
+                            "No content available for Azure file",
+                            filename=filename,
+                        )
+                        continue
+                else:
+                    # Docker mode: get file content from container
+                    file_content = await self._get_file_from_container(
+                        ctx.container, file_path
+                    )
+
+                    # Skip placeholder responses
+                    if file_content and file_content.startswith(b"#"):
+                        logger.warning(
+                            "Got placeholder content for file",
+                            filename=filename,
+                        )
+                        continue
+
+                if not file_content:
+                    continue
 
                 # Store the file
                 file_id = await self.file_service.store_execution_output_file(
@@ -507,6 +543,7 @@ class ExecutionOrchestrator:
                     session_id=ctx.session_id,
                     filename=filename,
                     file_id=file_id,
+                    size=len(file_content),
                 )
 
             except Exception as e:

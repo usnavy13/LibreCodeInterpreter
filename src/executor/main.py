@@ -143,6 +143,19 @@ async def execute(request: ExecuteRequest) -> ExecuteResponse:
         except Exception:
             pass
 
+        # Clean up files in parent /mnt/data created with absolute paths
+        # This ensures isolation between executions
+        try:
+            for entry in os.scandir(WORKING_DIR_BASE):
+                if entry.is_file():
+                    try:
+                        os.unlink(entry.path)
+                        logger.debug(f"Cleaned up parent file: {entry.name}")
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):

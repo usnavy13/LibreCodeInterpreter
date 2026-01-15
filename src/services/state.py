@@ -93,6 +93,9 @@ class StateService:
         try:
             state = await self.redis.get(self._state_key(session_id))
             if state:
+                # Handle bytes from decode_responses=False (Azure mode)
+                if isinstance(state, bytes):
+                    state = state.decode('utf-8')
                 logger.debug(
                     "Retrieved state from Redis",
                     session_id=session_id[:12],

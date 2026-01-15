@@ -2,7 +2,7 @@
 # Note: BuildKit features removed for ACR cloud build compatibility
 # Combines all 12 language runtimes into a single image for warm pool deployment
 
-FROM ubuntu:22.04 AS base
+FROM ubuntu:24.04 AS base
 
 # Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
@@ -37,25 +37,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # =============================================================================
-# STAGE 2: Python 3.13 with data science libraries
+# STAGE 2: Python 3.12 with data science libraries (Ubuntu 24.04 default)
 # =============================================================================
 
-# Add deadsnakes PPA for Python 3.13
-RUN apt-get update && apt-get install -y --no-install-recommends software-properties-common \
-    && add-apt-repository -y ppa:deadsnakes/ppa \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends \
-        python3.13 \
-        python3.13-venv \
-        python3.13-dev \
+# Install Python 3.12 from Ubuntu 24.04 default repos (no PPA needed)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3 \
+        python3-venv \
+        python3-dev \
+        python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
-# Set Python 3.13 as default
-RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.13 1 \
-    && update-alternatives --install /usr/bin/python python /usr/bin/python3.13 1
-
-# Install pip using get-pip.py (avoids distutils issue with Python 3.13)
-RUN curl -sS https://bootstrap.pypa.io/get-pip.py | python3
+# Ensure python command points to python3
+RUN ln -sf /usr/bin/python3 /usr/bin/python
 
 # Install Python system dependencies for data science packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -97,12 +91,11 @@ COPY docker/requirements/python-new.txt /tmp/python-new.txt
 
 # Install build tools (pip already installed via get-pip.py)
 ENV PIP_NO_BUILD_ISOLATION=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_BREAK_SYSTEM_PACKAGES=1
 
 RUN pip install \
-    "setuptools<70" \
-    wheel \
-    "packaging<24"
+    wheel
 
 # Install Python packages in layers
 RUN pip install --no-cache-dir -r /tmp/python-core.txt
@@ -202,16 +195,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # =============================================================================
-# STAGE 7: PHP 8.2
+# STAGE 7: PHP 8.3 (Ubuntu 24.04 default)
 # =============================================================================
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    php8.1-cli \
-    php8.1-xml \
-    php8.1-zip \
-    php8.1-gd \
-    php8.1-mbstring \
-    php8.1-curl \
+    php8.3-cli \
+    php8.3-xml \
+    php8.3-zip \
+    php8.3-gd \
+    php8.3-mbstring \
+    php8.3-curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Composer

@@ -14,9 +14,9 @@ from unidecode import unidecode
 
 # Local application imports
 from ..config import settings
-from ..dependencies import FileServiceDep
+from ..dependencies import FileServiceDep, SessionServiceDep
 from ..services.execution.output import OutputProcessor
-from ..utils.id_generator import generate_session_id
+from ..models import SessionCreate
 
 
 logger = structlog.get_logger(__name__)
@@ -56,6 +56,7 @@ async def upload_file(
     files: Optional[List[UploadFile]] = File(None),
     entity_id: Optional[str] = Form(None),
     file_service: FileServiceDep = None,
+    session_service: SessionServiceDep = None,
 ):
     """Upload files with multipart form handling - LibreChat compatible.
 
@@ -105,8 +106,12 @@ async def upload_file(
 
         uploaded_files = []
 
-        # Create a session ID for this upload
-        session_id = generate_session_id()
+        # Create a proper session for this upload (so it can be looked up later)
+        metadata = {}
+        if entity_id:
+            metadata["entity_id"] = entity_id
+        session = await session_service.create_session(SessionCreate(metadata=metadata))
+        session_id = session.session_id
 
         for file in upload_files:
             # Read file content

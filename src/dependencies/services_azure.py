@@ -43,11 +43,12 @@ def get_file_service() -> FileServiceInterface:
 @lru_cache()
 def get_state_service() -> StateService:
     """Get state service instance with Azure Redis connection."""
-    import redis as redis_lib
+    import redis.asyncio as redis_async
 
     redis_url = azure_settings.get_redis_url() or settings.get_redis_url()
     if redis_url:
-        redis_client = redis_lib.from_url(redis_url, decode_responses=False)
+        # StateService uses async redis and stores binary state data
+        redis_client = redis_async.from_url(redis_url, decode_responses=False)
         return StateService(redis_client=redis_client)
     return StateService()
 
@@ -66,10 +67,13 @@ def get_state_archival_service() -> AzureStateArchivalService:
 @lru_cache()
 def get_execution_service() -> ExecutionServiceInterface:
     """Get Azure execution service instance (HTTP-based)."""
+    # Get file service for downloading file content
+    file_service = get_file_service()
     return AzureExecutionService(
         executor_url=azure_settings.executor_url,
         timeout=azure_settings.executor_timeout,
         max_retries=azure_settings.executor_max_retries,
+        file_service=file_service,
     )
 
 
@@ -83,7 +87,7 @@ def get_session_service() -> SessionServiceInterface:
         redis_url = azure_settings.get_redis_url() or settings.get_redis_url()
         redis_client = None
         if redis_url:
-            redis_client = redis_lib.asyncio.from_url(redis_url, decode_responses=False)
+            redis_client = redis_lib.asyncio.from_url(redis_url, decode_responses=True)
 
         # Wire up dependencies
         execution_service = get_execution_service()

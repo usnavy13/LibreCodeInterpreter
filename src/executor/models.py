@@ -11,8 +11,22 @@ class FileReference(BaseModel):
 
     file_id: str
     filename: str
-    content: Optional[bytes] = None  # Base64 encoded content
+    content: Optional[bytes] = None  # Raw content bytes
+    content_b64: Optional[str] = None  # Base64-encoded content (for HTTP transfer)
     path: Optional[str] = None  # Path in working directory
+
+    def get_content(self) -> Optional[bytes]:
+        """Get file content, decoding from base64 if needed.
+
+        Returns:
+            File content as bytes, or None if not available
+        """
+        if self.content:
+            return self.content
+        if self.content_b64:
+            import base64
+            return base64.b64decode(self.content_b64)
+        return None
 
 
 class ExecuteRequest(BaseModel):

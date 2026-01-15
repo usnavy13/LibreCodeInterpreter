@@ -3,7 +3,7 @@
 # Standard library imports
 from datetime import datetime
 from enum import Enum
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 # Third-party imports
 from pydantic import BaseModel, Field
@@ -42,6 +42,9 @@ class ExecutionOutput(BaseModel):
         default=None, description="Size in bytes for file outputs"
     )
     timestamp: datetime = Field(default_factory=datetime.utcnow)
+    metadata: Optional[Dict[str, Any]] = Field(
+        default=None, description="Additional metadata (e.g., content_b64 for Azure mode)"
+    )
 
 
 class CodeExecution(BaseModel):

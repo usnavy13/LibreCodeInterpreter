@@ -31,6 +31,7 @@ class AzureExecutionService(ExecutionServiceInterface):
         executor_url: Optional[str] = None,
         timeout: int = 60,
         max_retries: int = 3,
+        file_service: Optional[Any] = None,
     ):
         """
         Initialize the Azure execution service.
@@ -39,6 +40,7 @@ class AzureExecutionService(ExecutionServiceInterface):
             executor_url: URL of the executor service (e.g., http://executor:8001)
             timeout: HTTP request timeout in seconds
             max_retries: Maximum number of retries for failed requests
+            file_service: File service for downloading file content from Azure Storage
         """
         self.executor_url = executor_url or azure_settings.executor_url
         if not self.executor_url:
@@ -48,6 +50,7 @@ class AzureExecutionService(ExecutionServiceInterface):
 
         self.timeout = timeout or azure_settings.executor_timeout
         self.max_retries = max_retries or azure_settings.executor_max_retries
+        self.file_service = file_service
 
         # Create HTTP client with connection pooling
         self.client = httpx.AsyncClient(
@@ -63,6 +66,7 @@ class AzureExecutionService(ExecutionServiceInterface):
             "Initialized Azure execution service",
             executor_url=self.executor_url,
             timeout=self.timeout,
+            has_file_service=file_service is not None,
         )
 
     async def execute_code(
@@ -93,12 +97,13 @@ class AzureExecutionService(ExecutionServiceInterface):
         execution_id = str(uuid.uuid4())
 
         # Build request payload
+        prepared_files = await self._prepare_files(files) if files else None
         payload = {
             "code": request.code,
             "language": request.language,
             "timeout": request.timeout or 30,
             "session_id": session_id,
-            "files": self._prepare_files(files) if files else None,
+            "files": prepared_files,
             "initial_state": initial_state,
             "capture_state": capture_state,
         }
@@ -140,13 +145,17 @@ class AzureExecutionService(ExecutionServiceInterface):
             if stderr:
                 outputs.append(ExecutionOutput(type="stderr", content=stderr))
 
-            # Handle generated files
+            # Handle generated files - include content_b64 as metadata for Azure mode
             generated_files = response.get("generated_files", [])
             for file_info in generated_files:
-                outputs.append(ExecutionOutput(
-                    type="file",
-                    content=file_info.get("path", file_info.get("filename", "")),
-                ))
+                output_kwargs = {
+                    "type": "file",
+                    "content": file_info.get("path", file_info.get("filename", "")),
+                }
+                # Include content_b64 in metadata for orchestrator to store
+                if "content_b64" in file_info:
+                    output_kwargs["metadata"] = {"content_b64": file_info["content_b64"]}
+                outputs.append(ExecutionOutput(**output_kwargs))
 
             # Build execution record
             execution = CodeExecution(
@@ -255,15 +264,45 @@ class AzureExecutionService(ExecutionServiceInterface):
 
         raise last_error or Exception("Executor request failed after retries")
 
-    def _prepare_files(self, files: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Prepare files for executor request."""
+    async def _prepare_files(self, files: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Prepare files for executor request, including content from Azure Storage.
+
+        Downloads file content from Azure Blob Storage and includes it base64-encoded
+        in the request payload so the executor can write it to the working directory.
+        """
+        import base64
+
         prepared = []
         for file_info in files:
-            prepared.append({
+            file_data = {
                 "file_id": file_info.get("file_id", ""),
                 "filename": file_info.get("filename", ""),
-                "path": file_info.get("path", ""),
-            })
+            }
+
+            # Download file content from Azure Blob Storage
+            if self.file_service:
+                session_id = file_info.get("session_id", "")
+                file_id = file_info.get("file_id", "")
+                if session_id and file_id:
+                    try:
+                        content = await self.file_service.get_file_content(
+                            session_id, file_id
+                        )
+                        if content:
+                            file_data["content_b64"] = base64.b64encode(content).decode('ascii')
+                            logger.debug(
+                                "Downloaded file content from storage",
+                                file_id=file_id[:12] if file_id else None,
+                                size=len(content),
+                            )
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to get file content from storage",
+                            file_id=file_id[:12] if file_id else None,
+                            error=str(e),
+                        )
+
+            prepared.append(file_data)
         return prepared
 
     async def get_execution(self, execution_id: str) -> Optional[CodeExecution]:

@@ -696,3 +696,379 @@ print(f'Processed images saved. Edges shape: {edges.shape}')
                 assert 'department_breakdown' in result_data
                 assert 'Engineering' in result_data['department_breakdown']
                 assert result_data['department_breakdown']['Engineering']['count'] == 3
+
+
+class TestStatePersistence:
+    """Test Python state persistence across executions."""
+
+    @pytest.mark.asyncio
+    async def test_variable_persists_across_executions(self, ssl_context, headers):
+        """Test that a variable defined in one execution persists to the next.
+
+        State persistence requires passing the session_id from the first execution
+        to subsequent executions.
+        """
+        connector = aiohttp.TCPConnector(ssl=ssl_context)
+        async with aiohttp.ClientSession(connector=connector) as session:
+            # Execution 1: Define a variable
+            payload1 = {
+                "lang": "py",
+                "code": "x = 42\nprint('defined x =', x)"
+            }
+
+            async with session.post(
+                f"{API_URL}/exec", json=payload1, headers=headers, ssl=ssl_context
+            ) as resp:
+                assert resp.status == 200
+                result1 = await resp.json()
+
+                assert "defined x = 42" in result1.get("stdout", "")
+                assert result1.get("has_state") is True, "Expected has_state=True after Python execution"
+                session_id = result1.get("session_id")
+                assert session_id, "No session_id returned"
+
+            # Execution 2: Use the variable (passing session_id to continue state)
+            payload2 = {
+                "lang": "py",
+                "code": "print(f'x from state: {x}')",
+                "session_id": session_id
+            }
+
+            async with session.post(
+                f"{API_URL}/exec", json=payload2, headers=headers, ssl=ssl_context
+            ) as resp:
+                assert resp.status == 200
+                result2 = await resp.json()
+
+                # Session ID should be preserved
+                assert result2.get("session_id") == session_id, \
+                    f"Session ID changed: expected {session_id}, got {result2.get('session_id')}"
+
+                stdout = result2.get("stdout", "")
+                assert "x from state: 42" in stdout, \
+                    f"Variable not persisted. stdout: {stdout}, stderr: {result2.get('stderr', '')}"
+
+    @pytest.mark.asyncio
+    async def test_numpy_array_persists(self, ssl_context, headers):
+        """Test that numpy arrays persist across executions."""
+        connector = aiohttp.TCPConnector(ssl=ssl_context)
+        async with aiohttp.ClientSession(connector=connector) as session:
+            # Execution 1: Create numpy array
+            payload1 = {
+                "lang": "py",
+                "code": "import numpy as np\narr = np.array([1, 2, 3, 4, 5])\nprint('created array with sum:', arr.sum())"
+            }
+
+            async with session.post(
+                f"{API_URL}/exec", json=payload1, headers=headers, ssl=ssl_context
+            ) as resp:
+                assert resp.status == 200
+                result1 = await resp.json()
+                assert "sum: 15" in result1.get("stdout", "")
+                session_id = result1.get("session_id")
+
+            # Execution 2: Use the array (passing session_id)
+            payload2 = {
+                "lang": "py",
+                "code": "print(f'array sum from state: {arr.sum()}')",
+                "session_id": session_id
+            }
+
+            async with session.post(
+                f"{API_URL}/exec", json=payload2, headers=headers, ssl=ssl_context
+            ) as resp:
+                assert resp.status == 200
+                result2 = await resp.json()
+
+                stdout = result2.get("stdout", "")
+                assert "array sum from state: 15" in stdout, f"NumPy array not persisted. stdout: {stdout}"
+
+    @pytest.mark.asyncio
+    async def test_pandas_dataframe_persists(self, ssl_context, headers):
+        """Test that pandas DataFrames persist across executions."""
+        connector = aiohttp.TCPConnector(ssl=ssl_context)
+        async with aiohttp.ClientSession(connector=connector) as session:
+            # Execution 1: Create DataFrame
+            payload1 = {
+                "lang": "py",
+                "code": """import pandas as pd
+df = pd.DataFrame({'name': ['Alice', 'Bob', 'Charlie'], 'age': [25, 30, 35]})
+print(f'created df with {len(df)} rows')"""
+            }
+
+            async with session.post(
+                f"{API_URL}/exec", json=payload1, headers=headers, ssl=ssl_context
+            ) as resp:
+                assert resp.status == 200
+                result1 = await resp.json()
+                assert "3 rows" in result1.get("stdout", "")
+                session_id = result1.get("session_id")
+
+            # Execution 2: Use the DataFrame (passing session_id)
+            payload2 = {
+                "lang": "py",
+                "code": "print('names:', df['name'].tolist())",
+                "session_id": session_id
+            }
+
+            async with session.post(
+                f"{API_URL}/exec", json=payload2, headers=headers, ssl=ssl_context
+            ) as resp:
+                assert resp.status == 200
+                result2 = await resp.json()
+
+                stdout = result2.get("stdout", "")
+                assert "Alice" in stdout and "Bob" in stdout, f"DataFrame not persisted. stdout: {stdout}"
+
+    @pytest.mark.asyncio
+    async def test_function_persists(self, ssl_context, headers):
+        """Test that user-defined functions persist across executions."""
+        connector = aiohttp.TCPConnector(ssl=ssl_context)
+        async with aiohttp.ClientSession(connector=connector) as session:
+            # Execution 1: Define a function
+            payload1 = {
+                "lang": "py",
+                "code": "def greet(name):\n    return f'Hello, {name}!'\nprint('function defined')"
+            }
+
+            async with session.post(
+                f"{API_URL}/exec", json=payload1, headers=headers, ssl=ssl_context
+            ) as resp:
+                assert resp.status == 200
+                result1 = await resp.json()
+                assert "function defined" in result1.get("stdout", "")
+                session_id = result1.get("session_id")
+
+            # Execution 2: Call the function (passing session_id)
+            payload2 = {
+                "lang": "py",
+                "code": "print(greet('World'))",
+                "session_id": session_id
+            }
+
+            async with session.post(
+                f"{API_URL}/exec", json=payload2, headers=headers, ssl=ssl_context
+            ) as resp:
+                assert resp.status == 200
+                result2 = await resp.json()
+
+                stdout = result2.get("stdout", "")
+                assert "Hello, World!" in stdout, f"Function not persisted. stdout: {stdout}"
+
+    @pytest.mark.asyncio
+    async def test_exec_response_has_state_fields(self, ssl_context, headers):
+        """Test that Python execution response includes state fields."""
+        connector = aiohttp.TCPConnector(ssl=ssl_context)
+        async with aiohttp.ClientSession(connector=connector) as session:
+            payload = {
+                "lang": "py",
+                "code": "x = 'hello world'\nprint(x)"
+            }
+
+            async with session.post(
+                f"{API_URL}/exec", json=payload, headers=headers, ssl=ssl_context
+            ) as resp:
+                assert resp.status == 200
+                result = await resp.json()
+
+                # Check state fields are present
+                assert "has_state" in result, "Response missing has_state field"
+                assert result["has_state"] is True, "Expected has_state=True for Python"
+                assert "state_size" in result, "Response missing state_size field"
+                assert result["state_size"] is not None, "Expected state_size to be set"
+                assert result["state_size"] > 0, "Expected positive state_size"
+
+    @pytest.mark.asyncio
+    async def test_session_id_continues_state(self, ssl_context, headers):
+        """Test that passing session_id explicitly continues state."""
+        connector = aiohttp.TCPConnector(ssl=ssl_context)
+        async with aiohttp.ClientSession(connector=connector) as session:
+            # Execution 1: Define variable, get session_id
+            payload1 = {
+                "lang": "py",
+                "code": "counter = 100\nprint('counter =', counter)"
+            }
+
+            async with session.post(
+                f"{API_URL}/exec", json=payload1, headers=headers, ssl=ssl_context
+            ) as resp:
+                assert resp.status == 200
+                result1 = await resp.json()
+                session_id = result1.get("session_id")
+                assert session_id, "No session_id in response"
+                assert "counter = 100" in result1.get("stdout", "")
+
+            # Execution 2: Use explicit session_id to continue state
+            payload2 = {
+                "lang": "py",
+                "code": "counter += 1\nprint('counter =', counter)",
+                "session_id": session_id
+            }
+
+            async with session.post(
+                f"{API_URL}/exec", json=payload2, headers=headers, ssl=ssl_context
+            ) as resp:
+                assert resp.status == 200
+                result2 = await resp.json()
+
+                stdout = result2.get("stdout", "")
+                assert "counter = 101" in stdout, f"State not continued with session_id. stdout: {stdout}"
+                # Should return same session_id
+                assert result2.get("session_id") == session_id, "Session ID should be the same"
+
+    @pytest.mark.asyncio
+    async def test_state_info_endpoint(self, ssl_context, headers):
+        """Test that /state/{session_id}/info returns correct metadata after execution."""
+        connector = aiohttp.TCPConnector(ssl=ssl_context)
+        async with aiohttp.ClientSession(connector=connector) as session:
+            # Create state via execution
+            payload = {
+                "lang": "py",
+                "code": "data = {'key': 'value'}\nprint('created')"
+            }
+
+            async with session.post(
+                f"{API_URL}/exec", json=payload, headers=headers, ssl=ssl_context
+            ) as resp:
+                assert resp.status == 200
+                result = await resp.json()
+                session_id = result.get("session_id")
+                assert result.get("has_state") is True, "Expected state to be captured"
+
+            # Check state info endpoint
+            async with session.get(
+                f"{API_URL}/state/{session_id}/info", headers=headers, ssl=ssl_context
+            ) as resp:
+                assert resp.status == 200
+                info = await resp.json()
+
+                assert info.get("exists") is True, f"State should exist. Got: {info}"
+                assert info.get("session_id") == session_id
+                assert info.get("size_bytes") is not None
+                assert info.get("size_bytes") > 0
+
+
+class TestContainerIsolation:
+    """Test that containers are properly isolated between sessions."""
+
+    @pytest.mark.asyncio
+    async def test_files_not_visible_across_sessions(self, ssl_context, headers):
+        """Test that files created in one session are NOT visible in another session.
+
+        This tests for a container isolation bug where containers are reused
+        without proper cleanup, causing files from one session to be visible
+        to other sessions.
+        """
+        connector = aiohttp.TCPConnector(ssl=ssl_context)
+        async with aiohttp.ClientSession(connector=connector) as session:
+            import time
+            unique_filename = f"isolation_test_{int(time.time())}.txt"
+
+            # Session 1: Create a unique file
+            payload1 = {
+                "lang": "py",
+                "code": f"with open('/mnt/data/{unique_filename}', 'w') as f:\n    f.write('secret data')\nprint('created')"
+            }
+
+            async with session.post(
+                f"{API_URL}/exec", json=payload1, headers=headers, ssl=ssl_context
+            ) as resp:
+                assert resp.status == 200
+                result1 = await resp.json()
+                assert "created" in result1.get("stdout", "")
+                session1_id = result1.get("session_id")
+
+            # Session 2: Check if the file is visible (it should NOT be)
+            # Do NOT pass session_id to get a fresh session
+            payload2 = {
+                "lang": "py",
+                "code": f"""import os
+files = os.listdir('/mnt/data') if os.path.exists('/mnt/data') else []
+target_exists = '{unique_filename}' in files
+print('files:', files)
+print('target_exists:', target_exists)
+"""
+            }
+
+            async with session.post(
+                f"{API_URL}/exec", json=payload2, headers=headers, ssl=ssl_context
+            ) as resp:
+                assert resp.status == 200
+                result2 = await resp.json()
+                session2_id = result2.get("session_id")
+
+                # Sessions should be different
+                assert session2_id != session1_id, \
+                    "Expected different session IDs for independent requests"
+
+                stdout = result2.get("stdout", "")
+                # File from session 1 should NOT be visible in session 2
+                assert "target_exists: False" in stdout, \
+                    f"Container isolation violated! File from session 1 visible in session 2. stdout: {stdout}"
+
+    @pytest.mark.asyncio
+    async def test_uploaded_files_mounted_in_container(self, ssl_context, headers):
+        """Test that uploaded files are properly mounted in /mnt/data for execution."""
+        connector = aiohttp.TCPConnector(ssl=ssl_context)
+        async with aiohttp.ClientSession(connector=connector) as session:
+            import time
+            entity_id = f"test-mount-{int(time.time())}"
+
+            # Upload a file
+            test_content = "name,value\ntest,123\n"
+            form_data = aiohttp.FormData()
+            form_data.add_field('files', test_content.encode(),
+                                filename='test_upload.csv',
+                                content_type='text/csv')
+
+            upload_headers = {"X-API-Key": API_KEY}
+
+            async with session.post(
+                f"{API_URL}/upload",
+                data=form_data,
+                headers=upload_headers,
+                ssl=ssl_context
+            ) as resp:
+                assert resp.status == 200, f"Upload failed: {await resp.text()}"
+                upload_result = await resp.json()
+                upload_session_id = upload_result.get("session_id")
+                uploaded_files = upload_result.get("files", [])
+                assert len(uploaded_files) >= 1, "No files in upload response"
+                file_id = uploaded_files[0].get("id") or uploaded_files[0].get("fileId")
+
+            # Execute code that reads the uploaded file
+            exec_payload = {
+                "lang": "py",
+                "code": """import os
+print('files in /mnt/data:', os.listdir('/mnt/data') if os.path.exists('/mnt/data') else 'N/A')
+try:
+    with open('/mnt/data/test_upload.csv', 'r') as f:
+        content = f.read()
+    print('file content:', content)
+except FileNotFoundError as e:
+    print('ERROR: File not found:', e)
+""",
+                "files": [{
+                    "id": file_id,
+                    "session_id": upload_session_id,
+                    "name": "test_upload.csv"
+                }]
+            }
+
+            async with session.post(
+                f"{API_URL}/exec",
+                json=exec_payload,
+                headers=headers,
+                ssl=ssl_context
+            ) as resp:
+                assert resp.status == 200, f"Exec failed: {await resp.text()}"
+                result = await resp.json()
+
+                stdout = result.get("stdout", "")
+                stderr = result.get("stderr", "")
+
+                # The uploaded file should be in /mnt/data
+                assert "ERROR: File not found" not in stdout, \
+                    f"Uploaded file not mounted in container. stdout: {stdout}, stderr: {stderr}"
+                assert "name,value" in stdout, \
+                    f"File content not readable. stdout: {stdout}"

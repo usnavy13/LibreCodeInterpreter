@@ -40,6 +40,9 @@ DEPLOYMENT_NAME=""
 API_URL=""
 ACR_NAME=""
 ACR_SERVER=""
+MANAGED_IDENTITY_NAME=""
+MANAGED_IDENTITY_ID=""
+MANAGED_IDENTITY_PRINCIPAL_ID=""
 
 # Required tool versions
 readonly MIN_AZ_CLI_VERSION="2.50.0"
@@ -141,6 +144,98 @@ spinner() {
         printf "\b\b\b\b\b\b"
     done
     printf "      \b\b\b\b\b\b"
+}
+
+# Stream command output showing only last N lines (refreshing in place)
+# Usage: some_command 2>&1 | stream_tail_output 5 "Building image"
+stream_tail_output() {
+    local num_lines=${1:-5}
+    local title=${2:-""}
+    local line_buffer=()
+    local total_lines=0
+
+    # Hide cursor
+    tput civis 2>/dev/null || true
+
+    # Save cursor position and print title
+    if [[ -n "${title}" ]]; then
+        echo -e "${BLUE}${title}${NC}"
+    fi
+
+    # Print placeholder lines
+    for ((i=0; i<num_lines; i++)); do
+        echo ""
+    done
+
+    while IFS= read -r line; do
+        # Log to file
+        echo "${line}" >> "${LOG_FILE}"
+
+        # Update buffer (keep last N lines)
+        line_buffer+=("${line}")
+        if [[ ${#line_buffer[@]} -gt ${num_lines} ]]; then
+            line_buffer=("${line_buffer[@]:1}")
+        fi
+        ((total_lines++))
+
+        # Move cursor up and clear lines
+        tput cuu ${num_lines} 2>/dev/null || printf "\033[${num_lines}A"
+
+        # Print the buffer
+        for ((i=0; i<num_lines; i++)); do
+            tput el 2>/dev/null || printf "\033[K"  # Clear line
+            if [[ $i -lt ${#line_buffer[@]} ]]; then
+                # Truncate line to terminal width
+                local term_width
+                term_width=$(tput cols 2>/dev/null || echo 80)
+                printf "  ${CYAN}%-$((term_width-4))s${NC}\n" "${line_buffer[$i]:0:$((term_width-4))}"
+            else
+                echo ""
+            fi
+        done
+    done
+
+    # Show cursor
+    tput cnorm 2>/dev/null || true
+
+    echo -e "  ${GREEN}Processed ${total_lines} lines${NC}"
+}
+
+# Show a progress bar with status
+# Usage: show_progress current max "message"
+show_progress() {
+    local current=$1
+    local max=$2
+    local message=${3:-""}
+    local width=40
+
+    # Calculate percentage
+    local percent=$((current * 100 / max))
+    local filled=$((current * width / max))
+    local empty=$((width - filled))
+
+    # Build progress bar
+    local bar=""
+    for ((i=0; i<filled; i++)); do bar+="█"; done
+    for ((i=0; i<empty; i++)); do bar+="░"; done
+
+    # Calculate elapsed time
+    local elapsed=""
+    if [[ -n "${PROGRESS_START_TIME:-}" ]]; then
+        local now=$(date +%s)
+        local secs=$((now - PROGRESS_START_TIME))
+        local mins=$((secs / 60))
+        secs=$((secs % 60))
+        elapsed=$(printf " (%dm %02ds)" $mins $secs)
+    fi
+
+    # Print progress (overwrite current line)
+    printf "\r  ${CYAN}[${bar}]${NC} ${percent}%%${elapsed} ${message}"
+}
+
+# Clear progress line
+clear_progress() {
+    printf "\r\033[K"
 }
 
 # Confirm prompt
@@ -504,6 +599,91 @@ phase_create_acr() {
     log_success "ACR created: ${ACR_NAME}"
     log_info "ACR Server: ${ACR_SERVER}"
 
+    # Create User-Assigned Managed Identity for Container Apps
+    # This allows us to assign AcrPull role BEFORE Container Apps are created
+    MANAGED_IDENTITY_NAME="codeinterp-${unique_suffix}-identity"
+
+    log_info "Creating User-Assigned Managed Identity: ${MANAGED_IDENTITY_NAME}..."
+    if az identity show --name "${MANAGED_IDENTITY_NAME}" --resource-group "${RESOURCE_GROUP}" &>/dev/null; then
+        log_info "Managed Identity ${MANAGED_IDENTITY_NAME} already exists"
+    else
+        if ! az identity create \
+            --name "${MANAGED_IDENTITY_NAME}" \
+            --resource-group "${RESOURCE_GROUP}" \
+            --location "${LOCATION}" \
+            --output none 2>> "${LOG_FILE}"; then
+            log_error "Failed to create Managed Identity"
+            return 1
+        fi
+    fi
+    log_success "Managed Identity created"
+
+    # Wait for identity to propagate to Azure AD Graph (can take 10-30 seconds)
+    log_info "Waiting for identity to propagate to Azure AD..."
+    sleep 15
+
+    # Get the identity's principal ID and resource ID
+    MANAGED_IDENTITY_PRINCIPAL_ID=$(az identity show \
+        --name "${MANAGED_IDENTITY_NAME}" \
+        --resource-group "${RESOURCE_GROUP}" \
+        --query principalId -o tsv)
+    MANAGED_IDENTITY_ID=$(az identity show \
+        --name "${MANAGED_IDENTITY_NAME}" \
+        --resource-group "${RESOURCE_GROUP}" \
+        --query id -o tsv)
+
+    log_info "Identity Principal ID: ${MANAGED_IDENTITY_PRINCIPAL_ID}"
+
+    # Assign AcrPull role to the managed identity (with retry for propagation delay)
+    log_info "Assigning AcrPull role to Managed Identity..."
+    local acr_id
+    acr_id=$(az acr show --name "${ACR_NAME}" --resource-group "${RESOURCE_GROUP}" --query id -o tsv)
+    local acr_pull_role="7f951dda-4ed3-4680-a7ca-43fe172d538d"
+
+    # Check if role already assigned
+    local existing_role
+    existing_role=$(az role assignment list \
+        --assignee "${MANAGED_IDENTITY_PRINCIPAL_ID}" \
+        --role "${acr_pull_role}" \
+        --scope "${acr_id}" \
+        --query "[].id" -o tsv 2>/dev/null || echo "")
+
+    if [[ -n "${existing_role}" ]]; then
+        log_info "AcrPull role already assigned to Managed Identity"
+    else
+        # Retry role assignment (identity may still be propagating)
+        local max_retries=5
+        local retry_delay=10
+        local role_assigned=false
+
+        for ((i=1; i<=max_retries; i++)); do
+            if az role assignment create \
+                --assignee "${MANAGED_IDENTITY_PRINCIPAL_ID}" \
+                --role "${acr_pull_role}" \
+                --scope "${acr_id}" \
+                --output none 2>> "${LOG_FILE}"; then
+                role_assigned=true
+                break
+            fi
+            if [[ $i -lt $max_retries ]]; then
+                log_warning "Role assignment attempt $i failed, retrying in ${retry_delay}s..."
+                sleep ${retry_delay}
+                retry_delay=$((retry_delay * 2))  # Exponential backoff
+            fi
+        done
+
+        if [[ "${role_assigned}" != "true" ]]; then
+            log_error "Failed to assign AcrPull role after ${max_retries} attempts"
+            return 1
+        fi
+        log_success "AcrPull role assigned to Managed Identity"
+    fi
+
+    # Wait for role propagation (Azure RBAC can take up to 5 minutes)
+    log_info "Waiting 30 seconds for role assignment to propagate..."
+    sleep 30
+    log_success "Role assignment propagation wait complete"
+
     return 0
 }
 
@@ -532,12 +712,13 @@ phase_build_images_acr() {
 
     # Build API image
     log_info "Building API image (estimated: 5-10 minutes)..."
-    if ! az acr build \
+    az acr build \
         --registry "${ACR_NAME}" \
         --image "code-interpreter-api:latest" \
         --file "${PROJECT_ROOT}/Dockerfile" \
         --timeout "${API_BUILD_TIMEOUT}" \
-        "${PROJECT_ROOT}" 2>&1 | tee -a "${LOG_FILE}"; then
+        "${PROJECT_ROOT}" 2>&1 | stream_tail_output 5 ""
+    if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
         log_error "Failed to build API image"
         return 1
     fi
@@ -547,12 +728,13 @@ phase_build_images_acr() {
     # Build Executor image (large, takes longer)
     log_info "Building Executor image with 12 language runtimes..."
     log_info "This is a large image and may take 15-30 minutes"
-    if ! az acr build \
+    az acr build \
         --registry "${ACR_NAME}" \
         --image "code-interpreter-executor:latest" \
         --file "${PROJECT_ROOT}/docker/multi-lang.Dockerfile" \
         --timeout "${EXECUTOR_BUILD_TIMEOUT}" \
-        "${PROJECT_ROOT}" 2>&1 | tee -a "${LOG_FILE}"; then
+        "${PROJECT_ROOT}" 2>&1 | stream_tail_output 5 ""
+    if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
         log_error "Failed to build Executor image"
         return 1
     fi
@@ -585,7 +767,7 @@ phase_deploy_infrastructure() {
     log_info "Images will be pulled from ACR: ${ACR_SERVER}"
 
     # Start deployment with --no-wait to avoid timeout issues
-    # Container Apps may get stuck trying to pull images before we assign AcrPull roles
+    # The managed identity already has AcrPull role, so image pulls will work immediately
     if ! az deployment group create \
         --name "${DEPLOYMENT_NAME}" \
         --resource-group "${RESOURCE_GROUP}" \
@@ -595,21 +777,18 @@ phase_deploy_infrastructure() {
         --parameters masterApiKey="${MASTER_API_KEY}" \
         --parameters usePlaceholderImages=false \
         --parameters existingAcrName="${ACR_NAME}" \
+        --parameters managedIdentityId="${MANAGED_IDENTITY_ID}" \
         --no-wait \
         --output none 2>> "${LOG_FILE}"; then
         log_error "Failed to start Bicep deployment"
         return 1
     fi
 
-    log_info "Deployment started, waiting for Container Apps to be created..."
-
-    # Wait for Container Apps to exist (so we can assign roles)
-    wait_for_container_apps || return 1
-
-    # Assign AcrPull roles immediately (Bicep conditional role assignments don't work reliably)
-    assign_acr_pull_roles || return 1
+    log_info "Deployment started..."
+    log_info "Container Apps will use pre-configured managed identity with AcrPull role"
 
     # Wait for deployment to complete
+    # No need to wait for Container Apps separately - they already have the identity with AcrPull role
     wait_for_deployment_complete || return 1
 
     # Get deployment outputs
@@ -643,10 +822,11 @@ phase_deploy_infrastructure() {
 
 # Wait for Container Apps to be created with managed identities
 wait_for_container_apps() {
-    local max_attempts=60  # 5 minutes max
+    local max_attempts=720  # 60 minutes max (Redis can take 10-20 min to provision)
     local attempt=1
 
     log_info "Waiting for Container Apps to be created..."
+    PROGRESS_START_TIME=$(date +%s)
 
     while [[ ${attempt} -le ${max_attempts} ]]; do
         # Check if container apps exist and have managed identities
@@ -662,25 +842,30 @@ wait_for_container_apps() {
         fi
 
         if [[ ${app_count} -ge 2 ]]; then
+            clear_progress
             log_success "Found ${app_count} Container Apps with managed identities"
+            unset PROGRESS_START_TIME
             return 0
         fi
 
-        printf "  Waiting for Container Apps... (attempt %d/%d, found %d apps)\n" "${attempt}" "${max_attempts}" "${app_count}"
+        show_progress ${attempt} ${max_attempts} "Found ${app_count}/2 apps"
         sleep 5
         ((attempt++))
     done
 
+    clear_progress
+    unset PROGRESS_START_TIME
     log_error "Timed out waiting for Container Apps to be created"
     return 1
 }
 
 # Wait for Bicep deployment to complete
 wait_for_deployment_complete() {
-    local max_attempts=120  # 10 minutes max
+    local max_attempts=720  # 60 minutes max
     local attempt=1
 
     log_info "Waiting for deployment to complete..."
+    PROGRESS_START_TIME=$(date +%s)
 
     while [[ ${attempt} -le ${max_attempts} ]]; do
         local state
@@ -692,28 +877,31 @@ wait_for_deployment_complete() {
 
         case "${state}" in
             Succeeded)
+                clear_progress
+                unset PROGRESS_START_TIME
                 log_success "Deployment completed successfully"
                 return 0
                 ;;
             Failed)
+                clear_progress
+                unset PROGRESS_START_TIME
                 log_error "Deployment failed"
                 # Get error details
                 az deployment group show \
                     --name "${DEPLOYMENT_NAME}" \
                     --resource-group "${RESOURCE_GROUP}" \
                     --query properties.error \
-                    --output json 2>/dev/null >> "${LOG_FILE}" || true
+                    --output json 2>/dev/null | tee -a "${LOG_FILE}" || true
                 return 1
                 ;;
             Canceled)
+                clear_progress
+                unset PROGRESS_START_TIME
                 log_error "Deployment was canceled"
                 return 1
                 ;;
-            Running|Accepted)
-                printf "  Deployment status: %s (attempt %d/%d)\n" "${state}" "${attempt}" "${max_attempts}"
-                ;;
             *)
-                printf "  Deployment status: %s (attempt %d/%d)\n" "${state}" "${attempt}" "${max_attempts}"
+                show_progress ${attempt} ${max_attempts} "${state}"
                 ;;
         esac
 
@@ -721,6 +909,8 @@ wait_for_deployment_complete() {
         ((attempt++))
     done
 
+    clear_progress
+    unset PROGRESS_START_TIME
     log_warning "Deployment still running after ${max_attempts} attempts, continuing anyway..."
     return 0
 }
@@ -875,25 +1065,26 @@ phase_wait_for_ready() {
 
     log_info "Waiting for API to become healthy..."
     log_info "URL: ${API_URL}/health"
-    log_info "Max attempts: ${HEALTH_CHECK_MAX_ATTEMPTS}, interval: ${HEALTH_CHECK_INTERVAL}s"
+    PROGRESS_START_TIME=$(date +%s)
 
     while [[ ${attempt} -le ${HEALTH_CHECK_MAX_ATTEMPTS} ]]; do
-        printf "  Attempt %d/%d... " "${attempt}" "${HEALTH_CHECK_MAX_ATTEMPTS}"
-
         local http_code
         http_code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${API_URL}/health" 2>/dev/null || echo "000")
 
         if [[ "${http_code}" == "200" ]]; then
-            echo -e "${GREEN}OK${NC}"
+            clear_progress
+            unset PROGRESS_START_TIME
             log_success "API is healthy!"
             return 0
         fi
 
-        echo -e "${YELLOW}HTTP ${http_code}${NC}"
+        show_progress ${attempt} ${HEALTH_CHECK_MAX_ATTEMPTS} "HTTP ${http_code}"
         sleep "${HEALTH_CHECK_INTERVAL}"
         ((attempt++))
     done
 
+    clear_progress
+    unset PROGRESS_START_TIME
     log_error "API did not become healthy within ${HEALTH_CHECK_MAX_ATTEMPTS} attempts"
     log_error "Check container logs:"
     log_error "  az containerapp logs show -n <app-name> -g ${RESOURCE_GROUP} --follow"

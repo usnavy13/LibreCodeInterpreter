@@ -29,6 +29,12 @@ param usePlaceholderImages bool = true
 @description('Existing ACR name (if ACR was created separately before this deployment)')
 param existingAcrName string = ''
 
+@description('User-Assigned Managed Identity resource ID (pre-created with AcrPull role)')
+param managedIdentityId string = ''
+
+// Use the provided managed identity if available
+var useManagedIdentity = !empty(managedIdentityId)
+
 // Placeholder image that works on Container Apps (used for initial deployment)
 var placeholderImage = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
 
@@ -194,7 +200,7 @@ resource apiContainerApp 'Microsoft.App/containerApps@2023-05-01' = {
       registries: usePlaceholderImages ? [] : [
         {
           server: acrLoginServer
-          identity: 'system'
+          identity: useManagedIdentity ? managedIdentityId : 'system'
         }
       ]
     }
@@ -263,7 +269,12 @@ resource apiContainerApp 'Microsoft.App/containerApps@2023-05-01' = {
       }
     }
   }
-  identity: {
+  identity: useManagedIdentity ? {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${managedIdentityId}': {}
+    }
+  } : {
     type: 'SystemAssigned'
   }
 }
@@ -284,7 +295,7 @@ resource executorContainerApp 'Microsoft.App/containerApps@2023-05-01' = {
       registries: usePlaceholderImages ? [] : [
         {
           server: acrLoginServer
-          identity: 'system'
+          identity: useManagedIdentity ? managedIdentityId : 'system'
         }
       ]
     }
@@ -333,54 +344,18 @@ resource executorContainerApp 'Microsoft.App/containerApps@2023-05-01' = {
       }
     }
   }
-  identity: {
+  identity: useManagedIdentity ? {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${managedIdentityId}': {}
+    }
+  } : {
     type: 'SystemAssigned'
   }
 }
 
-// Role assignment for API container app to pull from ACR (only if using new ACR)
-resource apiAcrPullRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!useExistingAcr) {
-  name: guid(newAcr.id, apiContainerApp.id, 'acrpull')
-  scope: newAcr
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
-    principalId: apiContainerApp.identity.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
-// Role assignment for API container app to pull from existing ACR
-resource apiAcrPullRoleExisting 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (useExistingAcr) {
-  name: guid(existingAcr.id, apiContainerApp.id, 'acrpull')
-  scope: existingAcr
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
-    principalId: apiContainerApp.identity.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
-// Role assignment for Executor container app to pull from ACR (only if using new ACR)
-resource executorAcrPullRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!useExistingAcr) {
-  name: guid(newAcr.id, executorContainerApp.id, 'acrpull')
-  scope: newAcr
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
-    principalId: executorContainerApp.identity.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
-// Role assignment for Executor container app to pull from existing ACR
-resource executorAcrPullRoleExisting 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (useExistingAcr) {
-  name: guid(existingAcr.id, executorContainerApp.id, 'acrpull')
-  scope: existingAcr
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
-    principalId: executorContainerApp.identity.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
+// Note: When using User-Assigned Managed Identity, the AcrPull role is assigned in setup.sh Phase 1
+// before the Container Apps are created, eliminating the chicken-and-egg problem
 
 // Outputs
 output apiUrl string = 'https://${apiContainerApp.properties.configuration.ingress.fqdn}'
