@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.4
 # D execution environment with BuildKit optimizations
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 
 ARG BUILD_DATE
 ARG VERSION
