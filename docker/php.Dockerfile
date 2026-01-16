@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.4
 # PHP execution environment with BuildKit optimizations
-FROM php:8.2-cli
+FROM php:8.5-cli
 
 # Install system dependencies and PHP extensions
 RUN apt-get update && apt-get install -y --no-install-recommends \
