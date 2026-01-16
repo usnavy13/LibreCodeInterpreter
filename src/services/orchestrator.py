@@ -484,6 +484,16 @@ class ExecutionOrchestrator:
         """
         generated = []
 
+        # Build set of mounted filenames to avoid re-storing uploaded files
+        # Use sanitized names since executor writes files with sanitized names
+        from .execution.output import OutputProcessor
+        mounted_filenames = set()
+        if ctx.mounted_files:
+            for mf in ctx.mounted_files:
+                # Add both original and sanitized names for matching
+                mounted_filenames.add(mf["filename"])
+                mounted_filenames.add(OutputProcessor.sanitize_filename(mf["filename"]))
+
         for output in ctx.execution.outputs:
             if output.type.value != "file":
                 continue
@@ -492,6 +502,14 @@ class ExecutionOrchestrator:
             filename = file_path.split("/")[-1] if "/" in file_path else file_path
 
             if not filename or filename.startswith("."):
+                continue
+
+            # Skip files that were uploaded (already mounted)
+            if filename in mounted_filenames:
+                logger.debug(
+                    "Skipping uploaded file from generated files",
+                    filename=filename,
+                )
                 continue
 
             try:

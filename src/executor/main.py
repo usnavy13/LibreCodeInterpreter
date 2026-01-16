@@ -29,7 +29,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Configuration from environment
-MAX_CONCURRENT_EXECUTIONS = int(os.getenv("MAX_CONCURRENT_EXECUTIONS", "4"))
+MAX_CONCURRENT_EXECUTIONS = int(os.getenv("MAX_CONCURRENT_EXECUTIONS", "1"))  # Serialized for isolation
 EXECUTOR_PORT = int(os.getenv("EXECUTOR_PORT", "8001"))
 WORKING_DIR_BASE = os.getenv("WORKING_DIR_BASE", "/mnt/data")
 
@@ -103,8 +103,9 @@ async def execute(request: ExecuteRequest) -> ExecuteResponse:
     execution_id = str(uuid.uuid4())[:8]
     logger.info(f"[{execution_id}] Executing {request.language} code ({len(request.code)} chars)")
 
-    # Create unique working directory for this execution
-    working_dir = os.path.join(WORKING_DIR_BASE, f"exec_{execution_id}")
+    # Use /mnt/data directly - with serialized execution (1 request per replica),
+    # we have exclusive access to this directory, no subdirectory needed
+    working_dir = WORKING_DIR_BASE
     os.makedirs(working_dir, exist_ok=True)
 
     try:
@@ -136,23 +137,19 @@ async def execute(request: ExecuteRequest) -> ExecuteResponse:
         raise HTTPException(status_code=500, detail=str(e))
 
     finally:
-        # Cleanup working directory
+        # Full cleanup of /mnt/data/* - safe because we have exclusive access
+        # with serialized execution (1 request per replica)
         try:
             import shutil
-            shutil.rmtree(working_dir, ignore_errors=True)
-        except Exception:
-            pass
-
-        # Clean up files in parent /mnt/data created with absolute paths
-        # This ensures isolation between executions
-        try:
             for entry in os.scandir(WORKING_DIR_BASE):
-                if entry.is_file():
-                    try:
+                try:
+                    if entry.is_dir():
+                        shutil.rmtree(entry.path, ignore_errors=True)
+                    else:
                         os.unlink(entry.path)
-                        logger.debug(f"Cleaned up parent file: {entry.name}")
-                    except Exception:
-                        pass
+                    logger.debug(f"Cleaned up: {entry.name}")
+                except Exception:
+                    pass
         except Exception:
             pass
 

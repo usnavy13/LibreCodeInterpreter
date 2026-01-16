@@ -210,8 +210,8 @@ resource apiContainerApp 'Microsoft.App/containerApps@2023-05-01' = {
           name: 'api'
           image: usePlaceholderImages ? placeholderImage : '${acrLoginServer}/code-interpreter-api:${apiImageTag}'
           resources: {
-            cpu: json('1.0')
-            memory: '2Gi'
+            cpu: json('0.5')
+            memory: '1Gi'
           }
           env: [
             {
@@ -291,6 +291,9 @@ resource executorContainerApp 'Microsoft.App/containerApps@2023-05-01' = {
         external: false  // Internal only
         targetPort: 8001
         transport: 'auto'
+        // Note: Request serialization is enforced by:
+        // 1. MAX_CONCURRENT_EXECUTIONS=1 (application semaphore)
+        // 2. Scale rule concurrentRequests=1 (triggers scale-up when busy)
       }
       registries: usePlaceholderImages ? [] : [
         {
@@ -305,8 +308,8 @@ resource executorContainerApp 'Microsoft.App/containerApps@2023-05-01' = {
           name: 'executor'
           image: usePlaceholderImages ? placeholderImage : '${acrLoginServer}/code-interpreter-executor:${executorImageTag}'
           resources: {
-            cpu: json('2.0')
-            memory: '4Gi'
+            cpu: json('1.0')
+            memory: '2Gi'
           }
           env: [
             {
@@ -319,7 +322,7 @@ resource executorContainerApp 'Microsoft.App/containerApps@2023-05-01' = {
             }
             {
               name: 'MAX_CONCURRENT_EXECUTIONS'
-              value: '4'
+              value: '1'  // Serialized execution for isolation (matches maxConcurrentRequests)
             }
             {
               name: 'WORKING_DIR_BASE'
@@ -329,14 +332,19 @@ resource executorContainerApp 'Microsoft.App/containerApps@2023-05-01' = {
         }
       ]
       scale: {
-        minReplicas: executorMinReplicas  // Warm pool
-        maxReplicas: executorMaxReplicas
+        // With serialized execution (1 request per replica), scale based on demand
+        // 3 replicas minimum for baseline capacity; ACA auto-scales when all busy
+        minReplicas: 3
+        maxReplicas: executorMaxReplicas < 20 ? 20 : executorMaxReplicas
         rules: [
           {
             name: 'http-rule'
             http: {
               metadata: {
-                concurrentRequests: '10'  // Scale up when busy
+                // Scale when avg 3+ concurrent requests per replica
+                // With serialized execution: 1 executing + 2 queued before scaling
+                // 3 replicas × 3 = handles 9 concurrent before scale-up
+                concurrentRequests: '3'
               }
             }
           }

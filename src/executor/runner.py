@@ -8,9 +8,33 @@ using the appropriate execution method for each.
 import asyncio
 import logging
 import os
+import re
 import tempfile
 import time
 from typing import Any, Dict, List, Optional
+
+
+def sanitize_filename(filename: str) -> str:
+    """Sanitize filename to match LibreChat's sanitization logic.
+
+    Replaces all non-alphanumeric characters (except '.' and '-') with
+    underscores. This ensures filenames on disk match what LibreChat
+    reports in the system prompt.
+    """
+    if not filename:
+        return "_"
+
+    # Remove any directory components
+    name = os.path.basename(filename)
+
+    # Replace any non-alphanumeric characters except for '.' and '-'
+    name = re.sub(r"[^a-zA-Z0-9.-]", "_", name)
+
+    # Ensure the name doesn't start with a dot
+    if name.startswith(".") or name == "":
+        name = "_" + name
+
+    return name
 
 from .languages import get_language, get_supported_languages, is_supported_language
 from .sandbox import run_sandboxed, run_with_file, run_with_stdin
@@ -51,12 +75,11 @@ async def execute_code(
     # Ensure working directory exists
     os.makedirs(working_dir, exist_ok=True)
 
-    # Write any provided files to /mnt/data directly (not subdirectory)
-    # This ensures files are accessible at /mnt/data/filename.csv as users expect
+    # Write any provided files to working directory
+    # With serialized execution, working_dir IS /mnt/data, so files are at /mnt/data/filename.csv
     if request.files:
-        parent_dir = os.path.dirname(working_dir)  # /mnt/data
         for file_ref in request.files:
-            await write_file_to_working_dir(file_ref, parent_dir)
+            await write_file_to_working_dir(file_ref, working_dir)
 
     try:
         # Python has special handling for state persistence
@@ -83,22 +106,9 @@ async def execute_code(
                 working_dir=working_dir,
             )
 
-        # Detect generated files in execution subdirectory
+        # Detect generated files in working directory
+        # With serialized execution, working_dir IS /mnt/data - no parent dir scan needed
         generated_files = await detect_generated_files(working_dir)
-
-        # Also scan parent directory for files created with absolute paths (e.g., /mnt/data/chart.png)
-        parent_dir = os.path.dirname(working_dir)
-        if parent_dir and parent_dir != working_dir and os.path.isdir(parent_dir):
-            try:
-                parent_files = await detect_generated_files(parent_dir, include_content=True)
-                exec_dir_name = os.path.basename(working_dir)
-                for f in parent_files:
-                    # Only include files not in any execution subdirectory
-                    if f"exec_" not in f.get("path", ""):
-                        generated_files.append(f)
-                        logger.info(f"Found file in parent directory: {f.get('filename')}")
-            except Exception as e:
-                logger.warning(f"Failed to scan parent directory: {e}")
 
         execution_time_ms = (time.perf_counter() - start_time) * 1000
 
@@ -222,7 +232,8 @@ async def write_file_to_working_dir(
     Returns:
         Path to the written file
     """
-    filename = file_ref.filename
+    # Sanitize filename to match what LibreChat reports to the AI
+    filename = sanitize_filename(file_ref.filename)
     filepath = os.path.join(working_dir, filename)
 
     # Create parent directories if needed
