@@ -21,7 +21,7 @@ minio==7.2.20
 
 # Docker client for container management
 docker==7.1.0
-requests-unixsocket==0.3.0
+requests-unixsocket==0.4.1
 
 # Date/time parsing utilities
 python-dateutil==2.9.0.post0
