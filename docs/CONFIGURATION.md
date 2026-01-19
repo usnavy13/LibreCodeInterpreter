@@ -263,7 +263,7 @@ Inactive states are automatically archived to MinIO for long-term storage.
 | -------------------------------------- | ------- | -------------------------------------- |
 | `STATE_ARCHIVE_ENABLED`                | `true`  | Enable MinIO cold storage archival     |
 | `STATE_ARCHIVE_AFTER_SECONDS`          | `3600`  | Archive after this inactivity (1 hour) |
-| `STATE_ARCHIVE_TTL_DAYS`               | `7`     | Keep archives for this many days       |
+| `STATE_ARCHIVE_TTL_DAYS`               | `1`     | Keep archives for this many days (24h) |
 | `STATE_ARCHIVE_CHECK_INTERVAL_SECONDS` | `300`   | Archival check frequency (5 min)       |
 
 ### Security Configuration
