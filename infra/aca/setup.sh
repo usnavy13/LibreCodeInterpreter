@@ -4,8 +4,12 @@
 # Usage: ./setup.sh [OPTIONS]
 #
 # This script automates the complete deployment of Code Interpreter API to Azure Container Apps,
-# including infrastructure provisioning, cloud-based Docker image building via ACR Tasks,
-# and deployment verification.
+# using the UNIFIED single-container architecture (API + Executor combined).
+#
+# Key features:
+# - Single container with inline execution (no HTTP between containers)
+# - Serialized execution (1 request per replica) for isolation
+# - ACA-managed scaling based on concurrent requests
 #
 # See --help for all available options.
 
@@ -51,8 +55,7 @@ readonly MIN_AZ_CLI_VERSION="2.50.0"
 readonly ACA_EXTENSION="containerapp"
 
 # Build timeouts (seconds)
-readonly API_BUILD_TIMEOUT=1800      # 30 minutes for API image
-readonly EXECUTOR_BUILD_TIMEOUT=3600 # 60 minutes for executor image (large multi-lang)
+readonly UNIFIED_BUILD_TIMEOUT=3600  # 60 minutes for unified image (API + all 12 language runtimes)
 
 # Health check settings
 readonly HEALTH_CHECK_MAX_ATTEMPTS=30
@@ -687,9 +690,9 @@ phase_create_acr() {
     return 0
 }
 
-# Phase 2: Build Docker images using ACR Tasks (BEFORE deploying container apps)
+# Phase 2: Build Docker image using ACR Tasks (BEFORE deploying container apps)
 phase_build_images_acr() {
-    log_phase 2 "Build Docker Images (ACR Tasks)"
+    log_phase 2 "Build Unified Docker Image (ACR Tasks)"
 
     if [[ "${SKIP_BUILD}" == "true" ]]; then
         log_info "Skipping image build (--skip-build specified)"
@@ -697,7 +700,7 @@ phase_build_images_acr() {
     fi
 
     if [[ "${DRY_RUN}" == "true" ]]; then
-        log_info "[DRY RUN] Would build images using ACR Tasks"
+        log_info "[DRY RUN] Would build unified image using ACR Tasks"
         return 0
     fi
 
@@ -706,72 +709,59 @@ phase_build_images_acr() {
         return 1
     fi
 
-    log_info "Building images in Azure Container Registry: ${ACR_NAME}"
+    log_info "Building unified image in Azure Container Registry: ${ACR_NAME}"
     log_info "This uses ACR Tasks - no local Docker required"
     echo ""
 
-    # Build API image
-    log_info "Building API image (estimated: 5-10 minutes)..."
+    # Build unified image (API + all 12 language runtimes)
+    log_info "Building unified image with API + 12 language runtimes..."
+    log_info "This is a large image and may take 20-40 minutes"
     az acr build \
         --registry "${ACR_NAME}" \
-        --image "code-interpreter-api:latest" \
-        --file "${PROJECT_ROOT}/Dockerfile" \
-        --timeout "${API_BUILD_TIMEOUT}" \
+        --image "code-interpreter-unified:latest" \
+        --file "${PROJECT_ROOT}/Dockerfile.unified" \
+        --timeout "${UNIFIED_BUILD_TIMEOUT}" \
         "${PROJECT_ROOT}" 2>&1 | stream_tail_output 5 ""
     if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
-        log_error "Failed to build API image"
+        log_error "Failed to build unified image"
         return 1
     fi
-    log_success "API image built and pushed to ACR"
-    echo ""
-
-    # Build Executor image (large, takes longer)
-    log_info "Building Executor image with 12 language runtimes..."
-    log_info "This is a large image and may take 15-30 minutes"
-    az acr build \
-        --registry "${ACR_NAME}" \
-        --image "code-interpreter-executor:latest" \
-        --file "${PROJECT_ROOT}/docker/multi-lang.Dockerfile" \
-        --timeout "${EXECUTOR_BUILD_TIMEOUT}" \
-        "${PROJECT_ROOT}" 2>&1 | stream_tail_output 5 ""
-    if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
-        log_error "Failed to build Executor image"
-        return 1
-    fi
-    log_success "Executor image built and pushed to ACR"
+    log_success "Unified image built and pushed to ACR"
 
     return 0
 }
 
 # Phase 3: Deploy full Azure infrastructure via Bicep (with images already in ACR)
 phase_deploy_infrastructure() {
-    log_phase 3 "Deploy Azure Infrastructure"
+    log_phase 3 "Deploy Azure Infrastructure (Unified Architecture)"
 
     if [[ "${DRY_RUN}" == "true" ]]; then
         log_info "[DRY RUN] Would deploy Bicep template to ${RESOURCE_GROUP}"
         return 0
     fi
 
-    # Check parameter file exists
-    local params_file="${SCRIPT_DIR}/parameters/${ENVIRONMENT}.json"
+    # Check parameter file exists (use unified parameter files)
+    local params_file="${SCRIPT_DIR}/parameters/${ENVIRONMENT}-unified.json"
     if [[ ! -f "${params_file}" ]]; then
-        log_error "Parameter file not found: ${params_file}"
-        return 1
+        log_warning "Parameter file not found: ${params_file}"
+        log_info "Falling back to dev-unified.json"
+        params_file="${SCRIPT_DIR}/parameters/dev-unified.json"
     fi
 
     # Deploy Bicep template
-    DEPLOYMENT_NAME="code-interpreter-$(date +%Y%m%d-%H%M%S)"
+    DEPLOYMENT_NAME="code-interpreter-unified-$(date +%Y%m%d-%H%M%S)"
 
-    log_info "Deploying Bicep template..."
+    log_info "Deploying unified Bicep template..."
     log_info "Deployment name: ${DEPLOYMENT_NAME}"
-    log_info "Images will be pulled from ACR: ${ACR_SERVER}"
+    log_info "Architecture: Single container (API + Executor combined)"
+    log_info "Image will be pulled from ACR: ${ACR_SERVER}"
 
     # Start deployment with --no-wait to avoid timeout issues
     # The managed identity already has AcrPull role, so image pulls will work immediately
     if ! az deployment group create \
         --name "${DEPLOYMENT_NAME}" \
         --resource-group "${RESOURCE_GROUP}" \
-        --template-file "${SCRIPT_DIR}/main.bicep" \
+        --template-file "${SCRIPT_DIR}/main-unified.bicep" \
         --parameters "@${params_file}" \
         --parameters apiKeys="${API_KEY}" \
         --parameters masterApiKey="${MASTER_API_KEY}" \
@@ -785,10 +775,9 @@ phase_deploy_infrastructure() {
     fi
 
     log_info "Deployment started..."
-    log_info "Container Apps will use pre-configured managed identity with AcrPull role"
+    log_info "Unified Container App will use pre-configured managed identity with AcrPull role"
 
     # Wait for deployment to complete
-    # No need to wait for Container Apps separately - they already have the identity with AcrPull role
     wait_for_deployment_complete || return 1
 
     # Get deployment outputs
@@ -820,16 +809,16 @@ phase_deploy_infrastructure() {
     return 0
 }
 
-# Wait for Container Apps to be created with managed identities
+# Wait for Container App to be created with managed identity (unified architecture = 1 app)
 wait_for_container_apps() {
     local max_attempts=720  # 60 minutes max (Redis can take 10-20 min to provision)
     local attempt=1
 
-    log_info "Waiting for Container Apps to be created..."
+    log_info "Waiting for unified Container App to be created..."
     PROGRESS_START_TIME=$(date +%s)
 
     while [[ ${attempt} -le ${max_attempts} ]]; do
-        # Check if container apps exist and have managed identities
+        # Check if container app exists and has managed identity
         local apps_with_identity
         apps_with_identity=$(az containerapp list -g "${RESOURCE_GROUP}" \
             --query "[?identity.principalId!=null].name" -o tsv 2>/dev/null || echo "")
@@ -841,21 +830,22 @@ wait_for_container_apps() {
             app_count=$(echo "${apps_with_identity}" | wc -l | tr -d ' ')
         fi
 
-        if [[ ${app_count} -ge 2 ]]; then
+        # Unified architecture only has 1 container app
+        if [[ ${app_count} -ge 1 ]]; then
             clear_progress
-            log_success "Found ${app_count} Container Apps with managed identities"
+            log_success "Found unified Container App with managed identity"
             unset PROGRESS_START_TIME
             return 0
         fi
 
-        show_progress ${attempt} ${max_attempts} "Found ${app_count}/2 apps"
+        show_progress ${attempt} ${max_attempts} "Waiting for container app..."
         sleep 5
         ((attempt++))
     done
 
     clear_progress
     unset PROGRESS_START_TIME
-    log_error "Timed out waiting for Container Apps to be created"
+    log_error "Timed out waiting for Container App to be created"
     return 1
 }
 
@@ -1031,24 +1021,30 @@ restart_container_apps() {
     return 0
 }
 
-# Phase 4: Wait for containers to be ready
+# Phase 4: Wait for container to be ready
 phase_wait_for_ready() {
-    log_phase 4 "Wait for Containers to be Ready"
+    log_phase 4 "Wait for Unified Container to be Ready"
 
     if [[ "${DRY_RUN}" == "true" ]]; then
-        log_info "[DRY RUN] Would wait for containers to be ready"
+        log_info "[DRY RUN] Would wait for container to be ready"
         return 0
     fi
 
-    # Get API URL if not set
+    # Get API URL if not set (unified architecture - look for 'unified' in name)
     if [[ -z "${API_URL}" ]]; then
-        local api_app
-        api_app=$(az containerapp list -g "${RESOURCE_GROUP}" \
-            --query "[?contains(name, 'api')].name" -o tsv 2>/dev/null || echo "")
+        local unified_app
+        unified_app=$(az containerapp list -g "${RESOURCE_GROUP}" \
+            --query "[?contains(name, 'unified')].name" -o tsv 2>/dev/null || echo "")
 
-        if [[ -n "${api_app}" ]]; then
+        # Fallback: get first container app
+        if [[ -z "${unified_app}" ]]; then
+            unified_app=$(az containerapp list -g "${RESOURCE_GROUP}" \
+                --query "[0].name" -o tsv 2>/dev/null || echo "")
+        fi
+
+        if [[ -n "${unified_app}" ]]; then
             local fqdn
-            fqdn=$(az containerapp show -n "${api_app}" -g "${RESOURCE_GROUP}" \
+            fqdn=$(az containerapp show -n "${unified_app}" -g "${RESOURCE_GROUP}" \
                 --query properties.configuration.ingress.fqdn -o tsv 2>/dev/null || echo "")
             if [[ -n "${fqdn}" ]]; then
                 API_URL="https://${fqdn}"
@@ -1063,7 +1059,7 @@ phase_wait_for_ready() {
 
     local attempt=1
 
-    log_info "Waiting for API to become healthy..."
+    log_info "Waiting for unified container to become healthy..."
     log_info "URL: ${API_URL}/health"
     PROGRESS_START_TIME=$(date +%s)
 
@@ -1074,7 +1070,7 @@ phase_wait_for_ready() {
         if [[ "${http_code}" == "200" ]]; then
             clear_progress
             unset PROGRESS_START_TIME
-            log_success "API is healthy!"
+            log_success "Unified container is healthy!"
             return 0
         fi
 
@@ -1085,7 +1081,7 @@ phase_wait_for_ready() {
 
     clear_progress
     unset PROGRESS_START_TIME
-    log_error "API did not become healthy within ${HEALTH_CHECK_MAX_ATTEMPTS} attempts"
+    log_error "Container did not become healthy within ${HEALTH_CHECK_MAX_ATTEMPTS} attempts"
     log_error "Check container logs:"
     log_error "  az containerapp logs show -n <app-name> -g ${RESOURCE_GROUP} --follow"
     return 1
@@ -1220,10 +1216,11 @@ save_credentials() {
     local creds_file="${SCRIPT_DIR}/.credentials.${ENVIRONMENT}"
 
     cat > "${creds_file}" << EOF
-# Code Interpreter ACA Credentials - ${ENVIRONMENT}
+# Code Interpreter ACA Credentials - ${ENVIRONMENT} (Unified Architecture)
 # Generated: $(date -Iseconds)
 # Resource Group: ${RESOURCE_GROUP}
 # Deployment: ${DEPLOYMENT_NAME:-unknown}
+# Architecture: Single Container (API + Executor combined)
 
 export API_KEY="${API_KEY}"
 export MASTER_API_KEY="${MASTER_API_KEY}"
@@ -1247,6 +1244,7 @@ print_completion_summary() {
     echo -e "${GREEN}${BOLD}  Deployment Complete!${NC}"
     echo -e "${GREEN}${BOLD}======================================${NC}"
     echo ""
+    echo "Architecture:      Unified (Single Container)"
     echo "API URL:           ${API_URL}"
     echo "Resource Group:    ${RESOURCE_GROUP}"
     echo "Environment:       ${ENVIRONMENT}"
@@ -1254,6 +1252,11 @@ print_completion_summary() {
     echo ""
     echo "Credentials file:  ${SCRIPT_DIR}/.credentials.${ENVIRONMENT}"
     echo "Log file:          ${LOG_FILE}"
+    echo ""
+    echo -e "${BOLD}Architecture Details:${NC}"
+    echo "  - Single container with API + 12 language runtimes"
+    echo "  - Serialized execution (1 request per replica)"
+    echo "  - ACA-managed scaling based on concurrent requests"
     echo ""
     echo -e "${BOLD}Quick Start:${NC}"
     echo "  source ${SCRIPT_DIR}/.credentials.${ENVIRONMENT}"
@@ -1266,6 +1269,9 @@ print_completion_summary() {
     echo -e "${BOLD}View Logs:${NC}"
     echo "  az containerapp logs show -n \$(az containerapp list -g ${RESOURCE_GROUP} --query '[0].name' -o tsv) -g ${RESOURCE_GROUP} --follow"
     echo ""
+    echo -e "${BOLD}Check Replicas:${NC}"
+    echo "  az containerapp replica list -n \$(az containerapp list -g ${RESOURCE_GROUP} --query '[0].name' -o tsv) -g ${RESOURCE_GROUP} -o table"
+    echo ""
 }
 
 # =============================================================================
@@ -1275,7 +1281,7 @@ print_completion_summary() {
 # Show help
 show_help() {
     cat << EOF
-${BOLD}Code Interpreter Azure Container Apps Setup Script${NC}
+${BOLD}Code Interpreter Azure Container Apps Setup Script (Unified Architecture)${NC}
 Version: ${SCRIPT_VERSION}
 
 ${BOLD}USAGE:${NC}
@@ -1283,6 +1289,11 @@ ${BOLD}USAGE:${NC}
 
 ${BOLD}DESCRIPTION:${NC}
     Unified end-to-end deployment script for Code Interpreter API to Azure Container Apps.
+    Uses the UNIFIED single-container architecture:
+    - Single container with API + 12 language runtimes
+    - Serialized execution (1 request per replica) for isolation
+    - ACA-managed scaling based on concurrent requests
+
     Handles infrastructure provisioning, Docker image building (via ACR Tasks), and
     deployment verification. No local Docker installation required.
 
@@ -1292,8 +1303,8 @@ ${BOLD}OPTIONS:${NC}
     -g, --rg <name>         Resource group name [default: code-interpreter-<env>]
     -l, --location <region> Azure region [default: eastus]
 
-    --skip-build            Skip image build (use existing images in ACR)
-    --skip-deploy           Only build and push images, skip infrastructure deployment
+    --skip-build            Skip image build (use existing image in ACR)
+    --skip-deploy           Only build and push image, skip infrastructure deployment
     --uninstall             Remove all Azure resources for the environment
     --cleanup               Alias for --uninstall
 
@@ -1314,7 +1325,7 @@ ${BOLD}EXAMPLES:${NC}
     # Deploy to specific resource group and region
     ${SCRIPT_NAME} --rg my-codeinterp-dev --location westus2
 
-    # Update images only (skip infrastructure)
+    # Update image only (skip infrastructure)
     ${SCRIPT_NAME} --skip-deploy
 
     # Deploy infrastructure, skip image build (use existing)
@@ -1329,11 +1340,12 @@ ${BOLD}PREREQUISITES:${NC}
     - No local Docker required (builds happen in Azure)
 
 ${BOLD}FILES:${NC}
-    infra/aca/parameters/dev.json   - Development environment parameters
-    infra/aca/parameters/prod.json  - Production environment parameters
-    infra/aca/main.bicep            - Infrastructure as Code template
-    infra/aca/.credentials.<env>    - Generated credentials (gitignored)
-    infra/aca/setup-*.log           - Deployment log files
+    infra/aca/parameters/dev-unified.json   - Development environment parameters
+    infra/aca/parameters/prod-unified.json  - Production environment parameters
+    infra/aca/main-unified.bicep            - Infrastructure as Code template
+    infra/aca/Dockerfile.unified            - Unified Docker image (API + runtimes)
+    infra/aca/.credentials.<env>            - Generated credentials (gitignored)
+    infra/aca/setup-*.log                   - Deployment log files
 
 EOF
 }
@@ -1455,13 +1467,17 @@ main() {
         fi
         ACR_SERVER="${ACR_NAME}.azurecr.io"
 
-        # Get API URL
-        local api_app
-        api_app=$(az containerapp list -g "${RESOURCE_GROUP}" \
-            --query "[?contains(name, 'api')].name" -o tsv 2>/dev/null || echo "")
-        if [[ -n "${api_app}" ]]; then
+        # Get API URL (look for unified container app or fallback to first app)
+        local unified_app
+        unified_app=$(az containerapp list -g "${RESOURCE_GROUP}" \
+            --query "[?contains(name, 'unified')].name" -o tsv 2>/dev/null || echo "")
+        if [[ -z "${unified_app}" ]]; then
+            unified_app=$(az containerapp list -g "${RESOURCE_GROUP}" \
+                --query "[0].name" -o tsv 2>/dev/null || echo "")
+        fi
+        if [[ -n "${unified_app}" ]]; then
             local fqdn
-            fqdn=$(az containerapp show -n "${api_app}" -g "${RESOURCE_GROUP}" \
+            fqdn=$(az containerapp show -n "${unified_app}" -g "${RESOURCE_GROUP}" \
                 --query properties.configuration.ingress.fqdn -o tsv 2>/dev/null || echo "")
             if [[ -n "${fqdn}" ]]; then
                 API_URL="https://${fqdn}"
@@ -1471,7 +1487,7 @@ main() {
         log_info "Using existing ACR: ${ACR_NAME}"
         log_info "Using existing API URL: ${API_URL}"
 
-        # Only build images if not skipping
+        # Only build image if not skipping
         phase_build_images_acr || exit 1
     fi
 

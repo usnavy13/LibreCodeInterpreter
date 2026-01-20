@@ -586,7 +586,17 @@ class HealthCheckService:
 
     async def check_executor_service(self) -> HealthCheckResult:
         """Check executor service connectivity (Azure deployment mode only)."""
+        import os
         start_time = time.time()
+
+        # In unified mode, the executor is inline - always healthy
+        if os.environ.get("UNIFIED_MODE", "false").lower() == "true":
+            return HealthCheckResult(
+                service="executor",
+                status=HealthStatus.HEALTHY,
+                response_time_ms=0.1,
+                details={"mode": "inline", "type": "unified"},
+            )
 
         try:
             from ..config.azure import azure_settings

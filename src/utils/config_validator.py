@@ -14,6 +14,11 @@ def is_azure_deployment() -> bool:
     return os.environ.get("DEPLOYMENT_MODE", "docker").lower() == "azure"
 
 
+def is_unified_mode() -> bool:
+    """Check if running in unified single-container mode."""
+    return os.environ.get("UNIFIED_MODE", "false").lower() == "true"
+
+
 class ConfigurationError(Exception):
     """Raised when configuration validation fails."""
 
@@ -71,13 +76,17 @@ class ConfigValidator:
         if not azure_settings.has_azure_redis():
             self.warnings.append("Azure Redis not configured - using default Redis settings")
 
-        # Check Executor URL
-        if not azure_settings.has_executor_service():
+        # Check Executor URL - only required in non-unified Azure mode
+        # In unified mode, we use inline execution (no separate executor service)
+        if is_unified_mode():
+            logger.info("Unified mode - using inline executor (no external executor URL needed)")
+        elif not azure_settings.has_executor_service():
             self.errors.append("Executor URL not configured for Azure deployment")
 
         logger.info(
             f"Azure services validation complete: storage={azure_settings.has_azure_storage()}, "
-            f"redis={azure_settings.has_azure_redis()}, executor={azure_settings.has_executor_service()}"
+            f"redis={azure_settings.has_azure_redis()}, "
+            f"executor={'inline (unified)' if is_unified_mode() else azure_settings.has_executor_service()}"
         )
 
     def _validate_api_config(self):
