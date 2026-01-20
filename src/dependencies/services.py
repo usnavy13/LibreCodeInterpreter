@@ -72,7 +72,6 @@ def inject_container_pool_to_execution_service():
 
     Called after pool is initialized to wire it into the cached execution service.
     """
-    global _container_pool
     if _container_pool:
         execution_service = get_execution_service()
         execution_service.container_pool = _container_pool
