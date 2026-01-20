@@ -14,7 +14,6 @@ from ..config import settings
 from ..services.auth import get_auth_service
 from ..utils.request_helpers import extract_api_key, get_client_ip
 
-
 logger = structlog.get_logger(__name__)
 
 

@@ -13,7 +13,6 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from ..services.metrics import metrics_collector, APIMetrics
 from ..config import settings
 
-
 logger = structlog.get_logger(__name__)
 
 

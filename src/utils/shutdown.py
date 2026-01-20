@@ -7,7 +7,6 @@ import structlog
 from ..services.health import health_service
 from ..services.metrics import metrics_collector
 
-
 logger = structlog.get_logger(__name__)
 
 

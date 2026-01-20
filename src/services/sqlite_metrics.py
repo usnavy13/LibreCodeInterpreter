@@ -646,15 +646,13 @@ class SQLiteMetricsService:
         if not self._db:
             return []
 
-        cursor = await self._db.execute(
-            """
+        cursor = await self._db.execute("""
             SELECT DISTINCT api_key_hash, COUNT(*) as usage_count
             FROM executions
             GROUP BY api_key_hash
             ORDER BY usage_count DESC
             LIMIT 50
-            """
-        )
+            """)
 
         return [
             {"key_hash": row["api_key_hash"], "usage_count": row["usage_count"]}
