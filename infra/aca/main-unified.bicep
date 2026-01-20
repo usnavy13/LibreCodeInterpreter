@@ -266,9 +266,9 @@ resource unifiedContainerApp 'Microsoft.App/containerApps@2023-05-01' = {
             name: 'http-serialized'
             http: {
               metadata: {
-                // 1 concurrent request per replica for true isolation
-                // Requests queue and trigger scale-up when replicas are busy
-                concurrentRequests: '1'
+                // 5 concurrent requests per replica before scaling
+                // Balances isolation with reasonable scaling behavior
+                concurrentRequests: '5'
               }
             }
           }
