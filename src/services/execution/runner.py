@@ -398,13 +398,28 @@ class CodeExecutionRunner:
         image = self.container_manager.get_image_for_language(language)
         await self.container_manager.pull_image_if_needed(image)
 
+        # Enable REPL mode for Python if configured (matches pool behavior)
+        use_repl_mode = language == "py" and settings.repl_enabled
+
         container = self.container_manager.create_container(
             image=image,
             session_id=session_id,
             working_dir="/mnt/data",
             language=language,
+            repl_mode=use_repl_mode,
         )
         await self.container_manager.start_container(container)
+
+        # For REPL containers, wait for REPL to be ready before returning
+        if use_repl_mode:
+            repl_executor = REPLExecutor(self.container_manager.client)
+            ready = await repl_executor.wait_for_ready(container, timeout=10.0)
+            if not ready:
+                logger.warning(
+                    "REPL not ready in fresh container, may affect performance",
+                    session_id=session_id[:12],
+                    container_id=container.id[:12],
+                )
 
         self.session_containers[session_id] = container
         logger.info(

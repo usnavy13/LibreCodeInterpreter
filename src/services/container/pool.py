@@ -251,15 +251,21 @@ class ContainerPool:
     async def _create_fresh_container(
         self, session_id: str, language: str
     ) -> Container:
-        """Create a new container."""
+        """Create a new container when pool is exhausted."""
         image = self._container_manager.get_image_for_language(language)
 
         # Ensure image is available
         await self._container_manager.pull_image_if_needed(image)
 
+        # Enable REPL mode for Python if configured (same as pooled containers)
+        use_repl_mode = language == "py" and settings.repl_enabled
+
         # Create and start container
         container = self._container_manager.create_container(
-            image=image, session_id=session_id, language=language
+            image=image,
+            session_id=session_id,
+            language=language,
+            repl_mode=use_repl_mode,
         )
 
         started = await self._container_manager.start_container(container)
@@ -270,11 +276,22 @@ class ContainerPool:
                 pass
             raise RuntimeError(f"Failed to start container for {language}")
 
+        # For REPL containers, wait for REPL to be ready before returning
+        if use_repl_mode:
+            repl_ready = await self._wait_for_repl_ready(container)
+            if not repl_ready:
+                logger.warning(
+                    "REPL not ready in fresh container",
+                    container_id=container.id[:12],
+                    language=language,
+                )
+
         logger.info(
             "Created fresh container",
             session_id=session_id[:12] if session_id else "none",
             container_id=container.id[:12],
             language=language,
+            repl_mode=use_repl_mode,
         )
 
         return container
