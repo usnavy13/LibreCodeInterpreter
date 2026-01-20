@@ -203,7 +203,7 @@ class TestFileTypeRestrictions:
         response = client.post("/upload", files=files, headers=auth_headers)
 
         assert response.status_code == 415
-        assert "File type not allowed" in response.json()["detail"]
+        assert "File type not allowed" in response.json()["error"]
 
     def test_upload_blocked_dll_file(self, client, auth_headers):
         """Test that .dll files are blocked with 415 status."""
@@ -218,7 +218,7 @@ class TestFileTypeRestrictions:
         response = client.post("/upload", files=files, headers=auth_headers)
 
         assert response.status_code == 415
-        assert "File type not allowed" in response.json()["detail"]
+        assert "File type not allowed" in response.json()["error"]
 
     def test_upload_blocked_bin_file(self, client, auth_headers):
         """Test that .bin files are blocked with 415 status."""
@@ -233,7 +233,7 @@ class TestFileTypeRestrictions:
         response = client.post("/upload", files=files, headers=auth_headers)
 
         assert response.status_code == 415
-        assert "File type not allowed" in response.json()["detail"]
+        assert "File type not allowed" in response.json()["error"]
 
     def test_upload_allowed_txt_file(self, client, auth_headers):
         """Test that allowed file types still work."""

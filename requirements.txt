@@ -1,6 +1,6 @@
 requests>=2.31.0,<3
 # Core API framework
-fastapi==0.127.1
+fastapi==0.128.0
 uvicorn[standard]==0.40.0
 
 # Data validation and serialization
@@ -21,7 +21,7 @@ minio==7.2.20
 
 # Docker client for container management
 docker==7.1.0
-requests-unixsocket==0.3.0
+requests-unixsocket==0.4.1
 
 # Date/time parsing utilities
 python-dateutil==2.9.0.post0
@@ -35,11 +35,11 @@ pytest-mock==3.12.0
 
 # Development tools
 black>=24.3.0
-flake8==6.1.0
+flake8==7.3.0
 mypy==1.7.1
 
 # Environment management
-python-dotenv==1.0.0
+python-dotenv==1.2.1
 
 # Logging
 structlog==25.5.0
@@ -52,4 +52,4 @@ Unidecode==1.4.0
 psutil==5.9.6
 
 # Stress testing
-locust==2.43.0
+locust==2.43.1

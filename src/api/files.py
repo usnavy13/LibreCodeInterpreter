@@ -18,7 +18,6 @@ from ..dependencies import FileServiceDep
 from ..services.execution.output import OutputProcessor
 from ..utils.id_generator import generate_session_id
 
-
 logger = structlog.get_logger(__name__)
 router = APIRouter()
 

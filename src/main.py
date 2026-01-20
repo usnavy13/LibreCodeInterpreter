@@ -32,7 +32,6 @@ from .utils.error_handlers import (
 from .utils.logging import setup_logging
 from .utils.shutdown import setup_graceful_shutdown, shutdown_handler
 
-
 # Setup logging
 setup_logging()
 logger = structlog.get_logger()

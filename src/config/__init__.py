@@ -287,10 +287,10 @@ class Settings(BaseSettings):
         description="Archive state to MinIO after this many seconds of inactivity. Default: 1 hour",
     )
     state_archive_ttl_days: int = Field(
-        default=7,
+        default=1,
         ge=1,
         le=30,
-        description="Keep archived states in MinIO for this many days. Default: 7 days",
+        description="Keep archived states in MinIO for N days. Default: 1 (24 hours)",
     )
     state_archive_check_interval_seconds: int = Field(
         default=300,

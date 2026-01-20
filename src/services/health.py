@@ -17,7 +17,6 @@ from minio.error import S3Error
 # Local application imports
 from ..config import settings
 
-
 logger = structlog.get_logger(__name__)
 
 

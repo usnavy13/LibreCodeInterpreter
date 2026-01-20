@@ -12,7 +12,6 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from ..services.auth import get_auth_service
 from ..utils.request_helpers import extract_api_key
 
-
 logger = structlog.get_logger(__name__)
 security = HTTPBearer(auto_error=False)
 

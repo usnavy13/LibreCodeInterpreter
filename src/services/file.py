@@ -17,7 +17,6 @@ from ..config import settings
 from ..models import FileInfo, FileUploadRequest
 from ..utils.id_generator import generate_file_id
 
-
 logger = structlog.get_logger()
 
 

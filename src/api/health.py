@@ -9,7 +9,6 @@ from ..services.metrics import metrics_collector
 from ..dependencies.auth import verify_api_key
 from ..config import settings
 
-
 logger = structlog.get_logger(__name__)
 router = APIRouter()
 
