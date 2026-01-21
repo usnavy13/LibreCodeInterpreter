@@ -365,7 +365,7 @@ class ContainerManager:
             return False
 
     async def copy_content_to_container(
-        self, container: Container, content: bytes, dest_path: str
+        self, container: Container, content: bytes, dest_path: str, language: str = "py"
     ) -> bool:
         """Copy content directly to container without tempfiles.
 
@@ -376,6 +376,7 @@ class ContainerManager:
             container: Target container
             content: File content as bytes
             dest_path: Destination path in container (e.g., /mnt/data/file.py)
+            language: Programming language (used to set correct file ownership)
 
         Returns:
             True if successful, False otherwise
@@ -383,12 +384,17 @@ class ContainerManager:
         try:
             loop = asyncio.get_event_loop()
 
+            # Get user ID for this language's container
+            user_id = self.get_user_id_for_language(language)
+
             # Build in-memory tar archive
             tar_buffer = io.BytesIO()
             with tarfile.open(fileobj=tar_buffer, mode="w") as tar:
                 tarinfo = tarfile.TarInfo(name=dest_path.split("/")[-1])
                 tarinfo.size = len(content)
                 tarinfo.mode = 0o644
+                tarinfo.uid = user_id
+                tarinfo.gid = user_id
                 tar.addfile(tarinfo, io.BytesIO(content))
 
             tar_buffer.seek(0)

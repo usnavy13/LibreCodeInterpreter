@@ -68,7 +68,10 @@ class ExecutionContext:
     # State persistence fields
     initial_state: Optional[str] = None
     new_state: Optional[str] = None
+    new_state_hash: Optional[str] = None  # Hash of the new state (for file linking)
     state_errors: Optional[List[str]] = None
+    # File references for state-file linking (to update state_hash after execution)
+    mounted_file_refs: Optional[List[Dict[str, str]]] = None  # [{session_id, file_id}]
     # Metrics tracking fields
     api_key_hash: Optional[str] = None
     is_env_key: bool = False
@@ -145,14 +148,15 @@ class ExecutionOrchestrator:
             # Step 4: Execute code (with state)
             ctx.execution = await self._execute_code(ctx)
 
-            # Step 5: Handle generated files
-            ctx.generated_files = await self._handle_generated_files(ctx)
-
-            # Step 6: Extract outputs
+            # Step 5: Extract outputs (before state save)
             self._extract_outputs(ctx)
 
-            # Step 6.5: Save new state (Python only)
+            # Step 5.5: Save new state (Python only, before file handling)
+            # This sets ctx.new_state_hash needed for file-state linking
             await self._save_state(ctx)
+
+            # Step 6: Handle generated files (with state_hash for linking)
+            ctx.generated_files = await self._handle_generated_files(ctx)
 
             # Step 7: Build response
             response = self._build_response(ctx)
@@ -297,12 +301,19 @@ class ExecutionOrchestrator:
         return session.session_id
 
     async def _mount_files(self, ctx: ExecutionContext) -> List[Dict[str, Any]]:
-        """Mount files for code execution."""
+        """Mount files for code execution.
+
+        Also handles restore_state flag for state-file linking:
+        - If a file has restore_state=True, loads the state associated with that file
+        - Tracks mounted file references for updating state_hash after execution
+        """
         if not ctx.request.files:
             return []
 
         mounted = []
         mounted_ids = set()
+        file_refs = []  # Track for state-file linking
+        restore_state_hash = None  # Hash of state to restore (from first restore_state file)
 
         for file_ref in ctx.request.files:
             # Get file info
@@ -340,12 +351,75 @@ class ExecutionOrchestrator:
             )
             mounted_ids.add(key)
 
+            # Track file reference for state-file linking
+            file_refs.append({
+                "session_id": file_ref.session_id,
+                "file_id": file_info.file_id,
+            })
+
+            # Check for restore_state flag (only for Python, use first file's state)
+            if (
+                file_ref.restore_state
+                and ctx.request.lang == "py"
+                and restore_state_hash is None
+                and file_info.state_hash
+            ):
+                restore_state_hash = file_info.state_hash
+                logger.debug(
+                    "Will restore state from file",
+                    file_id=file_info.file_id,
+                    state_hash=file_info.state_hash[:12],
+                )
+
+        # Store file refs for later state_hash update
+        ctx.mounted_file_refs = file_refs
+
+        # If a file requested state restoration, load that state
+        if restore_state_hash and settings.state_persistence_enabled:
+            await self._load_state_by_hash(ctx, restore_state_hash)
+
         return mounted
+
+    async def _load_state_by_hash(
+        self, ctx: ExecutionContext, state_hash: str
+    ) -> None:
+        """Load state by its hash for state-file restoration.
+
+        Tries Redis first, then MinIO cold storage.
+        """
+        try:
+            # Try Redis first
+            state = await self.state_service.get_state_by_hash(state_hash)
+
+            if not state and self.state_archival_service and settings.state_archive_enabled:
+                # Try MinIO cold storage
+                state = await self.state_archival_service.restore_state_by_hash(state_hash)
+
+            if state:
+                ctx.initial_state = state
+                logger.info(
+                    "Restored state from file reference",
+                    session_id=ctx.session_id[:12] if ctx.session_id else "none",
+                    state_hash=state_hash[:12],
+                    state_size=len(state),
+                )
+            else:
+                logger.warning(
+                    "State not found for hash",
+                    state_hash=state_hash[:12],
+                )
+        except Exception as e:
+            logger.error(
+                "Failed to load state by hash",
+                state_hash=state_hash[:12],
+                error=str(e),
+            )
 
     async def _load_state(self, ctx: ExecutionContext) -> None:
         """Load previous state from Redis (or MinIO fallback) for Python sessions.
 
         Priority order:
+        0. State already loaded via restore_state file reference (highest priority)
         1. Recently uploaded state via POST /state (client-side cache restore)
         2. Redis hot storage (within 2-hour TTL)
         3. MinIO cold storage (archived state)
@@ -354,6 +428,14 @@ class ExecutionOrchestrator:
             return
 
         if ctx.request.lang != "py":
+            return
+
+        # Skip if state was already loaded via restore_state file reference
+        if ctx.initial_state:
+            logger.debug(
+                "State already loaded (from file restore_state)",
+                session_id=ctx.session_id[:12],
+            )
             return
 
         try:
@@ -398,7 +480,10 @@ class ExecutionOrchestrator:
             )
 
     async def _save_state(self, ctx: ExecutionContext) -> None:
-        """Save execution state to Redis for Python sessions."""
+        """Save execution state to Redis for Python sessions.
+
+        Also updates state_hash for all mounted files (state-file linking).
+        """
         if not settings.state_persistence_enabled:
             return
 
@@ -417,11 +502,18 @@ class ExecutionOrchestrator:
 
         if ctx.new_state:
             try:
-                await self.state_service.save_state(
+                success, state_hash = await self.state_service.save_state(
                     ctx.session_id,
                     ctx.new_state,
                     ttl_seconds=settings.state_ttl_seconds,
                 )
+                if success:
+                    ctx.new_state_hash = state_hash
+
+                    # Update state_hash for all mounted files (state-file linking)
+                    if state_hash and ctx.mounted_file_refs:
+                        await self._update_mounted_files_state_hash(ctx, state_hash)
+
             except Exception as e:
                 logger.warning(
                     "Failed to save state", session_id=ctx.session_id[:12], error=str(e)
@@ -436,12 +528,64 @@ class ExecutionOrchestrator:
                     warning=error,
                 )
 
+    async def _update_mounted_files_state_hash(
+        self, ctx: ExecutionContext, state_hash: str
+    ) -> None:
+        """Update state_hash for all mounted files after execution.
+
+        This enables "last used" semantics for state-file linking:
+        when a file is referenced and execution completes, the file's
+        state_hash is updated to the post-execution state.
+        """
+        if not ctx.mounted_file_refs:
+            return
+
+        for file_ref in ctx.mounted_file_refs:
+            try:
+                await self.file_service.update_file_state_hash(
+                    session_id=file_ref["session_id"],
+                    file_id=file_ref["file_id"],
+                    state_hash=state_hash,
+                    execution_id=ctx.request_id,
+                )
+            except Exception as e:
+                logger.warning(
+                    "Failed to update file state_hash",
+                    file_id=file_ref["file_id"],
+                    error=str(e),
+                )
+
+    def _normalize_args(self, args: Any) -> Optional[List[str]]:
+        """Normalize args parameter to List[str] or None.
+
+        Args:
+            args: Can be None, a string, a list of strings, or other JSON types
+
+        Returns:
+            List of string arguments, or None if no valid args
+        """
+        if args is None:
+            return None
+        if isinstance(args, str):
+            # Single string argument
+            return [args] if args.strip() else None
+        if isinstance(args, list):
+            # Convert all elements to strings, filter out empty
+            result = [str(arg) for arg in args if arg is not None and str(arg).strip()]
+            return result if result else None
+        # Other types (dict, int, etc.) - convert to string
+        return [str(args)]
+
     async def _execute_code(self, ctx: ExecutionContext) -> Any:
         """Execute the code with optional state persistence."""
+        # Normalize args from request
+        normalized_args = self._normalize_args(ctx.request.args)
+
         exec_request = ExecuteCodeRequest(
             code=ctx.request.code,
             language=ctx.request.lang,
             timeout=settings.max_execution_time,
+            args=normalized_args,
         )
 
         # Determine if we should use state persistence (Python only)
@@ -477,7 +621,11 @@ class ExecutionOrchestrator:
         return execution
 
     async def _handle_generated_files(self, ctx: ExecutionContext) -> List[FileRef]:
-        """Handle files generated during execution."""
+        """Handle files generated during execution.
+
+        Links generated files with the post-execution state hash for
+        state-file restoration.
+        """
         generated = []
 
         for output in ctx.execution.outputs:
@@ -496,9 +644,13 @@ class ExecutionOrchestrator:
                     ctx.container, file_path
                 )
 
-                # Store the file
+                # Store the file with state linking information
                 file_id = await self.file_service.store_execution_output_file(
-                    ctx.session_id, filename, file_content
+                    ctx.session_id,
+                    filename,
+                    file_content,
+                    execution_id=ctx.request_id,
+                    state_hash=ctx.new_state_hash,  # Link file to current state
                 )
 
                 generated.append(FileRef(id=file_id, name=filename))
@@ -507,6 +659,7 @@ class ExecutionOrchestrator:
                     session_id=ctx.session_id,
                     filename=filename,
                     file_id=file_id,
+                    state_hash=ctx.new_state_hash[:12] if ctx.new_state_hash else None,
                 )
 
             except Exception as e:

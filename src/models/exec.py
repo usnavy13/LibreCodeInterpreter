@@ -22,6 +22,10 @@ class RequestFile(BaseModel):
     id: str
     session_id: str
     name: str
+    restore_state: bool = Field(
+        default=False,
+        description="If true, restore Python state from when this file was last used"
+    )
 
 
 class ExecRequest(BaseModel):

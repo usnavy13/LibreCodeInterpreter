@@ -85,9 +85,12 @@ class TestSaveState:
 
         result = await state_service.save_state(session_id, state_b64)
 
-        assert result is True
-        # Verify pipeline was used with 3 setex calls (state, hash, meta)
-        assert mock_pipe.setex.call_count == 3
+        # save_state now returns Tuple[bool, Optional[str]]
+        success, state_hash = result
+        assert success is True
+        assert state_hash is not None
+        # Verify pipeline was used with 4 setex calls (state, hash, by_hash, meta)
+        assert mock_pipe.setex.call_count == 4
 
     @pytest.mark.asyncio
     async def test_save_state_with_upload_marker(
@@ -105,16 +108,22 @@ class TestSaveState:
 
         result = await state_service.save_state(session_id, state_b64, from_upload=True)
 
-        assert result is True
-        # Verify 4 setex calls (state, hash, meta, marker)
-        assert mock_pipe.setex.call_count == 4
+        # save_state now returns Tuple[bool, Optional[str]]
+        success, state_hash = result
+        assert success is True
+        assert state_hash is not None
+        # Verify 5 setex calls (state, hash, by_hash, meta, marker)
+        assert mock_pipe.setex.call_count == 5
 
     @pytest.mark.asyncio
     async def test_save_state_empty_returns_true(self, state_service):
-        """Test that empty state returns True without saving."""
+        """Test that empty state returns (True, None) without saving."""
         result = await state_service.save_state("session", "")
 
-        assert result is True
+        # save_state now returns Tuple[bool, Optional[str]]
+        success, state_hash = result
+        assert success is True
+        assert state_hash is None
 
 
 class TestGetStateRaw:
@@ -163,7 +172,10 @@ class TestSaveStateRaw:
 
         result = await state_service.save_state_raw(session_id, raw_bytes)
 
-        assert result is True
+        # save_state_raw now returns Tuple[bool, Optional[str]]
+        success, state_hash = result
+        assert success is True
+        assert state_hash is not None
 
 
 class TestGetStateHash:

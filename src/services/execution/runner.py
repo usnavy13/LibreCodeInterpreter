@@ -1,6 +1,7 @@
 """Code execution runner - core execution logic."""
 
 import asyncio
+import shlex
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -152,7 +153,7 @@ class CodeExecutionRunner:
 
             # Mount files if provided
             if files:
-                await self._mount_files_to_container(container, files)
+                await self._mount_files_to_container(container, files, request.language)
 
             # Execute the code
             start_time = datetime.utcnow()
@@ -185,11 +186,13 @@ class CodeExecutionRunner:
                     request.timeout or settings.max_execution_time,
                     initial_state=initial_state,
                     capture_state=capture_state,
+                    args=request.args,
                 )
             else:
                 # Standard execution (no state persistence)
                 exit_code, stdout, stderr = await self._execute_code_in_container(
-                    container, request.code, request.language, request.timeout
+                    container, request.code, request.language, request.timeout,
+                    args=request.args
                 )
             end_time = datetime.utcnow()
 
@@ -435,12 +438,20 @@ class CodeExecutionRunner:
         code: str,
         language: str,
         timeout: Optional[int] = None,
+        args: Optional[List[str]] = None,
     ) -> Tuple[int, str, str]:
         """Execute code in the container.
 
         For REPL-enabled containers (Python with REPL mode), uses the fast
         REPL executor which communicates with the pre-warmed Python interpreter.
         For other containers, uses the standard execution path.
+
+        Args:
+            container: Docker container to execute in
+            code: Code to execute
+            language: Programming language
+            timeout: Execution timeout in seconds
+            args: Optional list of command line arguments
         """
         language = language.lower()
         lang_config = get_language(language)
@@ -454,7 +465,7 @@ class CodeExecutionRunner:
             logger.debug(
                 "Using REPL executor", container_id=container.id[:12], language=language
             )
-            return await self._execute_via_repl(container, code, execution_timeout)
+            return await self._execute_via_repl(container, code, execution_timeout, args=args)
 
         # Standard execution path for non-REPL containers
         exec_command = lang_config.execution_command
@@ -480,13 +491,20 @@ class CodeExecutionRunner:
         # Direct memory-to-container transfer (no tempfiles)
         dest_path = f"/mnt/data/{code_filename}"
         if not await self.container_manager.copy_content_to_container(
-            container, code.encode("utf-8"), dest_path
+            container, code.encode("utf-8"), dest_path, language=language
         ):
             return 1, "", "Failed to write code file to container"
 
+        # Build execution command with args if provided
+        final_command = exec_command
+        if args:
+            # Safely quote each argument to prevent shell injection
+            quoted_args = " ".join(shlex.quote(arg) for arg in args)
+            final_command = f"{exec_command} {quoted_args}"
+
         return await self.container_manager.execute_command(
             container,
-            exec_command,
+            final_command,
             timeout=execution_timeout,
             language=language,
             working_dir="/mnt/data",
@@ -521,7 +539,8 @@ class CodeExecutionRunner:
             return False
 
     async def _execute_via_repl(
-        self, container: Container, code: str, timeout: int
+        self, container: Container, code: str, timeout: int,
+        args: Optional[List[str]] = None
     ) -> Tuple[int, str, str]:
         """Execute code via REPL server in container.
 
@@ -529,13 +548,14 @@ class CodeExecutionRunner:
             container: Docker container with REPL server running
             code: Python code to execute
             timeout: Maximum execution time in seconds
+            args: Optional list of command line arguments
 
         Returns:
             Tuple of (exit_code, stdout, stderr)
         """
         repl_executor = REPLExecutor(self.container_manager.client)
         return await repl_executor.execute(
-            container, code, timeout=timeout, working_dir="/mnt/data"
+            container, code, timeout=timeout, working_dir="/mnt/data", args=args
         )
 
     async def _execute_via_repl_with_state(
@@ -545,6 +565,7 @@ class CodeExecutionRunner:
         timeout: int,
         initial_state: Optional[str] = None,
         capture_state: bool = True,
+        args: Optional[List[str]] = None,
     ) -> Tuple[int, str, str, Optional[str], List[str]]:
         """Execute code via REPL server with state persistence.
 
@@ -554,6 +575,7 @@ class CodeExecutionRunner:
             timeout: Maximum execution time in seconds
             initial_state: Base64-encoded state to restore before execution
             capture_state: Whether to capture state after execution
+            args: Optional list of command line arguments
 
         Returns:
             Tuple of (exit_code, stdout, stderr, new_state, state_errors)
@@ -566,10 +588,11 @@ class CodeExecutionRunner:
             working_dir="/mnt/data",
             initial_state=initial_state,
             capture_state=capture_state,
+            args=args,
         )
 
     async def _mount_files_to_container(
-        self, container: Container, files: List[Dict[str, Any]]
+        self, container: Container, files: List[Dict[str, Any]], language: str = "py"
     ) -> None:
         """Mount files to container workspace."""
         try:
@@ -599,7 +622,7 @@ class CodeExecutionRunner:
                         dest_path = f"/mnt/data/{normalized_filename}"
 
                         if await self.container_manager.copy_content_to_container(
-                            container, file_content, dest_path
+                            container, file_content, dest_path, language=language
                         ):
                             logger.info(
                                 "Mounted file",
