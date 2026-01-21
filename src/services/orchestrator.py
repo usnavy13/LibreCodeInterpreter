@@ -155,6 +155,9 @@ class ExecutionOrchestrator:
             # This sets ctx.new_state_hash needed for file-state linking
             await self._save_state(ctx)
 
+            # Step 5.6: Update mounted files to capture in-place edits
+            await self._update_mounted_files_content(ctx)
+
             # Step 6: Handle generated files (with state_hash for linking)
             ctx.generated_files = await self._handle_generated_files(ctx)
 
@@ -555,6 +558,63 @@ class ExecutionOrchestrator:
                     error=str(e),
                 )
 
+    async def _update_mounted_files_content(self, ctx: ExecutionContext) -> None:
+        """Re-upload all mounted files to capture any modifications.
+
+        This ensures in-place edits to mounted files persist after execution.
+        Called after execution completes, reads current content from container
+        and updates the file in MinIO storage.
+        """
+        if not ctx.mounted_files or not ctx.container:
+            return
+
+        container_manager = self.execution_service.container_manager
+
+        for file_info in ctx.mounted_files:
+            try:
+                filename = file_info.get("filename")
+                file_id = file_info.get("file_id")
+                session_id = file_info.get("session_id")
+
+                if not all([filename, file_id, session_id]):
+                    continue
+
+                # Read current content from container
+                file_path = f"/mnt/data/{filename}"
+                content = await container_manager.get_file_content_from_container(
+                    ctx.container, file_path
+                )
+
+                if content is None:
+                    # File may have been deleted - that's ok
+                    logger.debug(
+                        "Mounted file not found after execution",
+                        filename=filename,
+                    )
+                    continue
+
+                # Update file in storage
+                await self.file_service.update_file_content(
+                    session_id=session_id,
+                    file_id=file_id,
+                    content=content,
+                    state_hash=ctx.new_state_hash,
+                    execution_id=ctx.request_id,
+                )
+
+                logger.debug(
+                    "Updated mounted file content",
+                    filename=filename,
+                    size=len(content),
+                )
+
+            except Exception as e:
+                logger.warning(
+                    "Failed to update mounted file",
+                    filename=file_info.get("filename"),
+                    error=str(e),
+                )
+
     def _normalize_args(self, args: Any) -> Optional[List[str]]:
         """Normalize args parameter to List[str] or None.
 
@@ -591,7 +651,8 @@ class ExecutionOrchestrator:
         # Determine if we should use state persistence (Python only)
         use_state = settings.state_persistence_enabled and ctx.request.lang == "py"
 
-        # execute_code returns (execution, container, new_state, state_errors, container_source) tuple
+        # execute_code returns tuple:
+        # (execution, container, new_state, state_errors, container_source)
         (
             execution,
             ctx.container,

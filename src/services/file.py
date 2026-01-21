@@ -804,6 +804,98 @@ class FileService(FileServiceInterface):
             )
             return False
 
+    async def update_file_content(
+        self,
+        session_id: str,
+        file_id: str,
+        content: bytes,
+        state_hash: Optional[str] = None,
+        execution_id: Optional[str] = None,
+    ) -> bool:
+        """Update the content of an existing file.
+
+        Overwrites the MinIO object and updates metadata. Used to persist
+        in-place edits to mounted files after execution.
+
+        Args:
+            session_id: Session identifier
+            file_id: File identifier
+            content: New file content as bytes
+            state_hash: Optional SHA256 hash of the Python state
+            execution_id: Optional ID of the execution that modified this file
+
+        Returns:
+            True if update was successful
+        """
+        try:
+            # Get existing metadata to find object_key
+            metadata = await self._get_file_metadata(session_id, file_id)
+            if not metadata:
+                logger.warning(
+                    "File not found for content update",
+                    session_id=session_id[:12],
+                    file_id=file_id,
+                )
+                return False
+
+            object_key = metadata.get("object_key")
+            if not object_key:
+                logger.warning(
+                    "No object_key in file metadata",
+                    session_id=session_id[:12],
+                    file_id=file_id,
+                )
+                return False
+
+            # Overwrite content in MinIO
+            import io
+
+            loop = asyncio.get_event_loop()
+            content_stream = io.BytesIO(content)
+            content_type = metadata.get("content_type", "application/octet-stream")
+
+            await loop.run_in_executor(
+                None,
+                lambda: self.minio_client.put_object(
+                    self.bucket_name,
+                    object_key,
+                    content_stream,
+                    len(content),
+                    content_type,
+                ),
+            )
+
+            # Update metadata
+            now = datetime.utcnow().isoformat()
+            updates = {
+                "size": len(content),
+                "last_used_at": now,
+            }
+            if state_hash:
+                updates["state_hash"] = state_hash
+            if execution_id:
+                updates["execution_id"] = execution_id
+
+            metadata_key = self._get_file_metadata_key(session_id, file_id)
+            await self.redis_client.hset(metadata_key, mapping=updates)
+
+            logger.debug(
+                "Updated file content",
+                session_id=session_id[:12],
+                file_id=file_id,
+                size=len(content),
+            )
+            return True
+
+        except Exception as e:
+            logger.error(
+                "Failed to update file content",
+                error=str(e),
+                session_id=session_id,
+                file_id=file_id,
+            )
+            return False
+
     async def close(self) -> None:
         """Close service connections."""
         try:
