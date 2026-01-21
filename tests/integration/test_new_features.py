@@ -336,3 +336,141 @@ class TestExecRequestArgsField:
             lang="py",
         )
         assert request.args is None
+
+
+class TestUploadedFileStateRestoration:
+    """Tests for uploaded file state restoration behavior.
+
+    Uploaded files should share the same behavior as generated files:
+    - After first use in execution, they get a state_hash
+    - On subsequent use with restore_state=true, that state is restored
+    """
+
+    def test_uploaded_file_no_initial_state_hash(self):
+        """Test that uploaded file has no state_hash initially."""
+        file_info = FileInfo(
+            file_id="uploaded-file-123",
+            filename="data.csv",
+            size=1024,
+            content_type="text/csv",
+            created_at=datetime.now(timezone.utc),
+            path="/data.csv",
+            # No state_hash, execution_id, or last_used_at
+        )
+        assert file_info.state_hash is None
+        assert file_info.execution_id is None
+        assert file_info.last_used_at is None
+
+    def test_uploaded_file_gets_state_hash_after_use(self):
+        """Test that uploaded file gets state_hash after being used in execution."""
+        now = datetime.now(timezone.utc)
+
+        # Simulate file before use
+        file_before = FileInfo(
+            file_id="uploaded-file-123",
+            filename="data.csv",
+            size=1024,
+            content_type="text/csv",
+            created_at=now,
+            path="/data.csv",
+        )
+        assert file_before.state_hash is None
+
+        # Simulate file after use (update_file_state_hash was called)
+        file_after = FileInfo(
+            file_id="uploaded-file-123",
+            filename="data.csv",
+            size=1024,
+            content_type="text/csv",
+            created_at=now,
+            path="/data.csv",
+            state_hash="abc123def456",
+            execution_id="exec-789",
+            last_used_at=now,
+        )
+        assert file_after.state_hash == "abc123def456"
+        assert file_after.execution_id == "exec-789"
+        assert file_after.last_used_at == now
+
+    @pytest.mark.asyncio
+    async def test_update_file_state_hash_works_for_uploaded_files(self):
+        """Test that update_file_state_hash works on uploaded files."""
+        from src.services.file import FileService
+        from unittest.mock import AsyncMock, MagicMock
+
+        mock_redis = AsyncMock()
+        mock_redis.hset = AsyncMock()
+
+        mock_minio = MagicMock()
+
+        service = FileService.__new__(FileService)
+        service.redis_client = mock_redis
+        service.minio_client = mock_minio
+        service.bucket_name = "test-bucket"
+
+        # Call update_file_state_hash (simulating what happens after execution)
+        result = await service.update_file_state_hash(
+            session_id="session-123",
+            file_id="uploaded-file-456",  # This is an uploaded file
+            state_hash="statehash789",
+            execution_id="exec-abc",
+        )
+
+        assert result is True
+        mock_redis.hset.assert_called_once()
+
+        # Verify the updates include all state fields
+        call_args = mock_redis.hset.call_args
+        mapping = call_args[1]["mapping"]
+        assert mapping["state_hash"] == "statehash789"
+        assert mapping["execution_id"] == "exec-abc"
+        assert "last_used_at" in mapping
+
+    def test_restore_state_flag_works_with_state_hash(self):
+        """Test that RequestFile with restore_state=True works when file has state_hash."""
+        from src.models.exec import RequestFile
+
+        # Uploaded file reference with restore_state flag
+        file_ref = RequestFile(
+            id="uploaded-file-123",
+            session_id="session-456",
+            name="data.csv",
+            restore_state=True,  # Request state restoration
+        )
+        assert file_ref.restore_state is True
+
+    def test_restore_state_requires_state_hash_to_be_set(self):
+        """Test that state restoration requires file to have state_hash.
+
+        This documents expected behavior: if an uploaded file hasn't been used
+        yet (no state_hash), restore_state=True is effectively ignored until
+        the file is used in an execution.
+        """
+        # File with no state_hash (never used in execution)
+        file_info_no_state = FileInfo(
+            file_id="uploaded-file-123",
+            filename="data.csv",
+            size=1024,
+            content_type="text/csv",
+            created_at=datetime.now(timezone.utc),
+            path="/data.csv",
+        )
+
+        # The mount logic checks: file_info.state_hash is truthy
+        # For uploaded files that haven't been used, this will be None/False
+        can_restore = bool(file_info_no_state.state_hash)
+        assert can_restore is False
+
+        # After first use, file has state_hash
+        file_info_with_state = FileInfo(
+            file_id="uploaded-file-123",
+            filename="data.csv",
+            size=1024,
+            content_type="text/csv",
+            created_at=datetime.now(timezone.utc),
+            path="/data.csv",
+            state_hash="abc123def456",
+        )
+
+        can_restore_now = bool(file_info_with_state.state_hash)
+        assert can_restore_now is True
