@@ -191,8 +191,11 @@ class CodeExecutionRunner:
             else:
                 # Standard execution (no state persistence)
                 exit_code, stdout, stderr = await self._execute_code_in_container(
-                    container, request.code, request.language, request.timeout,
-                    args=request.args
+                    container,
+                    request.code,
+                    request.language,
+                    request.timeout,
+                    args=request.args,
                 )
             end_time = datetime.utcnow()
 
@@ -465,7 +468,9 @@ class CodeExecutionRunner:
             logger.debug(
                 "Using REPL executor", container_id=container.id[:12], language=language
             )
-            return await self._execute_via_repl(container, code, execution_timeout, args=args)
+            return await self._execute_via_repl(
+                container, code, execution_timeout, args=args
+            )
 
         # Standard execution path for non-REPL containers
         exec_command = lang_config.execution_command
@@ -539,8 +544,11 @@ class CodeExecutionRunner:
             return False
 
     async def _execute_via_repl(
-        self, container: Container, code: str, timeout: int,
-        args: Optional[List[str]] = None
+        self,
+        container: Container,
+        code: str,
+        timeout: int,
+        args: Optional[List[str]] = None,
     ) -> Tuple[int, str, str]:
         """Execute code via REPL server in container.
 

@@ -29,9 +29,9 @@ class TestLanguageExecution:
         latency = time.perf_counter() - start
 
         # Basic assertions
-        assert response.status_code == 200, (
-            f"Failed for {language_test_case['lang']}: {response.text}"
-        )
+        assert (
+            response.status_code == 200
+        ), f"Failed for {language_test_case['lang']}: {response.text}"
 
         data = response.json()
 
@@ -61,7 +61,9 @@ class TestPythonExecution:
     """Specific tests for Python execution features."""
 
     @pytest.mark.asyncio
-    async def test_python_with_imports(self, async_client, auth_headers, unique_entity_id):
+    async def test_python_with_imports(
+        self, async_client, auth_headers, unique_entity_id
+    ):
         """Test Python execution with standard library imports."""
         response = await async_client.post(
             "/exec",
@@ -78,7 +80,9 @@ class TestPythonExecution:
         assert '{"ok": true}' in stdout or "{'ok': true}" in stdout.replace('"', "'")
 
     @pytest.mark.asyncio
-    async def test_python_with_numpy(self, async_client, auth_headers, unique_entity_id):
+    async def test_python_with_numpy(
+        self, async_client, auth_headers, unique_entity_id
+    ):
         """Test Python execution with NumPy."""
         response = await async_client.post(
             "/exec",
@@ -94,7 +98,9 @@ class TestPythonExecution:
         assert "mean=3.0" in response.json()["stdout"]
 
     @pytest.mark.asyncio
-    async def test_python_error_in_stderr(self, async_client, auth_headers, unique_entity_id):
+    async def test_python_error_in_stderr(
+        self, async_client, auth_headers, unique_entity_id
+    ):
         """Test that Python errors appear in stderr, not as HTTP error."""
         response = await async_client.post(
             "/exec",

@@ -9,14 +9,17 @@ class TestExecutionTiming:
     """Test execution timing constraints."""
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("lang,code", [
-        ("py", "print('timing test')"),
-        ("js", "console.log('timing test');"),
-        (
-            "go",
-            'package main\nimport "fmt"\nfunc main() { fmt.Println("timing test") }',
-        ),
-    ])
+    @pytest.mark.parametrize(
+        "lang,code",
+        [
+            ("py", "print('timing test')"),
+            ("js", "console.log('timing test');"),
+            (
+                "go",
+                'package main\nimport "fmt"\nfunc main() { fmt.Println("timing test") }',
+            ),
+        ],
+    )
     async def test_simple_execution_under_30s(
         self, async_client, auth_headers, unique_entity_id, lang, code
     ):
@@ -83,7 +86,9 @@ class TestFileTiming:
         assert latency < 10.0, f"Upload took {latency:.1f}s, expected < 10s"
 
     @pytest.mark.asyncio
-    async def test_download_under_5s(self, async_client, auth_headers, unique_entity_id):
+    async def test_download_under_5s(
+        self, async_client, auth_headers, unique_entity_id
+    ):
         """File download completes within 5 seconds."""
         # Upload first
         content = b"download timing test content"

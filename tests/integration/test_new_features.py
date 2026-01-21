@@ -197,7 +197,9 @@ class TestStateServiceHashMethods:
         mock_redis.setex = AsyncMock()
 
         service = StateService(redis_client=mock_redis)
-        result = await service.save_state_by_hash("abc123", "base64data", ttl_seconds=3600)
+        result = await service.save_state_by_hash(
+            "abc123", "base64data", ttl_seconds=3600
+        )
 
         assert result is True
         mock_redis.setex.assert_called_once()

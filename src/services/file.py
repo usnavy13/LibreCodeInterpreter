@@ -591,7 +591,9 @@ class FileService(FileServiceInterface):
                 "size": len(content),
                 "path": f"/{filename}",
                 "type": "upload",  # Mark as uploaded file
-                "is_agent_file": "1" if is_agent_file else "0",  # Read-only if agent file
+                "is_agent_file": (
+                    "1" if is_agent_file else "0"
+                ),  # Read-only if agent file
             }
 
             await self._store_file_metadata(session_id, file_id, metadata)
@@ -744,9 +746,7 @@ class FileService(FileServiceInterface):
             logger.error("Orphan MinIO objects cleanup failed", error=str(e))
             return 0
 
-    async def get_file_state_hash(
-        self, session_id: str, file_id: str
-    ) -> Optional[str]:
+    async def get_file_state_hash(self, session_id: str, file_id: str) -> Optional[str]:
         """Get the state hash associated with a file.
 
         Args:

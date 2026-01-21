@@ -34,7 +34,7 @@ LANGUAGE_SNIPPETS: Dict[str, Tuple[str, str]] = {
     "ts": ("console.log('ts: sum(1..10)=' + (1+2+3+4+5+6+7+8+9+10));", "55"),
     "go": (
         'package main\n\nimport (\n\t"fmt"\n)\n\nfunc main() {\n\ts := 0\n\t'
-        'for i := 1; i <= 10; i++ {\n\t\ts += i\n\t}\n\t'
+        "for i := 1; i <= 10; i++ {\n\t\ts += i\n\t}\n\t"
         'fmt.Printf("go: sum(1..10)=%d\\n", s)\n}',
         "55",
     ),
@@ -44,7 +44,7 @@ LANGUAGE_SNIPPETS: Dict[str, Tuple[str, str]] = {
         "55",
     ),
     "c": (
-        '#include <stdio.h>\nint main(){int s=0; for(int i=1;i<=10;i++) s+=i; '
+        "#include <stdio.h>\nint main(){int s=0; for(int i=1;i<=10;i++) s+=i; "
         'printf("c: sum(1..10)=%d\\n", s); return 0;}',
         "55",
     ),

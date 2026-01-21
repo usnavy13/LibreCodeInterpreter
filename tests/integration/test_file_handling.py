@@ -385,8 +385,7 @@ class TestUploadAnalyzeDownload:
             # Step 2: Execute analysis code that reads the uploaded file and creates a report
             from textwrap import dedent
 
-            analysis_code = dedent(
-                """
+            analysis_code = dedent("""
                 import pandas as pd
 
                 # Read the uploaded CSV (files are placed in /mnt/data/)
@@ -413,8 +412,7 @@ class TestUploadAnalyzeDownload:
                     f.write(report)
 
                 print(report)
-            """
-            ).strip()
+            """).strip()
 
             exec_payload = {
                 "lang": "py",
@@ -660,8 +658,7 @@ print(f'Processed images saved. Edges shape: {edges.shape}')
             # Step 2: Transform the data
             from textwrap import dedent
 
-            transform_code = dedent(
-                """
+            transform_code = dedent("""
                 import json
                 import pandas as pd
 
@@ -690,8 +687,7 @@ print(f'Processed images saved. Edges shape: {edges.shape}')
                     json.dump(output, f, indent=2)
 
                 print(json.dumps(output, indent=2))
-            """
-            ).strip()
+            """).strip()
 
             exec_payload = {
                 "lang": "py",

@@ -42,16 +42,15 @@ class FileInfo(BaseModel):
     path: str = Field(..., description="File path in the session")
     # State restoration fields (for Python state-file linking)
     execution_id: Optional[str] = Field(
-        default=None,
-        description="ID of the execution that created/last used this file"
+        default=None, description="ID of the execution that created/last used this file"
     )
     state_hash: Optional[str] = Field(
         default=None,
-        description="SHA256 hash of the Python state when this file was last used"
+        description="SHA256 hash of the Python state when this file was last used",
     )
     last_used_at: Optional[datetime] = Field(
         default=None,
-        description="Timestamp of when this file was last used in an execution"
+        description="Timestamp of when this file was last used in an execution",
     )
 
     class Config:

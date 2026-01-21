@@ -25,7 +25,7 @@ class RequestFile(BaseModel):
     name: str
     restore_state: bool = Field(
         default=False,
-        description="If true, restore Python state from when this file was last used"
+        description="If true, restore Python state from when this file was last used",
     )
 
 

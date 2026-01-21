@@ -15,7 +15,9 @@ import time
 
 # Test configuration - supports both BASE_URL and TEST_API_URL for flexibility
 API_URL = os.getenv("BASE_URL") or os.getenv("TEST_API_URL", "https://localhost")
-API_KEY = os.getenv("API_KEY") or os.getenv("TEST_API_KEY", "test-api-key-for-development-only")
+API_KEY = os.getenv("API_KEY") or os.getenv(
+    "TEST_API_KEY", "test-api-key-for-development-only"
+)
 
 
 @pytest.fixture
@@ -112,9 +114,9 @@ print('File modified')
                 content = await resp.text()
 
                 # Step 4: Assert content is "modified"
-                assert content == "modified content", (
-                    f"Expected 'modified content', got '{content}'"
-                )
+                assert (
+                    content == "modified content"
+                ), f"Expected 'modified content', got '{content}'"
 
     @pytest.mark.asyncio
     async def test_edit_mounted_file_append(self, ssl_context, headers, upload_headers):
@@ -140,7 +142,9 @@ print('File modified')
                 assert resp.status == 200
                 upload_result = await resp.json()
                 session_id = upload_result.get("session_id")
-                file_id = upload_result.get("files", [])[0].get("id") or upload_result.get("files", [])[0].get("fileId")
+                file_id = upload_result.get("files", [])[0].get(
+                    "id"
+                ) or upload_result.get("files", [])[0].get("fileId")
 
             # Append to the file
             exec_payload = {
@@ -151,9 +155,7 @@ with open('/mnt/data/log.txt', 'a') as f:
     f.write('line3\\n')
 print('Appended')
 """,
-                "files": [
-                    {"id": file_id, "session_id": session_id, "name": "log.txt"}
-                ],
+                "files": [{"id": file_id, "session_id": session_id, "name": "log.txt"}],
             }
 
             async with session.post(
@@ -199,7 +201,9 @@ print('Appended')
                 assert resp.status == 200
                 upload_result = await resp.json()
                 session_id = upload_result.get("session_id")
-                file_id = upload_result.get("files", [])[0].get("id") or upload_result.get("files", [])[0].get("fileId")
+                file_id = upload_result.get("files", [])[0].get(
+                    "id"
+                ) or upload_result.get("files", [])[0].get("fileId")
 
             # Delete the file during execution
             exec_payload = {
@@ -251,7 +255,9 @@ print('File deleted')
                 assert resp.status == 200
                 upload_result = await resp.json()
                 session_id = upload_result.get("session_id")
-                file_id = upload_result.get("files", [])[0].get("id") or upload_result.get("files", [])[0].get("fileId")
+                file_id = upload_result.get("files", [])[0].get(
+                    "id"
+                ) or upload_result.get("files", [])[0].get("fileId")
 
             # Modify the CSV using pandas
             exec_payload = {
@@ -356,7 +362,9 @@ print('Both files modified')
                     download_url, headers=upload_headers, ssl=ssl_context
                 ) as resp:
                     content = await resp.text()
-                    assert content == expected, f"Expected '{expected}', got '{content}'"
+                    assert (
+                        content == expected
+                    ), f"Expected '{expected}', got '{content}'"
 
     @pytest.mark.asyncio
     async def test_edit_and_generate_files(self, ssl_context, headers, upload_headers):
@@ -381,7 +389,9 @@ print('Both files modified')
             ) as resp:
                 upload_result = await resp.json()
                 session_id = upload_result.get("session_id")
-                file_id = upload_result.get("files", [])[0].get("id") or upload_result.get("files", [])[0].get("fileId")
+                file_id = upload_result.get("files", [])[0].get(
+                    "id"
+                ) or upload_result.get("files", [])[0].get("fileId")
 
             # Edit the source file and generate a new output file
             exec_payload = {
@@ -425,11 +435,15 @@ print('Done')
                 download_url, headers=upload_headers, ssl=ssl_context
             ) as resp:
                 content = await resp.text()
-                assert content == "SOURCE DATA", f"Expected 'SOURCE DATA', got '{content}'"
+                assert (
+                    content == "SOURCE DATA"
+                ), f"Expected 'SOURCE DATA', got '{content}'"
 
             # Verify output file was created
             exec_session_id = exec_result.get("session_id")
-            output_download_url = f"{API_URL}/download/{exec_session_id}/{output_file['id']}"
+            output_download_url = (
+                f"{API_URL}/download/{exec_session_id}/{output_file['id']}"
+            )
             async with session.get(
                 output_download_url, headers=upload_headers, ssl=ssl_context
             ) as resp:
@@ -471,7 +485,9 @@ class TestAgentFileReadOnlyProtection:
                 assert resp.status == 200
                 upload_result = await resp.json()
                 session_id = upload_result.get("session_id")
-                file_id = upload_result.get("files", [])[0].get("id") or upload_result.get("files", [])[0].get("fileId")
+                file_id = upload_result.get("files", [])[0].get(
+                    "id"
+                ) or upload_result.get("files", [])[0].get("fileId")
 
             # Try to modify the agent file
             exec_payload = {
@@ -503,12 +519,14 @@ print('Attempted modification')
                 assert resp.status == 200
                 content = await resp.text()
                 # Agent file should NOT be modified
-                assert content == original_content, (
-                    f"Agent file was modified! Expected '{original_content}', got '{content}'"
-                )
+                assert (
+                    content == original_content
+                ), f"Agent file was modified! Expected '{original_content}', got '{content}'"
 
     @pytest.mark.asyncio
-    async def test_user_file_can_be_modified(self, ssl_context, headers, upload_headers):
+    async def test_user_file_can_be_modified(
+        self, ssl_context, headers, upload_headers
+    ):
         """Test that files uploaded WITHOUT entity_id CAN be modified.
 
         User files should be editable (this is the counterpart to the above test).
@@ -535,7 +553,9 @@ print('Attempted modification')
                 assert resp.status == 200
                 upload_result = await resp.json()
                 session_id = upload_result.get("session_id")
-                file_id = upload_result.get("files", [])[0].get("id") or upload_result.get("files", [])[0].get("fileId")
+                file_id = upload_result.get("files", [])[0].get(
+                    "id"
+                ) or upload_result.get("files", [])[0].get("fileId")
 
             # Modify the user file
             exec_payload = {
@@ -563,6 +583,6 @@ print('Modified user file')
                 assert resp.status == 200
                 content = await resp.text()
                 # User file SHOULD be modified
-                assert content == "MODIFIED BY USER", (
-                    f"User file was not modified! Expected 'MODIFIED BY USER', got '{content}'"
-                )
+                assert (
+                    content == "MODIFIED BY USER"
+                ), f"User file was not modified! Expected 'MODIFIED BY USER', got '{content}'"

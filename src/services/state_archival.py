@@ -415,9 +415,7 @@ class StateArchivalService:
         """Generate MinIO object key for a hash-indexed state."""
         return f"{self.STATE_BY_HASH_PREFIX}/{state_hash}/state.dat"
 
-    async def archive_state_by_hash(
-        self, state_hash: str, state_data: str
-    ) -> bool:
+    async def archive_state_by_hash(self, state_hash: str, state_data: str) -> bool:
         """Archive a state indexed by its hash to MinIO.
 
         Args:
@@ -498,7 +496,9 @@ class StateArchivalService:
                 response.release_conn()
             except S3Error as e:
                 if e.code == "NoSuchKey":
-                    logger.debug("No archived state found by hash", hash=state_hash[:12])
+                    logger.debug(
+                        "No archived state found by hash", hash=state_hash[:12]
+                    )
                     return None
                 raise
 

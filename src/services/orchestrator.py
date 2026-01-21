@@ -335,7 +335,9 @@ class ExecutionOrchestrator:
         mounted = []
         mounted_ids = set()
         file_refs = []  # Track for state-file linking
-        restore_state_hash = None  # Hash of state to restore (from first restore_state file)
+        restore_state_hash = (
+            None  # Hash of state to restore (from first restore_state file)
+        )
 
         for file_ref in ctx.request.files:
             # Get file info
@@ -374,10 +376,12 @@ class ExecutionOrchestrator:
             mounted_ids.add(key)
 
             # Track file reference for state-file linking
-            file_refs.append({
-                "session_id": file_ref.session_id,
-                "file_id": file_info.file_id,
-            })
+            file_refs.append(
+                {
+                    "session_id": file_ref.session_id,
+                    "file_id": file_info.file_id,
+                }
+            )
 
             # Check for restore_state flag (only for Python, use first file's state)
             if (
@@ -443,10 +447,12 @@ class ExecutionOrchestrator:
             mounted_ids.add(key)
 
             # Track file reference for state-file linking
-            file_refs.append({
-                "session_id": ctx.session_id,
-                "file_id": file_info.file_id,
-            })
+            file_refs.append(
+                {
+                    "session_id": ctx.session_id,
+                    "file_id": file_info.file_id,
+                }
+            )
 
         # Store file refs for later state_hash update
         ctx.mounted_file_refs = file_refs
@@ -461,9 +467,7 @@ class ExecutionOrchestrator:
 
         return mounted
 
-    async def _load_state_by_hash(
-        self, ctx: ExecutionContext, state_hash: str
-    ) -> None:
+    async def _load_state_by_hash(self, ctx: ExecutionContext, state_hash: str) -> None:
         """Load state by its hash for state-file restoration.
 
         Tries Redis first, then MinIO cold storage.
@@ -472,9 +476,15 @@ class ExecutionOrchestrator:
             # Try Redis first
             state = await self.state_service.get_state_by_hash(state_hash)
 
-            if not state and self.state_archival_service and settings.state_archive_enabled:
+            if (
+                not state
+                and self.state_archival_service
+                and settings.state_archive_enabled
+            ):
                 # Try MinIO cold storage
-                state = await self.state_archival_service.restore_state_by_hash(state_hash)
+                state = await self.state_archival_service.restore_state_by_hash(
+                    state_hash
+                )
 
             if state:
                 ctx.initial_state = state
@@ -820,11 +830,13 @@ class ExecutionOrchestrator:
                     state_hash=ctx.new_state_hash,  # Link file to current state
                 )
 
-                generated.append(FileRef(
-                    id=file_id,
-                    name=filename,
-                    session_id=ctx.session_id,  # Include for cross-message persistence
-                ))
+                generated.append(
+                    FileRef(
+                        id=file_id,
+                        name=filename,
+                        session_id=ctx.session_id,  # Include for cross-message persistence
+                    )
+                )
                 logger.info(
                     "Generated file stored",
                     session_id=ctx.session_id,

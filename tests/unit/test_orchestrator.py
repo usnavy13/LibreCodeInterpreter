@@ -14,26 +14,30 @@ from src.models.session import Session, SessionStatus
 def mock_session_service():
     """Create a mock session service."""
     service = AsyncMock()
-    service.get_session = AsyncMock(return_value=Session(
-        session_id="test-session-123",
-        status=SessionStatus.ACTIVE,
-        created_at=datetime.now(),
-        last_activity=datetime.now(),
-        expires_at=datetime.now(),
-        files={},
-        metadata={},
-        working_directory="/workspace",
-    ))
-    service.create_session = AsyncMock(return_value=Session(
-        session_id="new-session-456",
-        status=SessionStatus.ACTIVE,
-        created_at=datetime.now(),
-        last_activity=datetime.now(),
-        expires_at=datetime.now(),
-        files={},
-        metadata={},
-        working_directory="/workspace",
-    ))
+    service.get_session = AsyncMock(
+        return_value=Session(
+            session_id="test-session-123",
+            status=SessionStatus.ACTIVE,
+            created_at=datetime.now(),
+            last_activity=datetime.now(),
+            expires_at=datetime.now(),
+            files={},
+            metadata={},
+            working_directory="/workspace",
+        )
+    )
+    service.create_session = AsyncMock(
+        return_value=Session(
+            session_id="new-session-456",
+            status=SessionStatus.ACTIVE,
+            created_at=datetime.now(),
+            last_activity=datetime.now(),
+            expires_at=datetime.now(),
+            files={},
+            metadata={},
+            working_directory="/workspace",
+        )
+    )
     service.list_sessions_by_entity = AsyncMock(return_value=[])
     return service
 
@@ -85,24 +89,26 @@ class TestMountFiles:
     ):
         """When session_id exists but no explicit files, should auto-mount all session files."""
         # Setup: session has two files (one uploaded, one generated)
-        mock_file_service.list_files = AsyncMock(return_value=[
-            FileInfo(
-                file_id="file-1",
-                filename="data.csv",
-                size=100,
-                content_type="text/csv",
-                created_at=datetime.now(),
-                path="/mnt/data/data.csv",
-            ),
-            FileInfo(
-                file_id="file-2",
-                filename="output.png",
-                size=500,
-                content_type="image/png",
-                created_at=datetime.now(),
-                path="/mnt/data/output.png",
-            ),
-        ])
+        mock_file_service.list_files = AsyncMock(
+            return_value=[
+                FileInfo(
+                    file_id="file-1",
+                    filename="data.csv",
+                    size=100,
+                    content_type="text/csv",
+                    created_at=datetime.now(),
+                    path="/mnt/data/data.csv",
+                ),
+                FileInfo(
+                    file_id="file-2",
+                    filename="output.png",
+                    size=500,
+                    content_type="image/png",
+                    created_at=datetime.now(),
+                    path="/mnt/data/output.png",
+                ),
+            ]
+        )
 
         request = ExecRequest(code="print('hello')", lang="py")
         ctx = ExecutionContext(
@@ -127,9 +133,7 @@ class TestMountFiles:
         assert len(ctx.mounted_file_refs) == 2
 
     @pytest.mark.asyncio
-    async def test_mount_files_empty_session(
-        self, orchestrator, mock_file_service
-    ):
+    async def test_mount_files_empty_session(self, orchestrator, mock_file_service):
         """When session_id exists but session has no files, should return empty list."""
         mock_file_service.list_files = AsyncMock(return_value=[])
 
@@ -153,21 +157,25 @@ class TestMountFiles:
         from src.models.exec import RequestFile
 
         # Setup: explicit file
-        mock_file_service.get_file_info = AsyncMock(return_value=FileInfo(
-            file_id="explicit-file",
-            filename="explicit.txt",
-            size=50,
-            content_type="text/plain",
-            created_at=datetime.now(),
-            path="/mnt/data/explicit.txt",
-        ))
+        mock_file_service.get_file_info = AsyncMock(
+            return_value=FileInfo(
+                file_id="explicit-file",
+                filename="explicit.txt",
+                size=50,
+                content_type="text/plain",
+                created_at=datetime.now(),
+                path="/mnt/data/explicit.txt",
+            )
+        )
         mock_file_service.list_files = AsyncMock(return_value=[])
 
         request = ExecRequest(
             code="print('hello')",
             lang="py",
             files=[
-                RequestFile(id="explicit-file", session_id="other-session", name="explicit.txt"),
+                RequestFile(
+                    id="explicit-file", session_id="other-session", name="explicit.txt"
+                ),
             ],
         )
         ctx = ExecutionContext(
@@ -192,20 +200,20 @@ class TestAutoMountSessionFiles:
     """Tests specifically for the auto-mount behavior."""
 
     @pytest.mark.asyncio
-    async def test_auto_mount_deduplicates_files(
-        self, orchestrator, mock_file_service
-    ):
+    async def test_auto_mount_deduplicates_files(self, orchestrator, mock_file_service):
         """Auto-mount should skip duplicate files."""
-        mock_file_service.list_files = AsyncMock(return_value=[
-            FileInfo(
-                file_id="file-1",
-                filename="data.csv",
-                size=100,
-                content_type="text/csv",
-                created_at=datetime.now(),
-                path="/mnt/data/data.csv",
-            ),
-        ])
+        mock_file_service.list_files = AsyncMock(
+            return_value=[
+                FileInfo(
+                    file_id="file-1",
+                    filename="data.csv",
+                    size=100,
+                    content_type="text/csv",
+                    created_at=datetime.now(),
+                    path="/mnt/data/data.csv",
+                ),
+            ]
+        )
 
         request = ExecRequest(code="print('hello')", lang="py")
         ctx = ExecutionContext(
@@ -219,20 +227,20 @@ class TestAutoMountSessionFiles:
         assert len(result) == 1
 
     @pytest.mark.asyncio
-    async def test_auto_mount_tracks_file_refs(
-        self, orchestrator, mock_file_service
-    ):
+    async def test_auto_mount_tracks_file_refs(self, orchestrator, mock_file_service):
         """Auto-mount should track file refs for state linking."""
-        mock_file_service.list_files = AsyncMock(return_value=[
-            FileInfo(
-                file_id="file-1",
-                filename="data.csv",
-                size=100,
-                content_type="text/csv",
-                created_at=datetime.now(),
-                path="/mnt/data/data.csv",
-            ),
-        ])
+        mock_file_service.list_files = AsyncMock(
+            return_value=[
+                FileInfo(
+                    file_id="file-1",
+                    filename="data.csv",
+                    size=100,
+                    content_type="text/csv",
+                    created_at=datetime.now(),
+                    path="/mnt/data/data.csv",
+                ),
+            ]
+        )
 
         request = ExecRequest(code="print('hello')", lang="py")
         ctx = ExecutionContext(
@@ -278,15 +286,17 @@ class TestExplicitFileMounting:
         """Explicit mount should handle restore_state flag."""
         from src.models.exec import RequestFile
 
-        mock_file_service.get_file_info = AsyncMock(return_value=FileInfo(
-            file_id="file-1",
-            filename="data.csv",
-            size=100,
-            content_type="text/csv",
-            created_at=datetime.now(),
-            path="/mnt/data/data.csv",
-            state_hash="abc123",
-        ))
+        mock_file_service.get_file_info = AsyncMock(
+            return_value=FileInfo(
+                file_id="file-1",
+                filename="data.csv",
+                size=100,
+                content_type="text/csv",
+                created_at=datetime.now(),
+                path="/mnt/data/data.csv",
+                state_hash="abc123",
+            )
+        )
 
         request = ExecRequest(
             code="print('hello')",
@@ -307,8 +317,10 @@ class TestExplicitFileMounting:
         )
 
         # Mock the state loading
-        with patch.object(orchestrator, '_load_state_by_hash', new_callable=AsyncMock) as mock_load:
-            with patch('src.services.orchestrator.settings') as mock_settings:
+        with patch.object(
+            orchestrator, "_load_state_by_hash", new_callable=AsyncMock
+        ) as mock_load:
+            with patch("src.services.orchestrator.settings") as mock_settings:
                 mock_settings.state_persistence_enabled = True
 
                 result = await orchestrator._mount_explicit_files(ctx)
@@ -327,16 +339,18 @@ class TestExplicitFileMounting:
 
         # First call returns None (ID not found), second returns file list
         mock_file_service.get_file_info = AsyncMock(return_value=None)
-        mock_file_service.list_files = AsyncMock(return_value=[
-            FileInfo(
-                file_id="actual-file-id",
-                filename="data.csv",
-                size=100,
-                content_type="text/csv",
-                created_at=datetime.now(),
-                path="/mnt/data/data.csv",
-            ),
-        ])
+        mock_file_service.list_files = AsyncMock(
+            return_value=[
+                FileInfo(
+                    file_id="actual-file-id",
+                    filename="data.csv",
+                    size=100,
+                    content_type="text/csv",
+                    created_at=datetime.now(),
+                    path="/mnt/data/data.csv",
+                ),
+            ]
+        )
 
         request = ExecRequest(
             code="print('hello')",
