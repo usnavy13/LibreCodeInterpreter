@@ -14,6 +14,7 @@ class FileRef(BaseModel):
     id: str
     name: str
     path: Optional[str] = None  # Make path optional
+    session_id: Optional[str] = None  # Session ID for cross-message file persistence
 
 
 class RequestFile(BaseModel):

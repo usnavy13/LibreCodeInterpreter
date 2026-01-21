@@ -306,13 +306,32 @@ class ExecutionOrchestrator:
     async def _mount_files(self, ctx: ExecutionContext) -> List[Dict[str, Any]]:
         """Mount files for code execution.
 
+        Behavior:
+        1. If request.files[] is provided, mount those files (explicit mounting)
+        2. If no request.files[] but session_id exists, auto-mount ALL session files
+        3. If neither, return empty list
+
         Also handles restore_state flag for state-file linking:
         - If a file has restore_state=True, loads the state associated with that file
         - Tracks mounted file references for updating state_hash after execution
         """
-        if not ctx.request.files:
-            return []
+        # If explicit files provided, mount those (existing behavior)
+        if ctx.request.files:
+            return await self._mount_explicit_files(ctx)
 
+        # Auto-mount all session files when session_id exists but no explicit files
+        if ctx.session_id:
+            return await self._auto_mount_session_files(ctx)
+
+        return []
+
+    async def _mount_explicit_files(
+        self, ctx: ExecutionContext
+    ) -> List[Dict[str, Any]]:
+        """Mount explicitly requested files from request.files[].
+
+        This preserves the original file mounting behavior with restore_state support.
+        """
         mounted = []
         mounted_ids = set()
         file_refs = []  # Track for state-file linking
@@ -380,6 +399,65 @@ class ExecutionOrchestrator:
         # If a file requested state restoration, load that state
         if restore_state_hash and settings.state_persistence_enabled:
             await self._load_state_by_hash(ctx, restore_state_hash)
+
+        return mounted
+
+    async def _auto_mount_session_files(
+        self, ctx: ExecutionContext
+    ) -> List[Dict[str, Any]]:
+        """Auto-mount all files from the current session.
+
+        This enables cross-message file persistence by automatically mounting
+        all files (uploaded + generated) when a session_id is provided but
+        no explicit files are requested.
+
+        SECURITY: All files are from the current session, so cross-session
+        isolation is maintained.
+        """
+        logger.info(
+            "Auto-mounting all session files",
+            session_id=ctx.session_id[:12] if ctx.session_id else None,
+        )
+
+        mounted = []
+        mounted_ids = set()
+        file_refs = []
+
+        session_files = await self.file_service.list_files(ctx.session_id)
+
+        for file_info in session_files:
+            # Skip duplicates (shouldn't happen, but defensive)
+            key = (ctx.session_id, file_info.file_id)
+            if key in mounted_ids:
+                continue
+
+            mounted.append(
+                {
+                    "file_id": file_info.file_id,
+                    "filename": file_info.filename,
+                    "path": file_info.path,
+                    "size": file_info.size,
+                    "session_id": ctx.session_id,
+                }
+            )
+            mounted_ids.add(key)
+
+            # Track file reference for state-file linking
+            file_refs.append({
+                "session_id": ctx.session_id,
+                "file_id": file_info.file_id,
+            })
+
+        # Store file refs for later state_hash update
+        ctx.mounted_file_refs = file_refs
+
+        if mounted:
+            logger.info(
+                "Auto-mounted session files",
+                session_id=ctx.session_id[:12] if ctx.session_id else None,
+                file_count=len(mounted),
+                files=[f["filename"] for f in mounted],
+            )
 
         return mounted
 
@@ -742,7 +820,11 @@ class ExecutionOrchestrator:
                     state_hash=ctx.new_state_hash,  # Link file to current state
                 )
 
-                generated.append(FileRef(id=file_id, name=filename))
+                generated.append(FileRef(
+                    id=file_id,
+                    name=filename,
+                    session_id=ctx.session_id,  # Include for cross-message persistence
+                ))
                 logger.info(
                     "Generated file stored",
                     session_id=ctx.session_id,
