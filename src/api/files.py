@@ -14,9 +14,9 @@ from unidecode import unidecode
 
 # Local application imports
 from ..config import settings
-from ..dependencies import FileServiceDep
+from ..dependencies import FileServiceDep, SessionServiceDep
+from ..models import SessionCreate
 from ..services.execution.output import OutputProcessor
-from ..utils.id_generator import generate_session_id
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()
@@ -55,6 +55,7 @@ async def upload_file(
     files: Optional[List[UploadFile]] = File(None),
     entity_id: Optional[str] = Form(None),
     file_service: FileServiceDep = None,
+    session_service: SessionServiceDep = None,
 ):
     """Upload files with multipart form handling - LibreChat compatible.
 
@@ -112,8 +113,17 @@ async def upload_file(
 
         uploaded_files = []
 
-        # Create a session ID for this upload
-        session_id = generate_session_id()
+        # Create a real session for file uploads
+        # This enables session reuse when files are referenced in /exec
+        metadata = {}
+        if entity_id:
+            metadata["entity_id"] = entity_id
+        session = await session_service.create_session(SessionCreate(metadata=metadata))
+        session_id = session.session_id
+
+        # Determine if this is an agent file (uploaded with entity_id)
+        # Agent files are read-only and cannot be modified by user code
+        is_agent_file = entity_id is not None and len(entity_id) > 0
 
         for file in upload_files:
             # Read file content
@@ -125,6 +135,7 @@ async def upload_file(
                 filename=file.filename,
                 content=content,
                 content_type=file.content_type,
+                is_agent_file=is_agent_file,
             )
 
             # Sanitize filename to match what will be used in container

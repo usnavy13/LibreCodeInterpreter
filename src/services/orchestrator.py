@@ -564,6 +564,10 @@ class ExecutionOrchestrator:
         This ensures in-place edits to mounted files persist after execution.
         Called after execution completes, reads current content from container
         and updates the file in MinIO storage.
+
+        SECURITY: Only updates files that belong to the current session.
+        Files referenced from other sessions are read-only to prevent
+        cross-session/cross-user data modification.
         """
         if not ctx.mounted_files or not ctx.container:
             return
@@ -574,9 +578,33 @@ class ExecutionOrchestrator:
             try:
                 filename = file_info.get("filename")
                 file_id = file_info.get("file_id")
-                session_id = file_info.get("session_id")
+                file_session_id = file_info.get("session_id")
 
-                if not all([filename, file_id, session_id]):
+                if not all([filename, file_id, file_session_id]):
+                    continue
+
+                # SECURITY: Only update files from the current session
+                # Files from other sessions are read-only
+                if file_session_id != ctx.session_id:
+                    logger.debug(
+                        "Skipping update for cross-session file",
+                        filename=filename,
+                        file_session=file_session_id[:12] if file_session_id else None,
+                        exec_session=ctx.session_id[:12] if ctx.session_id else None,
+                    )
+                    continue
+
+                # SECURITY: Skip agent-assigned files (uploaded with entity_id)
+                # Agent files are read-only and cannot be modified by user code
+                file_metadata = await self.file_service._get_file_metadata(
+                    file_session_id, file_id
+                )
+                if file_metadata and file_metadata.get("is_agent_file") == "1":
+                    logger.debug(
+                        "Skipping update for agent-assigned file (read-only)",
+                        filename=filename,
+                        file_id=file_id,
+                    )
                     continue
 
                 # Read current content from container
@@ -595,7 +623,7 @@ class ExecutionOrchestrator:
 
                 # Update file in storage
                 await self.file_service.update_file_content(
-                    session_id=session_id,
+                    session_id=file_session_id,
                     file_id=file_id,
                     content=content,
                     state_hash=ctx.new_state_hash,

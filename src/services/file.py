@@ -541,8 +541,20 @@ class FileService(FileServiceInterface):
         filename: str,
         content: bytes,
         content_type: Optional[str] = None,
+        is_agent_file: bool = False,
     ) -> str:
-        """Store an uploaded file directly."""
+        """Store an uploaded file directly.
+
+        Args:
+            session_id: Session identifier
+            filename: Original filename
+            content: File content as bytes
+            content_type: MIME type of the file
+            is_agent_file: If True, marks the file as read-only (agent-assigned)
+
+        Returns:
+            The generated file_id
+        """
         await self._ensure_bucket_exists()
 
         # Generate unique file ID
@@ -579,6 +591,7 @@ class FileService(FileServiceInterface):
                 "size": len(content),
                 "path": f"/{filename}",
                 "type": "upload",  # Mark as uploaded file
+                "is_agent_file": "1" if is_agent_file else "0",  # Read-only if agent file
             }
 
             await self._store_file_metadata(session_id, file_id, metadata)

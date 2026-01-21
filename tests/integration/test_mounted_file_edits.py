@@ -2,6 +2,9 @@
 
 These tests verify that in-place edits to mounted files are correctly
 persisted after execution completes.
+
+Note: Files uploaded WITH entity_id are "agent files" and are READ-ONLY.
+Files uploaded WITHOUT entity_id are "user files" and can be edited.
 """
 
 import pytest
@@ -10,9 +13,9 @@ import ssl
 import os
 import time
 
-# Test configuration
-API_URL = os.getenv("TEST_API_URL", "https://localhost")
-API_KEY = os.getenv("TEST_API_KEY", "test-api-key-for-development-only")
+# Test configuration - supports both BASE_URL and TEST_API_URL for flexibility
+API_URL = os.getenv("BASE_URL") or os.getenv("TEST_API_URL", "https://localhost")
+API_KEY = os.getenv("API_KEY") or os.getenv("TEST_API_KEY", "test-api-key-for-development-only")
 
 
 @pytest.fixture
@@ -45,16 +48,14 @@ class TestMountedFileEdits:
     ):
         """Test that editing a mounted file in-place persists the changes.
 
-        1. Upload a file with content "original"
+        1. Upload a file with content "original" (WITHOUT entity_id = user file)
         2. Execute code that modifies the file to "modified"
         3. Download the file
         4. Assert content is "modified"
         """
         connector = aiohttp.TCPConnector(ssl=ssl_context)
         async with aiohttp.ClientSession(connector=connector) as session:
-            entity_id = f"test-edit-persist-{int(time.time())}"
-
-            # Step 1: Upload a file with original content
+            # Step 1: Upload a file with original content (NO entity_id = user file, editable)
             original_content = "original content"
             form_data = aiohttp.FormData()
             form_data.add_field(
@@ -63,7 +64,7 @@ class TestMountedFileEdits:
                 filename="test.txt",
                 content_type="text/plain",
             )
-            form_data.add_field("entity_id", entity_id)
+            # NOTE: No entity_id - this is a user file that can be edited
 
             async with session.post(
                 f"{API_URL}/upload",
@@ -90,7 +91,6 @@ with open('/mnt/data/test.txt', 'w') as f:
     f.write('modified content')
 print('File modified')
 """,
-                "entity_id": entity_id,
                 "files": [
                     {"id": file_id, "session_id": session_id, "name": "test.txt"}
                 ],
@@ -121,9 +121,7 @@ print('File modified')
         """Test that appending to a mounted file persists."""
         connector = aiohttp.TCPConnector(ssl=ssl_context)
         async with aiohttp.ClientSession(connector=connector) as session:
-            entity_id = f"test-edit-append-{int(time.time())}"
-
-            # Upload a file with initial content
+            # Upload a file with initial content (NO entity_id = user file, editable)
             form_data = aiohttp.FormData()
             form_data.add_field(
                 "files",
@@ -131,7 +129,7 @@ print('File modified')
                 filename="log.txt",
                 content_type="text/plain",
             )
-            form_data.add_field("entity_id", entity_id)
+            # NOTE: No entity_id - this is a user file that can be edited
 
             async with session.post(
                 f"{API_URL}/upload",
@@ -153,7 +151,6 @@ with open('/mnt/data/log.txt', 'a') as f:
     f.write('line3\\n')
 print('Appended')
 """,
-                "entity_id": entity_id,
                 "files": [
                     {"id": file_id, "session_id": session_id, "name": "log.txt"}
                 ],
@@ -234,9 +231,7 @@ print('File deleted')
         """Test that editing a CSV file with pandas persists."""
         connector = aiohttp.TCPConnector(ssl=ssl_context)
         async with aiohttp.ClientSession(connector=connector) as session:
-            entity_id = f"test-edit-csv-{int(time.time())}"
-
-            # Upload a CSV file
+            # Upload a CSV file (NO entity_id = user file, editable)
             csv_content = "name,value\nAlice,10\nBob,20"
             form_data = aiohttp.FormData()
             form_data.add_field(
@@ -245,7 +240,7 @@ print('File deleted')
                 filename="data.csv",
                 content_type="text/csv",
             )
-            form_data.add_field("entity_id", entity_id)
+            # NOTE: No entity_id - this is a user file that can be edited
 
             async with session.post(
                 f"{API_URL}/upload",
@@ -269,7 +264,6 @@ df['value'] = df['value'] * 2  # Double all values
 df.to_csv('/mnt/data/data.csv', index=False)
 print(f'Updated {len(df)} rows')
 """,
-                "entity_id": entity_id,
                 "files": [
                     {"id": file_id, "session_id": session_id, "name": "data.csv"}
                 ],
@@ -296,49 +290,40 @@ print(f'Updated {len(df)} rows')
     async def test_multiple_mounted_files_edited(
         self, ssl_context, headers, upload_headers
     ):
-        """Test that multiple mounted files can be edited in one execution."""
+        """Test that multiple mounted files can be edited in one execution.
+
+        NOTE: Files must be in the same session for both to be editable.
+        Cross-session files are protected from modification.
+        """
         connector = aiohttp.TCPConnector(ssl=ssl_context)
         async with aiohttp.ClientSession(connector=connector) as session:
-            entity_id = f"test-multi-edit-{int(time.time())}"
-
-            # Upload first file
-            form_data1 = aiohttp.FormData()
-            form_data1.add_field(
+            # Upload both files in a single upload (same session, NO entity_id = user files)
+            form_data = aiohttp.FormData()
+            form_data.add_field(
                 "files",
                 b"file1 original",
                 filename="file1.txt",
                 content_type="text/plain",
             )
-            form_data1.add_field("entity_id", entity_id)
-
-            async with session.post(
-                f"{API_URL}/upload",
-                data=form_data1,
-                headers=upload_headers,
-                ssl=ssl_context,
-            ) as resp:
-                result1 = await resp.json()
-                session_id = result1.get("session_id")
-                file1_id = result1.get("files", [])[0].get("id") or result1.get("files", [])[0].get("fileId")
-
-            # Upload second file to the same session
-            form_data2 = aiohttp.FormData()
-            form_data2.add_field(
+            form_data.add_field(
                 "files",
                 b"file2 original",
                 filename="file2.txt",
                 content_type="text/plain",
             )
-            form_data2.add_field("entity_id", entity_id)
+            # NOTE: No entity_id - these are user files that can be edited
 
             async with session.post(
                 f"{API_URL}/upload",
-                data=form_data2,
+                data=form_data,
                 headers=upload_headers,
                 ssl=ssl_context,
             ) as resp:
-                result2 = await resp.json()
-                file2_id = result2.get("files", [])[0].get("id") or result2.get("files", [])[0].get("fileId")
+                result = await resp.json()
+                session_id = result.get("session_id")
+                files = result.get("files", [])
+                file1_id = files[0].get("id") or files[0].get("fileId")
+                file2_id = files[1].get("id") or files[1].get("fileId")
 
             # Edit both files
             exec_payload = {
@@ -350,7 +335,6 @@ with open('/mnt/data/file2.txt', 'w') as f:
     f.write('file2 modified')
 print('Both files modified')
 """,
-                "entity_id": entity_id,
                 "files": [
                     {"id": file1_id, "session_id": session_id, "name": "file1.txt"},
                     {"id": file2_id, "session_id": session_id, "name": "file2.txt"},
@@ -379,9 +363,7 @@ print('Both files modified')
         """Test that editing mounted files works alongside generating new files."""
         connector = aiohttp.TCPConnector(ssl=ssl_context)
         async with aiohttp.ClientSession(connector=connector) as session:
-            entity_id = f"test-edit-and-gen-{int(time.time())}"
-
-            # Upload a file
+            # Upload a file (NO entity_id = user file, editable)
             form_data = aiohttp.FormData()
             form_data.add_field(
                 "files",
@@ -389,7 +371,7 @@ print('Both files modified')
                 filename="source.txt",
                 content_type="text/plain",
             )
-            form_data.add_field("entity_id", entity_id)
+            # NOTE: No entity_id - this is a user file that can be edited
 
             async with session.post(
                 f"{API_URL}/upload",
@@ -419,7 +401,6 @@ with open('/mnt/data/output.txt', 'w') as f:
 
 print('Done')
 """,
-                "entity_id": entity_id,
                 "files": [
                     {"id": file_id, "session_id": session_id, "name": "source.txt"}
                 ],
@@ -454,3 +435,134 @@ print('Done')
             ) as resp:
                 content = await resp.text()
                 assert "Processed: SOURCE DATA" in content
+
+
+class TestAgentFileReadOnlyProtection:
+    """Test that agent-assigned files (uploaded with entity_id) are read-only."""
+
+    @pytest.mark.asyncio
+    async def test_agent_file_not_modified(self, ssl_context, headers, upload_headers):
+        """Test that files uploaded with entity_id cannot be modified.
+
+        Agent files are read-only to prevent users from corrupting
+        data that the agent creator assigned.
+        """
+        connector = aiohttp.TCPConnector(ssl=ssl_context)
+        async with aiohttp.ClientSession(connector=connector) as session:
+            entity_id = f"test-agent-readonly-{int(time.time())}"
+
+            # Upload a file WITH entity_id (agent file = read-only)
+            original_content = "agent data - do not modify"
+            form_data = aiohttp.FormData()
+            form_data.add_field(
+                "files",
+                original_content.encode(),
+                filename="agent_data.txt",
+                content_type="text/plain",
+            )
+            form_data.add_field("entity_id", entity_id)
+
+            async with session.post(
+                f"{API_URL}/upload",
+                data=form_data,
+                headers=upload_headers,
+                ssl=ssl_context,
+            ) as resp:
+                assert resp.status == 200
+                upload_result = await resp.json()
+                session_id = upload_result.get("session_id")
+                file_id = upload_result.get("files", [])[0].get("id") or upload_result.get("files", [])[0].get("fileId")
+
+            # Try to modify the agent file
+            exec_payload = {
+                "lang": "py",
+                "code": """
+with open('/mnt/data/agent_data.txt', 'w') as f:
+    f.write('HACKED BY USER')
+print('Attempted modification')
+""",
+                "entity_id": entity_id,
+                "files": [
+                    {"id": file_id, "session_id": session_id, "name": "agent_data.txt"}
+                ],
+            }
+
+            async with session.post(
+                f"{API_URL}/exec", json=exec_payload, headers=headers, ssl=ssl_context
+            ) as resp:
+                assert resp.status == 200
+                exec_result = await resp.json()
+                # Code executes successfully (file is modified in container)
+                assert "Attempted modification" in exec_result.get("stdout", "")
+
+            # Download the file - should still have original content
+            download_url = f"{API_URL}/download/{session_id}/{file_id}"
+            async with session.get(
+                download_url, headers=upload_headers, ssl=ssl_context
+            ) as resp:
+                assert resp.status == 200
+                content = await resp.text()
+                # Agent file should NOT be modified
+                assert content == original_content, (
+                    f"Agent file was modified! Expected '{original_content}', got '{content}'"
+                )
+
+    @pytest.mark.asyncio
+    async def test_user_file_can_be_modified(self, ssl_context, headers, upload_headers):
+        """Test that files uploaded WITHOUT entity_id CAN be modified.
+
+        User files should be editable (this is the counterpart to the above test).
+        """
+        connector = aiohttp.TCPConnector(ssl=ssl_context)
+        async with aiohttp.ClientSession(connector=connector) as session:
+            # Upload a file WITHOUT entity_id (user file = editable)
+            original_content = "user data"
+            form_data = aiohttp.FormData()
+            form_data.add_field(
+                "files",
+                original_content.encode(),
+                filename="user_data.txt",
+                content_type="text/plain",
+            )
+            # NOTE: No entity_id - this is a user file
+
+            async with session.post(
+                f"{API_URL}/upload",
+                data=form_data,
+                headers=upload_headers,
+                ssl=ssl_context,
+            ) as resp:
+                assert resp.status == 200
+                upload_result = await resp.json()
+                session_id = upload_result.get("session_id")
+                file_id = upload_result.get("files", [])[0].get("id") or upload_result.get("files", [])[0].get("fileId")
+
+            # Modify the user file
+            exec_payload = {
+                "lang": "py",
+                "code": """
+with open('/mnt/data/user_data.txt', 'w') as f:
+    f.write('MODIFIED BY USER')
+print('Modified user file')
+""",
+                "files": [
+                    {"id": file_id, "session_id": session_id, "name": "user_data.txt"}
+                ],
+            }
+
+            async with session.post(
+                f"{API_URL}/exec", json=exec_payload, headers=headers, ssl=ssl_context
+            ) as resp:
+                assert resp.status == 200
+
+            # Download the file - should have modified content
+            download_url = f"{API_URL}/download/{session_id}/{file_id}"
+            async with session.get(
+                download_url, headers=upload_headers, ssl=ssl_context
+            ) as resp:
+                assert resp.status == 200
+                content = await resp.text()
+                # User file SHOULD be modified
+                assert content == "MODIFIED BY USER", (
+                    f"User file was not modified! Expected 'MODIFIED BY USER', got '{content}'"
+                )
