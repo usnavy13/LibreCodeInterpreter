@@ -13,13 +13,14 @@ import os
 
 # Set test environment before importing config
 # These match the docker-compose infrastructure settings
-os.environ["API_KEY"] = "test-api-key-for-testing-12345"
-os.environ["REDIS_HOST"] = "localhost"
-os.environ["REDIS_PORT"] = "6379"
-os.environ["MINIO_ENDPOINT"] = "localhost:9000"
-os.environ["MINIO_ACCESS_KEY"] = "minioadmin"
-os.environ["MINIO_SECRET_KEY"] = "minioadmin"
-os.environ["MINIO_SECURE"] = "false"
+# Use setdefault to allow environment variables to override defaults
+os.environ.setdefault("API_KEY", "test-api-key-for-testing-12345")
+os.environ.setdefault("REDIS_HOST", "localhost")
+os.environ.setdefault("REDIS_PORT", "6379")
+os.environ.setdefault("MINIO_ENDPOINT", "localhost:9000")
+os.environ.setdefault("MINIO_ACCESS_KEY", "minioadmin")
+os.environ.setdefault("MINIO_SECRET_KEY", "minioadmin")
+os.environ.setdefault("MINIO_SECURE", "false")
 
 from src.config import settings
 from src.services.session import SessionService
