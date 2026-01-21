@@ -46,6 +46,7 @@ class StateArchivalService:
 
     # MinIO path prefix for archived states
     STATE_PREFIX = "states"
+    STATE_BY_HASH_PREFIX = "states/by_hash"  # For hash-indexed state storage
 
     def __init__(
         self,
@@ -407,3 +408,152 @@ class StateArchivalService:
             logger.error("Archive cleanup failed", error=str(e))
             summary["error"] = str(e)
             return summary
+
+    # ===== Hash-indexed state archival for state-file linking =====
+
+    def _get_state_by_hash_object_key(self, state_hash: str) -> str:
+        """Generate MinIO object key for a hash-indexed state."""
+        return f"{self.STATE_BY_HASH_PREFIX}/{state_hash}/state.dat"
+
+    async def archive_state_by_hash(self, state_hash: str, state_data: str) -> bool:
+        """Archive a state indexed by its hash to MinIO.
+
+        Args:
+            state_hash: SHA256 hash of the state
+            state_data: Base64-encoded state data
+
+        Returns:
+            True if archived successfully
+        """
+        try:
+            await self._ensure_bucket_exists()
+
+            object_key = self._get_state_by_hash_object_key(state_hash)
+            state_bytes = state_data.encode("utf-8")
+
+            # Create metadata
+            metadata = {
+                "archived_at": datetime.now(timezone.utc).isoformat(),
+                "original_size": str(len(state_bytes)),
+                "state_hash": state_hash,
+            }
+
+            # Upload to MinIO
+            loop = asyncio.get_event_loop()
+            data_stream = io.BytesIO(state_bytes)
+
+            await loop.run_in_executor(
+                None,
+                lambda: self.minio_client.put_object(
+                    self.bucket_name,
+                    object_key,
+                    data_stream,
+                    len(state_bytes),
+                    content_type="application/octet-stream",
+                    metadata=metadata,
+                ),
+            )
+
+            logger.debug(
+                "Archived state by hash to MinIO",
+                hash=state_hash[:12],
+                size_bytes=len(state_bytes),
+            )
+            return True
+
+        except Exception as e:
+            logger.error(
+                "Failed to archive state by hash",
+                hash=state_hash[:12],
+                error=str(e),
+            )
+            return False
+
+    async def restore_state_by_hash(self, state_hash: str) -> Optional[str]:
+        """Restore a state from MinIO by its hash.
+
+        If found, the state is also saved back to Redis for fast access.
+
+        Args:
+            state_hash: SHA256 hash of the state
+
+        Returns:
+            Base64-encoded state data, or None if not found
+        """
+        try:
+            await self._ensure_bucket_exists()
+
+            object_key = self._get_state_by_hash_object_key(state_hash)
+            loop = asyncio.get_event_loop()
+
+            try:
+                response = await loop.run_in_executor(
+                    None,
+                    lambda: self.minio_client.get_object(self.bucket_name, object_key),
+                )
+                state_bytes = response.read()
+                response.close()
+                response.release_conn()
+            except S3Error as e:
+                if e.code == "NoSuchKey":
+                    logger.debug(
+                        "No archived state found by hash", hash=state_hash[:12]
+                    )
+                    return None
+                raise
+
+            state_data = state_bytes.decode("utf-8")
+
+            # Restore to Redis for fast access
+            await self.state_service.save_state_by_hash(
+                state_hash, state_data, ttl_seconds=settings.state_ttl_seconds
+            )
+
+            logger.debug(
+                "Restored state by hash from MinIO",
+                hash=state_hash[:12],
+                size_bytes=len(state_bytes),
+            )
+            return state_data
+
+        except Exception as e:
+            logger.error(
+                "Failed to restore state by hash",
+                hash=state_hash[:12],
+                error=str(e),
+            )
+            return None
+
+    async def has_archived_state_by_hash(self, state_hash: str) -> bool:
+        """Check if a state with this hash is archived in MinIO.
+
+        Args:
+            state_hash: SHA256 hash of the state
+
+        Returns:
+            True if archived state exists
+        """
+        try:
+            await self._ensure_bucket_exists()
+
+            object_key = self._get_state_by_hash_object_key(state_hash)
+            loop = asyncio.get_event_loop()
+
+            try:
+                await loop.run_in_executor(
+                    None,
+                    lambda: self.minio_client.stat_object(self.bucket_name, object_key),
+                )
+                return True
+            except S3Error as e:
+                if e.code == "NoSuchKey":
+                    return False
+                raise
+
+        except Exception as e:
+            logger.error(
+                "Failed to check archived state by hash",
+                hash=state_hash[:12],
+                error=str(e),
+            )
+            return False

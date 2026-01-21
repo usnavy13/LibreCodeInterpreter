@@ -17,7 +17,6 @@ from src.models import CodeExecution, ExecutionStatus, ExecutionOutput, OutputTy
 from src.models.session import Session, SessionStatus
 from src.models.files import FileInfo
 
-
 # All 12 supported languages
 SUPPORTED_LANGUAGES = [
     "py",

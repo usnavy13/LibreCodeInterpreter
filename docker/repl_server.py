@@ -291,7 +291,8 @@ def execute_code(
     timeout: int = 30,
     working_dir: str = "/mnt/data",
     initial_state: str = None,
-    capture_state: bool = False
+    capture_state: bool = False,
+    args: list = None
 ) -> dict:
     """Execute code in isolated namespace and capture output.
 
@@ -301,6 +302,7 @@ def execute_code(
         working_dir: Working directory for execution
         initial_state: Base64-encoded cloudpickle state to restore before execution
         capture_state: Whether to capture and return state after execution
+        args: Optional list of command line arguments
 
     Returns:
         Dict with exit_code, stdout, stderr, execution_time_ms, and optionally state/state_errors
@@ -329,6 +331,12 @@ def execute_code(
     stderr_capture = StringIO()
 
     exit_code = 0
+
+    # Save and set sys.argv if args provided
+    original_argv = sys.argv
+    if args is not None:
+        # Set sys.argv to [script_name] + args (matches file-based execution)
+        sys.argv = ['/mnt/data/code.py'] + list(args)
 
     # Set up timeout handler
     old_handler = signal.signal(signal.SIGALRM, timeout_handler)
@@ -369,6 +377,9 @@ def execute_code(
         # Cancel timeout
         signal.alarm(0)
         signal.signal(signal.SIGALRM, old_handler)
+
+        # Restore sys.argv
+        sys.argv = original_argv
 
         # Restore working directory
         try:
@@ -503,6 +514,7 @@ def main():
             working_dir = request.get("working_dir", "/mnt/data")
             initial_state = request.get("initial_state")
             capture_state = request.get("capture_state", False)
+            args = request.get("args")  # List of command line arguments
 
             # Execute code with optional state persistence
             response = execute_code(
@@ -510,7 +522,8 @@ def main():
                 timeout,
                 working_dir,
                 initial_state=initial_state,
-                capture_state=capture_state
+                capture_state=capture_state,
+                args=args
             )
 
             # Send response

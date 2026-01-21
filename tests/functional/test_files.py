@@ -7,7 +7,9 @@ class TestFileUpload:
     """Test POST /upload."""
 
     @pytest.mark.asyncio
-    async def test_upload_single_file(self, async_client, auth_headers, unique_entity_id):
+    async def test_upload_single_file(
+        self, async_client, auth_headers, unique_entity_id
+    ):
         """Upload a single file using 'files' field."""
         files = {"files": ("test.txt", b"Hello World", "text/plain")}
         data = {"entity_id": unique_entity_id}

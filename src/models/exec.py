@@ -14,6 +14,7 @@ class FileRef(BaseModel):
     id: str
     name: str
     path: Optional[str] = None  # Make path optional
+    session_id: Optional[str] = None  # Session ID for cross-message file persistence
 
 
 class RequestFile(BaseModel):
@@ -22,6 +23,10 @@ class RequestFile(BaseModel):
     id: str
     session_id: str
     name: str
+    restore_state: bool = Field(
+        default=False,
+        description="If true, restore Python state from when this file was last used",
+    )
 
 
 class ExecRequest(BaseModel):

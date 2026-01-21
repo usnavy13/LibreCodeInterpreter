@@ -79,6 +79,9 @@ class ExecuteCodeRequest(BaseModel):
     timeout: Optional[int] = Field(
         default=None, description="Execution timeout in seconds"
     )
+    args: Optional[List[str]] = Field(
+        default=None, description="Command line arguments to pass to the executed code"
+    )
 
 
 class ExecuteCodeResponse(BaseModel):

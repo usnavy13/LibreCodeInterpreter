@@ -182,37 +182,32 @@ class TestAPIKeyAuthentication:
 
         assert response.status_code == 401
 
-    @patch("src.services.auth.settings")
-    def test_file_upload_flow_with_auth(self, mock_settings, client, mock_services):
+    def test_file_upload_flow_with_auth(self, client, mock_services):
         """Test file upload flow with authentication."""
-        mock_settings.api_key = "test-api-key-for-testing-12345"
+        from unittest.mock import MagicMock
+
         headers = {"x-api-key": "test-api-key-for-testing-12345"}
 
-        # Mock file upload
-        mock_services["file"].store_uploaded_file.return_value = "file-123"
-        # Mock get_file_info needed for upload response
-        from src.models.files import FileInfo
-        from datetime import datetime, timezone
+        with patch("src.services.auth.settings") as mock_settings:
+            mock_settings.api_key = "test-api-key-for-testing-12345"
 
-        mock_services["file"].get_file_info.return_value = FileInfo(
-            file_id="file-123",
-            filename="test.txt",
-            path="/tmp/test.txt",
-            size=12,
-            created_at=datetime.now(timezone.utc),
-            modified_at=datetime.now(timezone.utc),
-            content_type="text/plain",
-        )
+            # Mock file upload
+            mock_services["file"].store_uploaded_file.return_value = "file-123"
 
-        import io
+            # Mock session service to return a Session object with session_id
+            mock_session = MagicMock()
+            mock_session.session_id = "session-123"
+            mock_services["session"].create_session.return_value = mock_session
 
-        files = {"files": ("test.txt", io.BytesIO(b"test content"), "text/plain")}
+            import io
 
-        # Use /upload instead of /files/upload as per src/main.py
-        response = client.post("/upload", files=files, headers=headers)
+            files = {"files": ("test.txt", io.BytesIO(b"test content"), "text/plain")}
 
-        assert response.status_code == 200
-        assert "files" in response.json()
+            # Use /upload instead of /files/upload as per src/main.py
+            response = client.post("/upload", files=files, headers=headers)
+
+            assert response.status_code == 200
+            assert "files" in response.json()
 
     def test_file_upload_flow_without_auth(self, client, mock_services):
         """Test file upload flow without authentication."""

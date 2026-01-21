@@ -44,6 +44,7 @@ class StateService:
     HASH_KEY_PREFIX = "session:state:hash:"
     META_KEY_PREFIX = "session:state:meta:"
     UPLOAD_MARKER_PREFIX = "session:state:uploaded:"
+    BY_HASH_KEY_PREFIX = "state:by_hash:"  # For hash-indexed state storage
 
     def __init__(self, redis_client: Optional[redis.Redis] = None):
         """Initialize the state service.
@@ -111,8 +112,10 @@ class StateService:
         state_b64: str,
         ttl_seconds: Optional[int] = None,
         from_upload: bool = False,
-    ) -> bool:
+    ) -> Tuple[bool, Optional[str]]:
         """Save serialized state for a session.
+
+        Also saves state by hash for state-file linking feature.
 
         Args:
             session_id: Session identifier
@@ -121,10 +124,10 @@ class StateService:
             from_upload: If True, set upload marker for priority loading
 
         Returns:
-            True if state was saved successfully
+            Tuple of (success: bool, state_hash: Optional[str])
         """
         if not state_b64:
-            return True  # Nothing to save
+            return True, None  # Nothing to save
 
         if ttl_seconds is None:
             ttl_seconds = settings.state_ttl_seconds
@@ -138,11 +141,14 @@ class StateService:
             # Use pipeline for atomic operations
             pipe = self.redis.pipeline(transaction=True)
 
-            # Save state
+            # Save state by session_id
             pipe.setex(self._state_key(session_id), ttl_seconds, state_b64)
 
             # Save hash
             pipe.setex(self._hash_key(session_id), ttl_seconds, state_hash)
+
+            # Save state by hash (for state-file linking)
+            pipe.setex(self._by_hash_key(state_hash), ttl_seconds, state_b64)
 
             # Save metadata
             meta = json.dumps(
@@ -169,12 +175,12 @@ class StateService:
                 ttl_seconds=ttl_seconds,
                 from_upload=from_upload,
             )
-            return True
+            return True, state_hash
         except Exception as e:
             logger.error(
                 "Failed to save state", session_id=session_id[:12], error=str(e)
             )
-            return False
+            return False, None
 
     async def delete_state(self, session_id: str) -> bool:
         """Delete state for a session.
@@ -398,7 +404,7 @@ class StateService:
         raw_bytes: bytes,
         ttl_seconds: Optional[int] = None,
         from_upload: bool = False,
-    ) -> bool:
+    ) -> Tuple[bool, Optional[str]]:
         """Save state from raw binary bytes (from wire transfer).
 
         Encodes the raw bytes to base64 for Redis storage.
@@ -410,7 +416,7 @@ class StateService:
             from_upload: If True, set upload marker for priority loading
 
         Returns:
-            True if state was saved successfully
+            Tuple of (success: bool, state_hash: Optional[str])
         """
         try:
             state_b64 = base64.b64encode(raw_bytes).decode("utf-8")
@@ -421,7 +427,7 @@ class StateService:
             logger.error(
                 "Failed to save raw state", session_id=session_id[:12], error=str(e)
             )
-            return False
+            return False, None
 
     async def get_full_state_info(self, session_id: str) -> Optional[dict]:
         """Get full metadata about stored state including expiration.
@@ -501,3 +507,107 @@ class StateService:
             await self.redis.delete(self._upload_marker_key(session_id))
         except Exception:
             pass  # Non-critical operation
+
+    # ===== Hash-indexed state storage for state-file linking =====
+
+    def _by_hash_key(self, state_hash: str) -> str:
+        """Generate Redis key for hash-indexed state storage."""
+        return f"{self.BY_HASH_KEY_PREFIX}{state_hash}"
+
+    async def save_state_by_hash(
+        self,
+        state_hash: str,
+        state_b64: str,
+        ttl_seconds: Optional[int] = None,
+    ) -> bool:
+        """Save state indexed by its hash for later retrieval.
+
+        This is used for state-file linking, where a file references
+        a specific state snapshot by its hash.
+
+        Args:
+            state_hash: SHA256 hash of the raw state bytes
+            state_b64: Base64-encoded state data
+            ttl_seconds: TTL in seconds (default from settings)
+
+        Returns:
+            True if saved successfully
+        """
+        if not state_b64 or not state_hash:
+            return False
+
+        if ttl_seconds is None:
+            ttl_seconds = settings.state_ttl_seconds
+
+        try:
+            key = self._by_hash_key(state_hash)
+            await self.redis.setex(key, ttl_seconds, state_b64)
+
+            logger.debug(
+                "Saved state by hash",
+                hash=state_hash[:12],
+                size=len(state_b64),
+                ttl_seconds=ttl_seconds,
+            )
+            return True
+        except Exception as e:
+            logger.error(
+                "Failed to save state by hash",
+                hash=state_hash[:12],
+                error=str(e),
+            )
+            return False
+
+    async def get_state_by_hash(self, state_hash: str) -> Optional[str]:
+        """Retrieve state by its hash.
+
+        Args:
+            state_hash: SHA256 hash of the state
+
+        Returns:
+            Base64-encoded state string, or None if not found
+        """
+        try:
+            key = self._by_hash_key(state_hash)
+            state = await self.redis.get(key)
+            if state:
+                logger.debug(
+                    "Retrieved state by hash",
+                    hash=state_hash[:12],
+                    size=len(state),
+                )
+            return state
+        except Exception as e:
+            logger.error(
+                "Failed to get state by hash",
+                hash=state_hash[:12],
+                error=str(e),
+            )
+            return None
+
+    async def extend_state_by_hash_ttl(
+        self, state_hash: str, ttl_seconds: Optional[int] = None
+    ) -> bool:
+        """Extend TTL of a hash-indexed state.
+
+        Args:
+            state_hash: SHA256 hash of the state
+            ttl_seconds: New TTL in seconds
+
+        Returns:
+            True if TTL was extended, False if not found or error
+        """
+        if ttl_seconds is None:
+            ttl_seconds = settings.state_ttl_seconds
+
+        try:
+            key = self._by_hash_key(state_hash)
+            result = await self.redis.expire(key, ttl_seconds)
+            return bool(result)
+        except Exception as e:
+            logger.error(
+                "Failed to extend state by hash TTL",
+                hash=state_hash[:12],
+                error=str(e),
+            )
+            return False

@@ -43,6 +43,7 @@ class REPLExecutor:
         code: str,
         timeout: int = None,
         working_dir: str = "/mnt/data",
+        args: Optional[List[str]] = None,
     ) -> Tuple[int, str, str]:
         """Execute code in running REPL.
 
@@ -51,6 +52,7 @@ class REPLExecutor:
             code: Python code to execute
             timeout: Maximum execution time in seconds
             working_dir: Working directory for code execution
+            args: Optional list of command line arguments
 
         Returns:
             Tuple of (exit_code, stdout, stderr)
@@ -62,6 +64,8 @@ class REPLExecutor:
 
         # Build request
         request = {"code": code, "timeout": timeout, "working_dir": working_dir}
+        if args:
+            request["args"] = args
         request_json = json.dumps(request)
         request_bytes = request_json.encode("utf-8") + DELIMITER
 
@@ -109,6 +113,7 @@ class REPLExecutor:
         working_dir: str = "/mnt/data",
         initial_state: Optional[str] = None,
         capture_state: bool = False,
+        args: Optional[List[str]] = None,
     ) -> Tuple[int, str, str, Optional[str], List[str]]:
         """Execute code in running REPL with optional state persistence.
 
@@ -119,6 +124,7 @@ class REPLExecutor:
             working_dir: Working directory for code execution
             initial_state: Base64-encoded state to restore before execution
             capture_state: Whether to capture state after execution
+            args: Optional list of command line arguments
 
         Returns:
             Tuple of (exit_code, stdout, stderr, new_state, state_errors)
@@ -137,6 +143,9 @@ class REPLExecutor:
 
         if capture_state:
             request["capture_state"] = True
+
+        if args:
+            request["args"] = args
 
         request_json = json.dumps(request)
         request_bytes = request_json.encode("utf-8") + DELIMITER

@@ -14,7 +14,11 @@ class TestSessionWorkflow:
         response = await async_client.post(
             "/exec",
             headers=auth_headers,
-            json={"code": "print('hello')", "lang": "py", "entity_id": unique_entity_id},
+            json={
+                "code": "print('hello')",
+                "lang": "py",
+                "entity_id": unique_entity_id,
+            },
         )
 
         assert response.status_code == 200
@@ -170,7 +174,11 @@ class TestStatePersistence:
         r = await async_client.post(
             "/exec",
             headers=auth_headers,
-            json={"code": "data = [1,2,3]", "lang": "py", "entity_id": unique_entity_id},
+            json={
+                "code": "data = [1,2,3]",
+                "lang": "py",
+                "entity_id": unique_entity_id,
+            },
         )
 
         assert r.status_code == 200
