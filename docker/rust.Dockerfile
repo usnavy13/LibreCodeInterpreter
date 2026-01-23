@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.4
 # Rust execution environment with BuildKit optimizations
-FROM rust:1.92-slim
+FROM rust:1.93-slim
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
