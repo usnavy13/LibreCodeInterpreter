@@ -1,6 +1,6 @@
 requests>=2.31.0,<3
 # Core API framework
-fastapi==0.128.0
+fastapi==0.128.2
 uvicorn[standard]==0.40.0
 
 # Data validation and serialization
