@@ -49,7 +49,7 @@ python-multipart>=0.0.18
 Unidecode==1.4.0
 
 # System monitoring for performance tests
-psutil==5.9.6
+psutil==7.2.2
 
 # Stress testing
 locust==2.43.1
