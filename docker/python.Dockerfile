@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.4
 # Python execution environment with BuildKit optimizations
-FROM python:3.13-slim
+FROM python:3.14-slim
 
 # Install common packages for data science and general use
 RUN apt-get update && apt-get install -y --no-install-recommends \
