@@ -142,7 +142,14 @@ class SecurityMiddleware:
     def _should_skip_auth(self, request: Request) -> bool:
         """Check if authentication should be skipped."""
         path = request.url.path
-        return path in self.excluded_paths or request.method == "OPTIONS"
+        if path in self.excluded_paths or request.method == "OPTIONS":
+            return True
+        # Allow the admin dashboard UI (HTML/static assets) to load without auth.
+        # The dashboard itself has a login form where users enter the master key,
+        # which is then sent as a header with API requests.
+        if path.startswith("/admin-dashboard"):
+            return True
+        return False
 
     async def _authenticate_request(self, request: Request, scope: dict):
         """Handle API key authentication with rate limiting."""
