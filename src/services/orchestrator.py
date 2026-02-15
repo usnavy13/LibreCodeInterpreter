@@ -33,10 +33,7 @@ from ..models import (
     SessionCreate,
     ExecuteCodeRequest,
     ValidationError,
-    ExecutionError,
-    ResourceNotFoundError,
     ServiceUnavailableError,
-    TimeoutError,
 )
 from ..models.errors import ErrorDetail
 from .interfaces import (
@@ -171,9 +168,6 @@ class ExecutionOrchestrator:
 
         except (
             ValidationError,
-            ExecutionError,
-            TimeoutError,
-            ResourceNotFoundError,
             ServiceUnavailableError,
         ):
             raise
@@ -684,7 +678,7 @@ class ExecutionOrchestrator:
 
                 # SECURITY: Skip agent-assigned files (uploaded with entity_id)
                 # Agent files are read-only and cannot be modified by user code
-                file_metadata = await self.file_service._get_file_metadata(
+                file_metadata = await self.file_service.get_file_metadata(
                     file_session_id, file_id
                 )
                 if file_metadata and file_metadata.get("is_agent_file") == "1":
@@ -859,29 +853,16 @@ class ExecutionOrchestrator:
             container: Docker container object (passed directly, no session lookup needed)
             file_path: Path to file inside container
         """
-        import tempfile
-        import os
-
         if not container:
             return f"# Container not found for file: {file_path}\n".encode("utf-8")
 
         container_manager = self.execution_service.container_manager
-
-        with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
-            temp_path = tmp_file.name
-
-        try:
-            success = await container_manager.copy_from_container(
-                container, file_path, temp_path
-            )
-            if success:
-                with open(temp_path, "rb") as f:
-                    return f.read()
-            else:
-                return f"# Failed to retrieve file: {file_path}\n".encode("utf-8")
-        finally:
-            if os.path.exists(temp_path):
-                os.unlink(temp_path)
+        content = await container_manager.get_file_content_from_container(
+            container, file_path
+        )
+        if content is not None:
+            return content
+        return f"# Failed to retrieve file: {file_path}\n".encode("utf-8")
 
     def _extract_outputs(self, ctx: ExecutionContext) -> None:
         """Extract stdout and stderr from execution outputs."""
@@ -1017,9 +998,7 @@ class ExecutionOrchestrator:
             status: Execution status (completed, failed, timeout)
         """
         try:
-            from .detailed_metrics import get_detailed_metrics_service
-
-            service = get_detailed_metrics_service()
+            from .metrics import metrics_service
 
             # Get memory usage if available
             memory_peak_mb = None
@@ -1063,7 +1042,7 @@ class ExecutionOrchestrator:
                 state_size_bytes=state_size,
             )
 
-            await service.record_execution(metrics)
+            await metrics_service.record_execution(metrics)
 
         except Exception as e:
             logger.warning("Failed to record detailed metrics", error=str(e))

@@ -3,6 +3,7 @@
 import asyncio
 import re
 import shlex
+import struct
 from typing import Any, Dict, Optional, Tuple
 
 import structlog
@@ -13,6 +14,11 @@ from ...config import settings
 from .utils import wait_for_container_ready, receive_socket_output, run_in_executor
 
 logger = structlog.get_logger(__name__)
+
+# Docker multiplexed stream header constants
+_DOCKER_STREAM_STDOUT = 1
+_DOCKER_STREAM_STDERR = 2
+_DOCKER_HEADER_SIZE = 8
 
 
 class ContainerExecutor:
@@ -104,26 +110,130 @@ class ContainerExecutor:
         stdin_payload: Optional[str],
         timeout: int,
     ) -> Tuple[int, str, str]:
-        """Execute command and collect output via socket."""
+        """Execute command and collect output.
+
+        Uses docker-py's demux=True for proper stdout/stderr separation when
+        no stdin is needed. Falls back to raw socket with manual stream header
+        parsing when stdin must be sent.
+        """
         exec_instance = self.client.api.exec_create(container.id, **exec_config)
         exec_id = exec_instance["Id"]
 
+        if stdin_payload:
+            # Must use raw socket to send stdin data
+            stdout, stderr = self._exec_with_socket(
+                exec_id, stdin_payload, timeout
+            )
+        else:
+            # Use docker-py demux for proper stream separation
+            stdout, stderr = self._exec_with_demux(exec_id, timeout)
+
+        exec_info = self.client.api.exec_inspect(exec_id)
+        exit_code = exec_info["ExitCode"]
+
+        return exit_code, stdout, stderr
+
+    def _exec_with_demux(
+        self, exec_id: str, timeout: int
+    ) -> Tuple[str, str]:
+        """Execute using docker-py's demux=True for proper stream separation.
+
+        docker-py parses Docker's multiplexed stream headers internally and
+        returns (stdout_bytes, stderr_bytes) as a tuple. This is reliable and
+        avoids keyword-based guessing.
+        """
+        result = self.client.api.exec_start(exec_id, demux=True)
+        # demux=True returns (stdout_bytes | None, stderr_bytes | None)
+        stdout_bytes = result[0] if result[0] else b""
+        stderr_bytes = result[1] if result[1] else b""
+
+        stdout = self._sanitize_output(stdout_bytes) if stdout_bytes else ""
+        stderr = self._sanitize_output(stderr_bytes) if stderr_bytes else ""
+        return stdout, stderr
+
+    def _exec_with_socket(
+        self, exec_id: str, stdin_payload: str, timeout: int
+    ) -> Tuple[str, str]:
+        """Execute via raw socket when stdin must be sent.
+
+        Parses Docker's multiplexed stream headers (8-byte header per frame)
+        to separate stdout from stderr. Falls back to keyword-based separation
+        if header parsing fails.
+        """
         sock = self.client.api.exec_start(exec_id, socket=True)
         raw_sock = sock._sock
         raw_sock.settimeout(timeout)
 
-        if stdin_payload:
-            raw_sock.sendall(stdin_payload.encode("utf-8"))
-            raw_sock.shutdown(1)
+        raw_sock.sendall(stdin_payload.encode("utf-8"))
+        raw_sock.shutdown(1)
 
         output = receive_socket_output(raw_sock)
-        exec_info = self.client.api.exec_inspect(exec_id)
-        exit_code = exec_info["ExitCode"]
+        if not output:
+            return "", ""
 
-        output_str = self._sanitize_output(output) if output else ""
-        stdout, stderr = self._separate_output_streams(output_str, exit_code)
+        # Try to parse Docker multiplexed stream headers
+        stdout_bytes, stderr_bytes = self._demux_docker_stream(output)
+        if stdout_bytes is not None:
+            stdout = self._sanitize_output(stdout_bytes) if stdout_bytes else ""
+            stderr = self._sanitize_output(stderr_bytes) if stderr_bytes else ""
+            return stdout, stderr
 
-        return exit_code, stdout, stderr
+        # Fallback: header parsing failed, use keyword-based separation
+        logger.debug("Docker stream header parsing failed, using keyword fallback")
+        output_str = self._sanitize_output(output)
+        return self._separate_output_streams(output_str, exit_code=-1)
+
+    @staticmethod
+    def _demux_docker_stream(data: bytes) -> Tuple[Optional[bytes], Optional[bytes]]:
+        """Parse Docker multiplexed stream format into stdout and stderr.
+
+        Docker's multiplexed stream format (used when tty=False):
+        Each frame has an 8-byte header:
+          - byte 0: stream type (0=stdin, 1=stdout, 2=stderr)
+          - bytes 1-3: padding (zeros)
+          - bytes 4-7: payload size (big-endian uint32)
+
+        Returns:
+            (stdout_bytes, stderr_bytes) on success, or (None, None) if
+            the data does not look like a valid multiplexed stream.
+        """
+        stdout_parts = []
+        stderr_parts = []
+        pos = 0
+
+        while pos < len(data):
+            if pos + _DOCKER_HEADER_SIZE > len(data):
+                # Not enough data for a header -- invalid
+                return None, None
+
+            stream_type = data[pos]
+            # Validate padding bytes are zero
+            if data[pos + 1 : pos + 4] != b"\x00\x00\x00":
+                return None, None
+
+            size = struct.unpack(">I", data[pos + 4 : pos + 8])[0]
+
+            if stream_type not in (_DOCKER_STREAM_STDOUT, _DOCKER_STREAM_STDERR, 0):
+                return None, None
+
+            payload_start = pos + _DOCKER_HEADER_SIZE
+            payload_end = payload_start + size
+
+            if payload_end > len(data):
+                # Partial final frame -- take what we have
+                payload_end = len(data)
+
+            payload = data[payload_start:payload_end]
+
+            if stream_type == _DOCKER_STREAM_STDOUT:
+                stdout_parts.append(payload)
+            elif stream_type == _DOCKER_STREAM_STDERR:
+                stderr_parts.append(payload)
+            # stream_type 0 (stdin) is ignored
+
+            pos = payload_end
+
+        return b"".join(stdout_parts), b"".join(stderr_parts)
 
     async def _start_container(self, container: Container) -> bool:
         """Start a container and wait for running state."""
@@ -246,7 +356,12 @@ class ContainerExecutor:
             return "[Output sanitization failed]"
 
     def _separate_output_streams(self, output: str, exit_code: int) -> Tuple[str, str]:
-        """Separate stdout and stderr from combined output."""
+        """Fallback: separate stdout/stderr using keyword heuristics.
+
+        Only used when Docker stream header parsing is unavailable (e.g.,
+        raw socket mode where headers could not be parsed). Prefer
+        _exec_with_demux or _demux_docker_stream for reliable separation.
+        """
         if exit_code != 0:
             error_patterns = [
                 "error:",

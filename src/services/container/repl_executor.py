@@ -310,15 +310,31 @@ class REPLExecutor:
                 b"\x02",
                 b"\x00",
             ):
-                # This looks like a Docker header
+                # Validate padding bytes are zero (bytes 1-3)
+                if data[pos + 1 : pos + 4] != b"\x00\x00\x00":
+                    # Invalid header padding, skip to JSON search
+                    if data[pos : pos + 1] == b"{":
+                        result.extend(data[pos:])
+                        break
+                    pos += 1
+                    continue
+
                 # Read the payload size from bytes 4-7 (big-endian)
                 size = int.from_bytes(data[pos + 4 : pos + 8], byteorder="big")
-                if size > 0 and pos + 8 + size <= len(data) + 100:  # Allow some slack
-                    # Extract payload
-                    payload_start = pos + 8
-                    payload_end = min(pos + 8 + size, len(data))
-                    result.extend(data[payload_start:payload_end])
-                    pos = payload_end
+                payload_start = pos + 8
+
+                if size > 0 and payload_start + size <= len(data):
+                    # Complete frame: extract full payload
+                    result.extend(data[payload_start : payload_start + size])
+                    pos = payload_start + size
+                    continue
+                elif size > 0 and payload_start < len(data):
+                    # Partial final frame: take available data
+                    result.extend(data[payload_start:])
+                    break
+                else:
+                    # Empty or invalid size, skip this header
+                    pos = payload_start
                     continue
 
             # Not a header or invalid, try to find JSON start

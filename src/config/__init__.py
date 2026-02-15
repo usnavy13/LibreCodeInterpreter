@@ -18,9 +18,11 @@ Usage:
     settings.get_redis_url()
 """
 
+import secrets
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import structlog
 from pydantic import Field, validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -77,7 +79,10 @@ class Settings(BaseSettings):
     ssl_ca_certs: Optional[str] = Field(default=None)
 
     # Authentication Configuration
-    api_key: str = Field(default="test-api-key", min_length=16)
+    api_key: str = Field(
+        default_factory=lambda: secrets.token_urlsafe(24),
+        min_length=16,
+    )
     api_keys: Optional[str] = Field(default=None)
     api_key_header: str = Field(default="x-api-key")
     api_key_cache_ttl: int = Field(default=300, ge=60)
@@ -479,6 +484,20 @@ class Settings(BaseSettings):
     # ========================================================================
     # VALIDATORS (preserved from original)
     # ========================================================================
+
+    @validator("api_key")
+    def warn_auto_generated_api_key(cls, v):
+        """Log a warning if API_KEY was not explicitly set."""
+        import os
+
+        if not os.environ.get("API_KEY"):
+            _config_logger = structlog.get_logger("config")
+            _config_logger.warning(
+                "API_KEY not set in environment; using auto-generated key. "
+                "Set API_KEY explicitly for production use.",
+                auto_generated_key=v,
+            )
+        return v
 
     @validator("api_keys")
     def parse_api_keys(cls, v):

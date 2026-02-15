@@ -21,7 +21,7 @@ class PooledContainer:
     language: str
     image: str
     created_at: datetime
-    status: Literal["available", "starting", "unhealthy"] = "available"
+    status: Literal["available"] = "available"
     repl_enabled: bool = False  # Whether REPL mode is enabled for this container
     repl_ready: bool = False  # Whether REPL server is ready and responsive
 
@@ -39,8 +39,7 @@ class PoolStats:
     """Container pool statistics for monitoring."""
 
     language: str
-    available_count: int
-    assigned_count: int  # Kept for backward compatibility (always 0 now)
+    available_count: int = 0
     total_acquisitions: int = 0
     pool_hits: int = 0  # Acquired from pool
     pool_misses: int = 0  # Created fresh (pool empty)

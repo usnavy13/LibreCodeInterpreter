@@ -1,13 +1,14 @@
 """Admin API endpoints for dashboard."""
 
 from typing import List, Optional, Dict, Any
-from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException, Depends, Header, Query
+from datetime import datetime, timedelta, timezone
+from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel, Field
 
 from ..config import settings
+from ..dependencies.auth import verify_master_key
 from ..services.api_key_manager import get_api_key_manager
-from ..services.detailed_metrics import get_detailed_metrics_service
+from ..services.metrics import metrics_service as unified_metrics
 from ..services.health import health_service
 from ..models.api_key import RateLimits as RateLimitsModel
 
@@ -48,22 +49,6 @@ class ApiKeyResponse(BaseModel):
     last_used_at: Optional[datetime] = None
     usage_count: int
     source: str = "managed"  # "managed" or "environment"
-
-
-# --- Dependencies ---
-
-
-async def verify_master_key(x_api_key: str = Header(...)):
-    """Verify the Master API Key for admin operations."""
-    if not settings.master_api_key:
-        raise HTTPException(
-            status_code=500,
-            detail="Admin operations are disabled (no MASTER_API_KEY configured)",
-        )
-
-    if x_api_key != settings.master_api_key:
-        raise HTTPException(status_code=403, detail="Invalid Master API Key")
-    return x_api_key
 
 
 # --- Endpoints ---
@@ -189,27 +174,26 @@ async def get_admin_stats(
     hours: int = Query(24, ge=1, le=168), _: str = Depends(verify_master_key)
 ):
     """Get aggregated statistics for the admin dashboard."""
-    metrics_service = get_detailed_metrics_service()
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(hours=hours)
 
-    # Get high-level summary
-    summary = await metrics_service.get_summary()
+    # Get high-level summary from unified metrics service
+    summary = await unified_metrics.get_summary_stats(start=start, end=now)
 
     # Get language breakdown
-    language_stats = await metrics_service.get_language_stats(hours=hours)
+    lang_data = await unified_metrics.get_language_usage(start=start, end=now)
 
-    # Get pool stats
-    pool_stats = await metrics_service.get_pool_stats()
+    # Get pool stats (in-memory)
+    pool_stats = unified_metrics.get_pool_stats()
 
     # Get health status
     health_results = await health_service.check_all_services(use_cache=True)
     overall_health = health_service.get_overall_status(health_results)
 
     return {
-        "summary": summary.to_dict(),
-        "by_language": {
-            lang: stats.to_dict() for lang, stats in language_stats.items()
-        },
-        "pool_stats": pool_stats.to_dict(),
+        "summary": summary,
+        "by_language": lang_data.get("by_language", {}),
+        "pool_stats": pool_stats,
         "health": {
             "status": overall_health.value,
             "services": {
@@ -217,5 +201,5 @@ async def get_admin_stats(
             },
         },
         "period_hours": hours,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": now.isoformat(),
     }

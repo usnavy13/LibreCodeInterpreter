@@ -21,7 +21,7 @@ from .middleware.security import SecurityMiddleware, RequestLoggingMiddleware
 from .middleware.metrics import MetricsMiddleware
 from .models.errors import CodeInterpreterException
 from .services.health import health_service
-from .services.metrics import metrics_collector
+from .services.metrics import metrics_service
 from .utils.config_validator import validate_configuration, get_configuration_summary
 from .utils.error_handlers import (
     code_interpreter_exception_handler,
@@ -37,63 +37,19 @@ setup_logging()
 logger = structlog.get_logger()
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Application lifespan manager."""
-    # Startup
-    logger.info("Starting Code Interpreter API", version="1.0.0")
-
-    # Setup graceful shutdown callbacks (uvicorn handles signals)
-    setup_graceful_shutdown()
-
-    # Validate configuration on startup
-    if not validate_configuration():
-        logger.error("Configuration validation failed - shutting down")
-        sys.exit(1)
-
-    # Log security warnings if applicable
-    if settings.api_key == "test-api-key":
-        logger.warning("Using default API key - CHANGE THIS IN PRODUCTION!")
-
-    if settings.api_debug:
-        logger.warning("Debug mode is enabled - disable in production")
-
-    # Log API key management status
-    if settings.master_api_key:
-        logger.info("API key management enabled (MASTER_API_KEY configured)")
-    else:
-        logger.info("API key management: CLI disabled (no MASTER_API_KEY set)")
-
-    logger.info(
-        "Rate limiting configuration", rate_limit_enabled=settings.rate_limit_enabled
-    )
-
-    # Start monitoring services
+async def _startup_monitoring(app: FastAPI) -> None:
+    """Start metrics and monitoring services."""
     try:
-        logger.info("Starting metrics collector...")
-        await metrics_collector.start()
-        logger.info("Metrics collector started successfully")
+        logger.info("Starting metrics service...")
+        await metrics_service.start()
+        metrics_service.register_event_handlers()
+        logger.info("Metrics service started successfully")
     except Exception as e:
-        logger.error("Failed to start metrics collector", error=str(e))
-        # Don't fail startup if metrics collector fails
+        logger.error("Failed to start metrics service", error=str(e))
 
-    # Start SQLite metrics service for long-term analytics
-    if settings.sqlite_metrics_enabled:
-        try:
-            logger.info("Starting SQLite metrics service...")
-            from .services.sqlite_metrics import sqlite_metrics_service
 
-            await sqlite_metrics_service.start()
-            app.state.sqlite_metrics_service = sqlite_metrics_service
-            logger.info(
-                "SQLite metrics service started successfully",
-                db_path=settings.sqlite_metrics_db_path,
-            )
-        except Exception as e:
-            logger.error("Failed to start SQLite metrics service", error=str(e))
-            # Don't fail startup if SQLite metrics fails
-
-    # Start session cleanup task
+async def _startup_cleanup_tasks() -> None:
+    """Start session cleanup and event-driven cleanup scheduler."""
     try:
         logger.info("Starting session cleanup task...")
         from .dependencies.services import get_session_service
@@ -103,9 +59,7 @@ async def lifespan(app: FastAPI):
         logger.info("Session cleanup task started successfully")
     except Exception as e:
         logger.error("Failed to start session cleanup task", error=str(e))
-        # Don't fail startup if cleanup task fails
 
-    # Start event-driven cleanup scheduler
     try:
         logger.info("Starting cleanup scheduler...")
         from .services.cleanup import cleanup_scheduler
@@ -129,10 +83,10 @@ async def lifespan(app: FastAPI):
         )
     except Exception as e:
         logger.error("Failed to start cleanup scheduler", error=str(e))
-        # Don't fail startup if cleanup scheduler fails
 
-    # Initialize WAN network for container internet access if enabled
-    # IMPORTANT: This must happen BEFORE the container pool starts
+
+async def _startup_network(app: FastAPI) -> None:
+    """Initialize WAN network for container internet access if enabled."""
     if settings.enable_wan_access:
         try:
             logger.info("Initializing WAN network for container internet access...")
@@ -155,12 +109,12 @@ async def lifespan(app: FastAPI):
                 logger.warning("Docker not available, skipping WAN network setup")
         except Exception as e:
             logger.error("Error initializing WAN network", error=str(e))
-            # Don't fail startup if WAN network fails
     else:
         logger.info("WAN network access disabled (containers have no network access)")
 
-    # Start container pool if enabled
-    container_pool = None
+
+async def _startup_container_pool(app: FastAPI) -> None:
+    """Start the container pool if enabled."""
     if settings.container_pool_enabled:
         try:
             logger.info("Starting container pool...")
@@ -195,17 +149,16 @@ async def lifespan(app: FastAPI):
             )
         except Exception as e:
             logger.error("Failed to start container pool", error=str(e))
-            # Don't fail startup if container pool fails
-            container_pool = None
     else:
         logger.info("Container pool disabled by configuration")
 
-    # Perform initial health checks
+
+async def _perform_health_checks() -> None:
+    """Perform initial health checks on all services."""
     try:
         logger.info("Performing initial health checks...")
         health_results = await health_service.check_all_services(use_cache=False)
 
-        # Log health check results
         for service_name, result in health_results.items():
             if result.status.value == "healthy":
                 logger.info(
@@ -223,19 +176,12 @@ async def lifespan(app: FastAPI):
         logger.info(
             "Initial health checks completed", overall_status=overall_status.value
         )
-
     except Exception as e:
         logger.error("Initial health checks failed", error=str(e))
-        # Don't fail startup if health checks fail
 
-    logger.info("Code Interpreter API startup completed")
 
-    yield
-
-    # Shutdown
-    logger.info("Shutting down Code Interpreter API")
-
-    # Cleanup WAN network iptables rules
+async def _shutdown_network(app: FastAPI) -> None:
+    """Cleanup WAN network resources."""
     if hasattr(app.state, "wan_network_manager") and app.state.wan_network_manager:
         try:
             await app.state.wan_network_manager.cleanup()
@@ -243,18 +189,15 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error("Error cleaning up WAN network", error=str(e))
 
-    # Stop SQLite metrics service (flush pending writes)
-    if (
-        hasattr(app.state, "sqlite_metrics_service")
-        and app.state.sqlite_metrics_service
-    ):
-        try:
-            await app.state.sqlite_metrics_service.stop()
-            logger.info("SQLite metrics service stopped")
-        except Exception as e:
-            logger.error("Error stopping SQLite metrics service", error=str(e))
 
-    # Stop container pool first (it manages active containers)
+async def _shutdown_services(app: FastAPI) -> None:
+    """Stop monitoring services, container pool, and cleanup scheduler."""
+    try:
+        await metrics_service.stop()
+        logger.info("Metrics service stopped")
+    except Exception as e:
+        logger.error("Error stopping metrics service", error=str(e))
+
     if hasattr(app.state, "container_pool") and app.state.container_pool:
         try:
             await app.state.container_pool.stop()
@@ -262,7 +205,6 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error("Error stopping container pool", error=str(e))
 
-    # Stop cleanup scheduler
     try:
         from .services.cleanup import cleanup_scheduler
 
@@ -271,7 +213,45 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error("Error stopping cleanup scheduler", error=str(e))
 
-    # Perform graceful shutdown
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan manager."""
+    logger.info("Starting Code Interpreter API", version="1.0.0")
+
+    setup_graceful_shutdown()
+
+    if not validate_configuration():
+        logger.error("Configuration validation failed - shutting down")
+        sys.exit(1)
+
+    if settings.api_key == "test-api-key":
+        logger.warning("Using default API key - CHANGE THIS IN PRODUCTION!")
+    if settings.api_debug:
+        logger.warning("Debug mode is enabled - disable in production")
+    if settings.master_api_key:
+        logger.info("API key management enabled (MASTER_API_KEY configured)")
+    else:
+        logger.info("API key management: CLI disabled (no MASTER_API_KEY set)")
+    logger.info(
+        "Rate limiting configuration", rate_limit_enabled=settings.rate_limit_enabled
+    )
+
+    await _startup_monitoring(app)
+    await _startup_cleanup_tasks()
+    await _startup_network(app)
+    await _startup_container_pool(app)
+    await _perform_health_checks()
+
+    logger.info("Code Interpreter API startup completed")
+
+    yield
+
+    logger.info("Shutting down Code Interpreter API")
+
+    await _shutdown_network(app)
+    await _shutdown_services(app)
+
     try:
         await shutdown_handler.shutdown()
     except Exception as e:
@@ -317,20 +297,6 @@ app.add_exception_handler(HTTPException, http_exception_handler)
 app.add_exception_handler(RequestValidationError, validation_exception_handler)
 app.add_exception_handler(ValidationError, validation_exception_handler)
 app.add_exception_handler(Exception, general_exception_handler)
-
-
-@app.get("/health")
-async def health_check():
-    """Health check endpoint."""
-    return {
-        "status": "healthy",
-        "version": "1.0.0",
-        "config": {
-            "debug": settings.api_debug,
-            "docs_enabled": settings.enable_docs,
-            "cors_enabled": settings.enable_cors,
-        },
-    }
 
 
 @app.get("/config")

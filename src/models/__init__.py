@@ -5,7 +5,6 @@ from .session import (
     SessionStatus,
     SessionCreate,
     SessionResponse,
-    FileInfo as SessionFileInfo,
 )
 from .execution import (
     CodeExecution,
@@ -29,17 +28,8 @@ from .errors import (
     ErrorDetail,
     ErrorResponse,
     CodeInterpreterException,
-    AuthenticationError,
-    AuthorizationError,
     ValidationError,
-    ResourceNotFoundError,
-    ResourceConflictError,
-    ResourceExhaustedError,
-    ExecutionError,
-    TimeoutError,
-    RateLimitError,
     ServiceUnavailableError,
-    ExternalServiceError,
 )
 from .pool import PooledContainer, PoolStats, PoolConfig
 from .state import StateInfo, StateUploadResponse
@@ -50,7 +40,6 @@ __all__ = [
     "SessionStatus",
     "SessionCreate",
     "SessionResponse",
-    "SessionFileInfo",
     # Execution models
     "CodeExecution",
     "ExecutionStatus",
@@ -75,17 +64,8 @@ __all__ = [
     "ErrorDetail",
     "ErrorResponse",
     "CodeInterpreterException",
-    "AuthenticationError",
-    "AuthorizationError",
     "ValidationError",
-    "ResourceNotFoundError",
-    "ResourceConflictError",
-    "ResourceExhaustedError",
-    "ExecutionError",
-    "TimeoutError",
-    "RateLimitError",
     "ServiceUnavailableError",
-    "ExternalServiceError",
     # Pool models
     "PooledContainer",
     "PoolStats",

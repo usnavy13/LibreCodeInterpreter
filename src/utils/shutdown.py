@@ -5,7 +5,7 @@ from typing import List, Callable, Awaitable
 import structlog
 
 from ..services.health import health_service
-from ..services.metrics import metrics_collector
+from ..services.metrics import metrics_service
 
 logger = structlog.get_logger(__name__)
 
@@ -73,14 +73,14 @@ async def cleanup_services() -> None:
     except Exception as e:
         logger.error("Error stopping session service", error=str(e))
 
-    # Stop metrics collector with timeout
+    # Stop metrics service with timeout
     try:
-        await asyncio.wait_for(metrics_collector.stop(), timeout=5.0)
-        logger.info("Metrics collector stopped")
+        await asyncio.wait_for(metrics_service.stop(), timeout=5.0)
+        logger.info("Metrics service stopped")
     except asyncio.TimeoutError:
-        logger.warning("Metrics collector stop timed out")
+        logger.warning("Metrics service stop timed out")
     except Exception as e:
-        logger.error("Error stopping metrics collector", error=str(e))
+        logger.error("Error stopping metrics service", error=str(e))
 
     # Close health service with timeout
     try:

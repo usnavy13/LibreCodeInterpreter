@@ -7,7 +7,6 @@ from .interfaces import (
     SessionServiceInterface,
     ExecutionServiceInterface,
     FileServiceInterface,
-    ContainerServiceInterface,
 )
 
 __all__ = [
@@ -17,5 +16,4 @@ __all__ = [
     "SessionServiceInterface",
     "ExecutionServiceInterface",
     "FileServiceInterface",
-    "ContainerServiceInterface",
 ]

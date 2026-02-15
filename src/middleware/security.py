@@ -1,7 +1,9 @@
 """Consolidated security middleware for the Code Interpreter API."""
 
 # Standard library imports
+import hmac
 import time
+from datetime import datetime, timezone
 from typing import Callable, Optional
 
 # Third-party imports
@@ -27,8 +29,6 @@ class SecurityMiddleware:
             "/docs",
             "/redoc",
             "/openapi.json",
-            "/api/v1/admin",
-            "/admin-dashboard",
         }
 
     async def __call__(self, scope: dict, receive: Callable, send: Callable):
@@ -142,12 +142,7 @@ class SecurityMiddleware:
     def _should_skip_auth(self, request: Request) -> bool:
         """Check if authentication should be skipped."""
         path = request.url.path
-        return (
-            path in self.excluded_paths
-            or path.startswith("/api/v1/admin")
-            or path.startswith("/admin-dashboard")
-            or request.method == "OPTIONS"
-        )
+        return path in self.excluded_paths or request.method == "OPTIONS"
 
     async def _authenticate_request(self, request: Request, scope: dict):
         """Handle API key authentication with rate limiting."""
@@ -164,6 +159,20 @@ class SecurityMiddleware:
                 status_code=429,
                 detail="Too many authentication failures. Please try again later.",
             )
+
+        # For admin endpoints, accept the master API key directly
+        path = request.url.path
+        is_admin_path = path.startswith("/api/v1/admin") or path.startswith(
+            "/admin-dashboard"
+        )
+        if is_admin_path and api_key and settings.master_api_key:
+            if hmac.compare_digest(api_key, settings.master_api_key):
+                scope["state"] = scope.get("state", {})
+                scope["state"]["authenticated"] = True
+                scope["state"]["api_key"] = api_key
+                scope["state"]["api_key_hash"] = "master"
+                scope["state"]["is_env_key"] = True
+                return
 
         # Validate API key with full details
         result = await auth_service.validate_api_key_full(api_key)
@@ -185,18 +194,15 @@ class SecurityMiddleware:
                     "X-RateLimit-Reset": exceeded.resets_at.isoformat(),
                     "X-RateLimit-Period": exceeded.period,
                     "Retry-After": str(
-                        int(
-                            (
-                                exceeded.resets_at
-                                - exceeded.resets_at.replace(
-                                    hour=exceeded.resets_at.hour,
-                                    minute=0,
-                                    second=0,
-                                    microsecond=0,
-                                )
-                            ).total_seconds()
+                        max(
+                            int(
+                                (
+                                    exceeded.resets_at
+                                    - datetime.now(timezone.utc)
+                                ).total_seconds()
+                            ),
+                            60,
                         )
-                        or 60
                     ),
                 }
             raise HTTPException(

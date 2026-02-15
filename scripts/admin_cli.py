@@ -39,7 +39,7 @@ from rich import box
 
 from src.config import settings
 from src.core.pool import redis_pool
-from src.services.detailed_metrics import DetailedMetricsService
+from src.services.metrics import metrics_service
 from src.services.api_key_manager import ApiKeyManagerService
 from src.models.api_key import RateLimits
 
@@ -62,10 +62,10 @@ async def get_redis():
     return redis_client
 
 
-async def get_metrics_service() -> DetailedMetricsService:
-    """Get metrics service instance."""
-    redis_client = await get_redis()
-    return DetailedMetricsService(redis_client)
+async def ensure_metrics_started():
+    """Ensure metrics service is running."""
+    if not metrics_service._running:
+        await metrics_service.start()
 
 
 async def get_key_manager() -> ApiKeyManagerService:
@@ -119,121 +119,95 @@ def format_limit(value: Optional[int]) -> str:
 # Metrics Panels
 # ============================================================================
 
-async def build_summary_panel(service: DetailedMetricsService) -> Panel:
+async def build_summary_panel(hours: int = 24) -> Panel:
     """Build summary panel."""
-    summary = await service.get_summary()
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(hours=hours)
+    summary = await metrics_service.get_summary_stats(start=start, end=now)
 
     table = Table(show_header=False, box=None, padding=(0, 2))
     table.add_column("Metric", style="cyan")
     table.add_column("Value", style="white")
 
-    table.add_row("Total Executions", str(summary.total_executions))
-    table.add_row("Today (24h)", str(summary.total_executions_today))
-    table.add_row("This Hour", str(summary.total_executions_hour))
-    table.add_row("", "")
-    table.add_row("Success Rate", format_rate(summary.success_rate))
-    table.add_row("Avg Exec Time", format_duration(summary.avg_execution_time_ms))
-    table.add_row("Pool Hit Rate", format_rate(summary.pool_hit_rate))
+    table.add_row("Total Executions", str(summary.get("total_executions", 0)))
+    table.add_row("Success Rate", format_rate(summary.get("success_rate", 0)))
+    table.add_row("Avg Exec Time", format_duration(summary.get("avg_execution_time_ms", 0)))
+    table.add_row("Pool Hit Rate", format_rate(summary.get("pool_hit_rate", 0)))
+    table.add_row("Active API Keys", str(summary.get("active_api_keys", 0)))
 
-    return Panel(table, title="[bold]Metrics Summary[/bold]", border_style="blue")
+    return Panel(table, title=f"[bold]Metrics Summary[/bold] (last {hours}h)", border_style="blue")
 
 
-async def build_languages_table(service: DetailedMetricsService, hours: int = 24) -> Table:
+async def build_languages_table(hours: int = 24) -> Table:
     """Build languages table."""
-    language_stats = await service.get_language_stats(hours=hours)
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(hours=hours)
+    lang_data = await metrics_service.get_language_usage(start=start, end=now)
+    by_language = lang_data.get("by_language", {})
 
     table = Table(title=f"Language Metrics (last {hours}h)", box=box.ROUNDED)
     table.add_column("Language", style="cyan", justify="center")
     table.add_column("Executions", justify="right")
-    table.add_column("Success", justify="right", style="green")
-    table.add_column("Failures", justify="right", style="red")
-    table.add_column("Avg Time", justify="right")
-    table.add_column("Error Rate", justify="right")
 
-    sorted_languages = sorted(
-        language_stats.values(),
-        key=lambda x: x.execution_count,
-        reverse=True
-    )
+    sorted_langs = sorted(by_language.items(), key=lambda x: x[1], reverse=True)
 
-    for lang in sorted_languages:
-        table.add_row(
-            lang.language.upper(),
-            str(lang.execution_count),
-            str(lang.success_count),
-            str(lang.failure_count),
-            format_duration(lang.avg_execution_time_ms),
-            format_error_rate(lang.error_rate)
-        )
+    for lang, count in sorted_langs:
+        table.add_row(lang.upper(), str(count))
 
-    if sorted_languages:
-        total_exec = sum(l.execution_count for l in sorted_languages)
-        total_success = sum(l.success_count for l in sorted_languages)
-        total_fail = sum(l.failure_count for l in sorted_languages)
-        overall_rate = (total_fail / total_exec * 100) if total_exec > 0 else 0
+    if sorted_langs:
+        total = sum(count for _, count in sorted_langs)
+        table.add_row("", "", style="dim")
+        table.add_row("[bold]TOTAL[/bold]", f"[bold]{total}[/bold]")
 
-        table.add_row("", "", "", "", "", "", style="dim")
-        table.add_row(
-            "[bold]TOTAL[/bold]",
-            f"[bold]{total_exec}[/bold]",
-            f"[bold]{total_success}[/bold]",
-            f"[bold]{total_fail}[/bold]",
-            "",
-            format_error_rate(overall_rate)
-        )
+    if not sorted_langs:
+        table.add_row("[dim]No data[/dim]", "")
 
     return table
 
 
-async def build_pool_panel(service: DetailedMetricsService) -> Panel:
+async def build_pool_panel() -> Panel:
     """Build pool stats panel."""
-    pool_stats = await service.get_pool_stats()
+    pool_stats = metrics_service.get_pool_stats()
 
     table = Table(show_header=False, box=None, padding=(0, 2))
     table.add_column("Metric", style="cyan")
     table.add_column("Value", style="white")
 
-    table.add_row("Total Acquisitions", str(pool_stats.total_acquisitions))
-    table.add_row("Pool Hits", Text(str(pool_stats.pool_hits), style="green"))
-    table.add_row("Pool Misses", Text(str(pool_stats.pool_misses), style="yellow"))
-    table.add_row("Hit Rate", format_rate(pool_stats.hit_rate))
-    table.add_row("Avg Acquire Time", format_duration(pool_stats.avg_acquire_time_ms))
-    table.add_row("Exhaustion Events", Text(str(pool_stats.exhaustion_events),
-                                            style="red" if pool_stats.exhaustion_events > 0 else "green"))
+    table.add_row("Total Acquisitions", str(pool_stats["total_acquisitions"]))
+    table.add_row("Pool Hits", Text(str(pool_stats["pool_hits"]), style="green"))
+    table.add_row("Pool Misses", Text(str(pool_stats["pool_misses"]), style="yellow"))
+    table.add_row("Hit Rate", format_rate(pool_stats["hit_rate"]))
+    table.add_row("Avg Acquire Time", format_duration(pool_stats["avg_acquire_time_ms"]))
+    table.add_row("Exhaustion Events", Text(str(pool_stats["exhaustion_events"]),
+                                            style="red" if pool_stats["exhaustion_events"] > 0 else "green"))
 
     return Panel(table, title="[bold]Container Pool[/bold]", border_style="magenta")
 
 
-async def build_hourly_table(service: DetailedMetricsService, hours: int = 12) -> Table:
-    """Build hourly breakdown table."""
+async def build_hourly_table(hours: int = 12) -> Table:
+    """Build hourly breakdown table using time series from SQLite."""
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(hours=hours)
+    data = await metrics_service.get_time_series(
+        start=start, end=now, granularity="hour"
+    )
+
     table = Table(title=f"Hourly Breakdown (last {hours}h)", box=box.ROUNDED)
     table.add_column("Hour", style="dim")
     table.add_column("Executions", justify="right")
-    table.add_column("Success", justify="right", style="green")
-    table.add_column("Failures", justify="right", style="red")
-    table.add_column("Timeouts", justify="right", style="yellow")
+    table.add_column("Success Rate", justify="right")
     table.add_column("Avg Time", justify="right")
 
-    now = datetime.now(timezone.utc)
+    for i, ts in enumerate(data.get("timestamps", [])):
+        table.add_row(
+            ts,
+            str(data["executions"][i]),
+            format_rate(data["success_rate"][i]),
+            format_duration(data["avg_duration"][i]),
+        )
 
-    for i in range(hours):
-        hour = now - timedelta(hours=i)
-        metrics = await service.get_hourly_metrics(hour)
-
-        if metrics:
-            table.add_row(
-                hour.strftime('%m-%d %H:00'),
-                str(metrics.execution_count),
-                str(metrics.success_count),
-                str(metrics.failure_count),
-                str(metrics.timeout_count),
-                format_duration(metrics.avg_execution_time_ms)
-            )
-        else:
-            table.add_row(
-                hour.strftime('%m-%d %H:00'),
-                "[dim]0[/dim]", "[dim]0[/dim]", "[dim]0[/dim]", "[dim]0[/dim]", "[dim]-[/dim]"
-            )
+    if not data.get("timestamps"):
+        table.add_row("[dim]No data[/dim]", "", "", "")
 
     return table
 
@@ -327,7 +301,7 @@ async def build_key_detail_panel(manager: ApiKeyManagerService, key_hash: str) -
 
 async def metrics_menu():
     """Metrics sub-menu."""
-    service = await get_metrics_service()
+    await ensure_metrics_started()
 
     while True:
         console.clear()
@@ -338,10 +312,12 @@ async def metrics_menu():
         console.print()
 
         # Quick stats
-        summary = await service.get_summary()
-        console.print(f"  [cyan]Today:[/cyan] {summary.total_executions_today} executions  "
-                     f"[cyan]Success:[/cyan] {summary.success_rate:.1f}%  "
-                     f"[cyan]Avg:[/cyan] {format_duration(summary.avg_execution_time_ms)}")
+        now = datetime.now(timezone.utc)
+        start = now - timedelta(hours=24)
+        summary = await metrics_service.get_summary_stats(start=start, end=now)
+        console.print(f"  [cyan]Today:[/cyan] {summary.get('total_executions', 0)} executions  "
+                     f"[cyan]Success:[/cyan] {summary.get('success_rate', 0):.1f}%  "
+                     f"[cyan]Avg:[/cyan] {format_duration(summary.get('avg_execution_time_ms', 0))}")
         console.print()
 
         console.print("[bold]Options:[/bold]")
@@ -358,30 +334,30 @@ async def metrics_menu():
         if choice == "b":
             break
         elif choice == "1":
-            panel = await build_summary_panel(service)
+            panel = await build_summary_panel()
             console.print()
             console.print(panel)
         elif choice == "2":
-            table = await build_languages_table(service, 24)
+            table = await build_languages_table(24)
             console.print()
             console.print(table)
         elif choice == "3":
-            table = await build_hourly_table(service, 12)
+            table = await build_hourly_table(12)
             console.print()
             console.print(table)
         elif choice == "4":
-            panel = await build_pool_panel(service)
+            panel = await build_pool_panel()
             console.print()
             console.print(panel)
         elif choice == "5":
-            await live_dashboard(service)
+            await live_dashboard()
             continue
 
         console.print()
         Prompt.ask("[dim]Press Enter to continue[/dim]", default="")
 
 
-async def live_dashboard(service: DetailedMetricsService):
+async def live_dashboard():
     """Auto-refresh dashboard."""
     console.print("\n[bold cyan]Live Dashboard[/bold cyan] [dim](Ctrl+C to exit)[/dim]\n")
 
@@ -395,12 +371,12 @@ async def live_dashboard(service: DetailedMetricsService):
             ))
             console.print()
 
-            summary_panel = await build_summary_panel(service)
-            pool_panel = await build_pool_panel(service)
+            summary_panel = await build_summary_panel()
+            pool_panel = await build_pool_panel()
             console.print(Columns([summary_panel, pool_panel], equal=True, expand=True))
             console.print()
 
-            lang_table = await build_languages_table(service, 24)
+            lang_table = await build_languages_table(24)
             console.print(lang_table)
             console.print()
 
@@ -633,16 +609,19 @@ async def main_menu():
 
         # Quick stats
         try:
-            service = await get_metrics_service()
-            summary = await service.get_summary()
+            await ensure_metrics_started()
+            now = datetime.now(timezone.utc)
+            start = now - timedelta(hours=24)
+            summary = await metrics_service.get_summary_stats(start=start, end=now)
             manager = await get_key_manager()
             keys = await manager.list_keys()
 
+            success_rate = summary.get("success_rate", 0)
             stats_table = Table(show_header=False, box=None)
             stats_table.add_column("", style="dim")
             stats_table.add_column("")
-            stats_table.add_row("Executions (24h):", f"[cyan]{summary.total_executions_today}[/cyan]")
-            stats_table.add_row("Success Rate:", f"[{'green' if summary.success_rate >= 80 else 'yellow'}]{summary.success_rate:.1f}%[/]")
+            stats_table.add_row("Executions (24h):", f"[cyan]{summary.get('total_executions', 0)}[/cyan]")
+            stats_table.add_row("Success Rate:", f"[{'green' if success_rate >= 80 else 'yellow'}]{success_rate:.1f}%[/]")
             stats_table.add_row("API Keys:", f"[cyan]{len(keys)}[/cyan] active")
 
             console.print(stats_table)
@@ -673,8 +652,8 @@ async def main_menu():
             console.print()
             Prompt.ask("[dim]Press Enter to continue[/dim]", default="")
         elif choice == "4":
-            service = await get_metrics_service()
-            await live_dashboard(service)
+            await ensure_metrics_started()
+            await live_dashboard()
 
 
 # ============================================================================
@@ -749,8 +728,8 @@ async def cmd_revoke(args):
 
 async def cmd_summary(args):
     """Show quick summary."""
-    service = await get_metrics_service()
-    panel = await build_summary_panel(service)
+    await ensure_metrics_started()
+    panel = await build_summary_panel()
     console.print()
     console.print(panel)
     console.print()

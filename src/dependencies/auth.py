@@ -5,10 +5,11 @@ from typing import Optional
 
 # Third-party imports
 import structlog
-from fastapi import Request, HTTPException, Depends
+from fastapi import Request, HTTPException, Depends, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 # Local application imports
+from ..config import settings
 from ..services.auth import get_auth_service
 from ..utils.request_helpers import extract_api_key
 
@@ -45,6 +46,19 @@ async def verify_api_key(
         raise HTTPException(status_code=401, detail="Invalid API key")
 
     return api_key
+
+
+async def verify_master_key(x_api_key: str = Header(...)):
+    """Verify the Master API Key for admin operations."""
+    if not settings.master_api_key:
+        raise HTTPException(
+            status_code=500,
+            detail="Admin operations are disabled (no MASTER_API_KEY configured)",
+        )
+
+    if x_api_key != settings.master_api_key:
+        raise HTTPException(status_code=403, detail="Invalid Master API Key")
+    return x_api_key
 
 
 async def verify_api_key_optional(

@@ -225,7 +225,7 @@ class ContainerPool:
             return {
                 language: self._stats.get(
                     language,
-                    PoolStats(language=language, available_count=0, assigned_count=0),
+                    PoolStats(language=language),
                 )
             }
 
@@ -236,11 +236,10 @@ class ContainerPool:
             available = queue.qsize() if queue else 0
             if lang in self._stats:
                 self._stats[lang].available_count = available
-                self._stats[lang].assigned_count = 0  # No longer tracking
                 stats[lang] = self._stats[lang]
             else:
                 stats[lang] = PoolStats(
-                    language=lang, available_count=available, assigned_count=0
+                    language=lang, available_count=available
                 )
         return stats
 
@@ -530,7 +529,7 @@ class ContainerPool:
         """Record pool statistics."""
         if language not in self._stats:
             self._stats[language] = PoolStats(
-                language=language, available_count=0, assigned_count=0
+                language=language
             )
 
         stats = self._stats[language]
@@ -546,7 +545,3 @@ class ContainerPool:
             stats.avg_acquire_time_ms = (
                 stats.avg_acquire_time_ms * (n - 1) + acquire_time_ms
             ) / n
-
-
-# Backward compatibility aliases
-acquire_for_session = ContainerPool.acquire

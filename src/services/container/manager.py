@@ -179,36 +179,50 @@ class ContainerManager:
         # Determine network configuration
         use_wan_access = settings.enable_wan_access
 
-        # Security hardening: paths to mask to prevent host info leakage
-        # Note: MaskedPaths/ReadonlyPaths are not supported by docker-py 7.1.0.
-        # Instead, we use bind mounts to /dev/null for critical paths like
-        # /proc/kallsyms and /proc/modules (see "mounts" in container_config).
-        # The list below is kept for documentation purposes.
-        hardening_config: Dict[str, Any] = {}
+        # Security hardening: mask sensitive paths to prevent host info leakage.
+        # docker-py doesn't support MaskedPaths/ReadonlyPaths natively, so we
+        # implement them as bind mounts to /dev/null (masked) or read-only
+        # bind mounts (readonly).
+        hardening_mounts: List[docker.types.Mount] = []
         if settings.container_mask_host_info:
-            hardening_config["masked_paths"] = [
-                "/proc/version",  # Kernel version (reveals Azure hosting)
-                "/proc/version_signature",
-                "/proc/cpuinfo",  # CPU count and model
-                "/proc/meminfo",  # Total RAM
+            masked_paths = [
+                "/proc/version",
+                "/proc/cpuinfo",
+                "/proc/meminfo",
                 "/proc/kcore",
                 "/proc/keys",
                 "/proc/timer_list",
                 "/proc/sched_debug",
-                "/proc/kallsyms",  # Kernel symbol addresses (KASLR bypass) - masked via bind mount
-                "/proc/modules",  # Loaded kernel modules - masked via bind mount
-                "/sys/firmware",
-                "/sys/kernel/security",
-                "/etc/machine-id",  # Unique machine identifier
+                "/proc/kallsyms",
+                "/proc/modules",
+                "/etc/machine-id",
                 "/var/lib/dbus/machine-id",
             ]
-            hardening_config["readonly_paths"] = [
+            readonly_paths = [
                 "/proc/bus",
                 "/proc/fs",
                 "/proc/irq",
                 "/proc/sys",
                 "/proc/sysrq-trigger",
             ]
+            for path in masked_paths:
+                hardening_mounts.append(
+                    docker.types.Mount(
+                        target=path,
+                        source="/dev/null",
+                        type="bind",
+                        read_only=True,
+                    )
+                )
+            for path in readonly_paths:
+                hardening_mounts.append(
+                    docker.types.Mount(
+                        target=path,
+                        source=path,
+                        type="bind",
+                        read_only=True,
+                    )
+                )
 
         # Build labels
         labels = {
@@ -286,9 +300,11 @@ class ContainerManager:
             "security_opt": security_opts,
             "cap_drop": ["ALL"],
             "cap_add": ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"],
-            # read_only must be False to allow file uploads to /mnt/data
-            "read_only": False,
-            "tmpfs": settings.docker_tmpfs,
+            "read_only": True,
+            "tmpfs": {
+                **settings.docker_tmpfs,
+                "/mnt/data": "rw,nosuid,size=200m",
+            },
             # pids_limit: cgroup-based per-container process limit (prevents fork bombs)
             "pids_limit": settings.max_pids,
             "ulimits": [
@@ -298,8 +314,7 @@ class ContainerManager:
                     hard=settings.max_open_files,
                 ),
             ],
-            # Note: /proc/kallsyms and /proc/modules masking requires MaskedPaths
-            # which docker-py doesn't support. These paths are read-only by default.
+            "mounts": hardening_mounts,
             "environment": env,
             "labels": labels,
             "hostname": settings.container_generic_hostname,

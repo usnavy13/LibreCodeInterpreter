@@ -67,7 +67,7 @@ class FileService(FileServiceInterface):
         """Generate S3 object key for a file."""
         return f"sessions/{session_id}/{file_type}/{file_id}"
 
-    def _get_file_metadata_key(self, session_id: str, file_id: str) -> str:
+    def get_file_metadata_key(self, session_id: str, file_id: str) -> str:
         """Generate Redis key for file metadata."""
         return f"files:{session_id}:{file_id}"
 
@@ -80,7 +80,7 @@ class FileService(FileServiceInterface):
     ) -> None:
         """Store file metadata in Redis."""
         try:
-            metadata_key = self._get_file_metadata_key(session_id, file_id)
+            metadata_key = self.get_file_metadata_key(session_id, file_id)
             session_files_key = self._get_session_files_key(session_id)
 
             # Store file metadata
@@ -103,12 +103,12 @@ class FileService(FileServiceInterface):
             )
             raise
 
-    async def _get_file_metadata(
+    async def get_file_metadata(
         self, session_id: str, file_id: str
     ) -> Optional[Dict[str, Any]]:
         """Retrieve file metadata from Redis."""
         try:
-            metadata_key = self._get_file_metadata_key(session_id, file_id)
+            metadata_key = self.get_file_metadata_key(session_id, file_id)
             metadata = await self.redis_client.hgetall(metadata_key)
 
             if not metadata:
@@ -134,7 +134,7 @@ class FileService(FileServiceInterface):
     async def _delete_file_metadata(self, session_id: str, file_id: str) -> None:
         """Delete file metadata from Redis."""
         try:
-            metadata_key = self._get_file_metadata_key(session_id, file_id)
+            metadata_key = self.get_file_metadata_key(session_id, file_id)
             session_files_key = self._get_session_files_key(session_id)
 
             # Delete metadata
@@ -151,6 +151,39 @@ class FileService(FileServiceInterface):
                 file_id=file_id,
             )
             raise
+
+    def validate_uploads(
+        self,
+        filenames: List[str],
+        file_sizes: List[Optional[int]],
+    ) -> Optional[Tuple[int, str]]:
+        """Validate upload files against size, count, and type restrictions.
+
+        Args:
+            filenames: List of filenames to validate
+            file_sizes: List of file sizes (may contain None for unknown sizes)
+
+        Returns:
+            None if valid, or (http_status_code, error_message) tuple if invalid
+        """
+        for filename, size in zip(filenames, file_sizes):
+            if size and size > settings.max_file_size_mb * 1024 * 1024:
+                return (
+                    413,
+                    f"File {filename} exceeds maximum size of {settings.max_file_size_mb}MB",
+                )
+
+        if len(filenames) > settings.max_files_per_session:
+            return (
+                413,
+                f"Too many files. Maximum {settings.max_files_per_session} files allowed",
+            )
+
+        for filename in filenames:
+            if not settings.is_file_allowed(filename or ""):
+                return (415, f"File type not allowed: {filename}")
+
+        return None
 
     async def upload_file(
         self, session_id: str, request: FileUploadRequest
@@ -206,7 +239,7 @@ class FileService(FileServiceInterface):
 
     async def confirm_upload(self, session_id: str, file_id: str) -> FileInfo:
         """Confirm file upload completion and return file info."""
-        metadata = await self._get_file_metadata(session_id, file_id)
+        metadata = await self.get_file_metadata(session_id, file_id)
         if not metadata:
             raise ValueError(f"File {file_id} not found in session {session_id}")
 
@@ -250,7 +283,7 @@ class FileService(FileServiceInterface):
 
     async def get_file_info(self, session_id: str, file_id: str) -> Optional[FileInfo]:
         """Get file information."""
-        metadata = await self._get_file_metadata(session_id, file_id)
+        metadata = await self.get_file_metadata(session_id, file_id)
         if not metadata:
             return None
 
@@ -297,7 +330,7 @@ class FileService(FileServiceInterface):
 
     async def download_file(self, session_id: str, file_id: str) -> Optional[str]:
         """Generate download URL for a file."""
-        metadata = await self._get_file_metadata(session_id, file_id)
+        metadata = await self.get_file_metadata(session_id, file_id)
         if not metadata:
             return None
 
@@ -327,7 +360,7 @@ class FileService(FileServiceInterface):
 
     async def delete_file(self, session_id: str, file_id: str) -> bool:
         """Delete a file from the session."""
-        metadata = await self._get_file_metadata(session_id, file_id)
+        metadata = await self.get_file_metadata(session_id, file_id)
         if not metadata:
             return False
 
@@ -507,7 +540,7 @@ class FileService(FileServiceInterface):
 
     async def get_file_content(self, session_id: str, file_id: str) -> Optional[bytes]:
         """Get file content directly (for internal use)."""
-        metadata = await self._get_file_metadata(session_id, file_id)
+        metadata = await self.get_file_metadata(session_id, file_id)
         if not metadata:
             return None
 
@@ -757,7 +790,7 @@ class FileService(FileServiceInterface):
             SHA256 hash of the state when this file was last used, or None
         """
         try:
-            metadata_key = self._get_file_metadata_key(session_id, file_id)
+            metadata_key = self.get_file_metadata_key(session_id, file_id)
             state_hash = await self.redis_client.hget(metadata_key, "state_hash")
             return state_hash
         except Exception as e:
@@ -788,7 +821,7 @@ class FileService(FileServiceInterface):
             True if update was successful
         """
         try:
-            metadata_key = self._get_file_metadata_key(session_id, file_id)
+            metadata_key = self.get_file_metadata_key(session_id, file_id)
             now = datetime.utcnow().isoformat()
 
             # Update multiple fields atomically
@@ -842,7 +875,7 @@ class FileService(FileServiceInterface):
         """
         try:
             # Get existing metadata to find object_key
-            metadata = await self._get_file_metadata(session_id, file_id)
+            metadata = await self.get_file_metadata(session_id, file_id)
             if not metadata:
                 logger.warning(
                     "File not found for content update",
@@ -889,7 +922,7 @@ class FileService(FileServiceInterface):
             if execution_id:
                 updates["execution_id"] = execution_id
 
-            metadata_key = self._get_file_metadata_key(session_id, file_id)
+            metadata_key = self.get_file_metadata_key(session_id, file_id)
             await self.redis_client.hset(metadata_key, mapping=updates)
 
             logger.debug(

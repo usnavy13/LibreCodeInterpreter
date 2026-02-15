@@ -74,7 +74,7 @@ def inject_container_pool_to_execution_service():
     """
     if _container_pool:
         execution_service = get_execution_service()
-        execution_service.container_pool = _container_pool
+        execution_service.set_container_pool(_container_pool)
         logger.info("Container pool injected into execution service")
 
 
@@ -91,8 +91,8 @@ def get_session_service() -> SessionServiceInterface:
         file_service = get_file_service()
 
         # Wire up the dependencies
-        session_service._execution_service = execution_service
-        session_service._file_service = file_service
+        session_service.set_execution_service(execution_service)
+        session_service.set_file_service(file_service)
 
         logger.info("Session service initialized with dependencies")
         return session_service

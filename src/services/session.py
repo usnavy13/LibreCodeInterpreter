@@ -35,6 +35,14 @@ class SessionService(SessionServiceInterface):
         self._execution_service = execution_service
         self._file_service = file_service
         self._redis_available = False
+
+    def set_execution_service(self, execution_service) -> None:
+        """Set the execution service dependency."""
+        self._execution_service = execution_service
+
+    def set_file_service(self, file_service) -> None:
+        """Set the file service dependency."""
+        self._file_service = file_service
         logger.info("Redis client created", url=settings.get_redis_url().split("@")[-1])
 
     async def _check_redis_connectivity(self) -> bool:

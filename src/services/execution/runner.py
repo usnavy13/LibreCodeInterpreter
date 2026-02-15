@@ -22,7 +22,6 @@ from ...utils.id_generator import generate_execution_id
 from ..container import ContainerManager
 from ..container.pool import ContainerPool
 from ..container.repl_executor import REPLExecutor
-from ..metrics import metrics_collector, ExecutionMetrics
 from .output import OutputProcessor
 
 logger = structlog.get_logger(__name__)
@@ -46,6 +45,10 @@ class CodeExecutionRunner:
         self.container_pool = container_pool
         self.active_executions: Dict[str, CodeExecution] = {}
         self.session_containers: Dict[str, Container] = {}
+
+    def set_container_pool(self, pool: ContainerPool) -> None:
+        """Set the container pool dependency."""
+        self.container_pool = pool
 
     async def _get_container(
         self, session_id: str, language: str
@@ -303,9 +306,6 @@ class CodeExecutionRunner:
             state_errors = []
             logger.error(f"Code execution {execution_id} failed: {e}")
 
-        # Record metrics
-        self._record_metrics(execution, session_id, request.language, files)
-
         return execution, container, new_state, state_errors, container_source
 
     def _process_outputs(
@@ -357,34 +357,6 @@ class CodeExecutionRunner:
             for f in generated
             if Path(f.get("path", "")).name not in mounted_filenames
         ]
-
-    def _record_metrics(
-        self,
-        execution: CodeExecution,
-        session_id: str,
-        language: str,
-        files: Optional[List[Dict[str, Any]]],
-    ) -> None:
-        """Record execution metrics."""
-        try:
-            metrics = ExecutionMetrics(
-                execution_id=execution.execution_id,
-                session_id=session_id,
-                language=language,
-                status=execution.status.value,
-                execution_time_ms=execution.execution_time_ms or 0,
-                memory_peak_mb=execution.memory_peak_mb,
-                exit_code=execution.exit_code,
-                file_count=len(files) if files else 0,
-                output_size_bytes=(
-                    sum(len(o.content) for o in execution.outputs)
-                    if execution.outputs
-                    else 0
-                ),
-            )
-            metrics_collector.record_execution_metrics(metrics)
-        except Exception as e:
-            logger.error("Failed to record execution metrics", error=str(e))
 
     async def _create_fresh_container(
         self, session_id: str, language: str

@@ -3,30 +3,14 @@
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Literal, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from ..config import settings
-from ..services.sqlite_metrics import sqlite_metrics_service
+from ..dependencies.auth import verify_master_key
+from ..services.metrics import metrics_service
 from ..services.api_key_manager import get_api_key_manager
 
 router = APIRouter(prefix="/admin/metrics", tags=["admin-metrics"])
-
-
-# --- Dependencies ---
-
-
-async def verify_master_key(x_api_key: str = Header(...)):
-    """Verify the Master API Key for admin operations."""
-    if not settings.master_api_key:
-        raise HTTPException(
-            status_code=500,
-            detail="Admin operations are disabled (no MASTER_API_KEY configured)",
-        )
-
-    if x_api_key != settings.master_api_key:
-        raise HTTPException(status_code=403, detail="Invalid Master API Key")
-    return x_api_key
 
 
 def get_date_range(
@@ -126,7 +110,7 @@ async def get_metrics_summary(
     """Get summary statistics for the selected period."""
     start, end = get_date_range(period, start_date, end_date)
 
-    stats = await sqlite_metrics_service.get_summary_stats(
+    stats = await metrics_service.get_summary_stats(
         start=start, end=end, api_key_hash=api_key_hash
     )
 
@@ -157,7 +141,7 @@ async def get_language_metrics(
     """Get language usage data for stacked bar chart."""
     start, end = get_date_range(period, start_date, end_date)
 
-    data = await sqlite_metrics_service.get_language_usage(
+    data = await metrics_service.get_language_usage(
         start=start,
         end=end,
         api_key_hash=api_key_hash,
@@ -183,7 +167,7 @@ async def get_time_series(
     start, end = get_date_range(period, start_date, end_date)
     granularity = get_granularity(period)
 
-    data = await sqlite_metrics_service.get_time_series(
+    data = await metrics_service.get_time_series(
         start=start,
         end=end,
         api_key_hash=api_key_hash,
@@ -215,7 +199,7 @@ async def get_activity_heatmap(
     effective_period = period if period in ("week", "month") else "week"
     start, end = get_date_range(effective_period, start_date, end_date)
 
-    data = await sqlite_metrics_service.get_heatmap_data(
+    data = await metrics_service.get_heatmap_data(
         start=start, end=end, api_key_hash=api_key_hash
     )
 
@@ -238,7 +222,7 @@ async def get_api_keys_for_filter(_: str = Depends(verify_master_key)):
     key_lookup = {k.key_hash: k for k in managed_keys}
 
     # Get keys from SQLite with usage counts
-    sqlite_keys = await sqlite_metrics_service.get_api_keys_list()
+    sqlite_keys = await metrics_service.get_api_keys_list()
 
     result = []
     seen_hashes = set()
@@ -285,7 +269,7 @@ async def get_top_languages(
     """Get top languages by execution count."""
     start, end = get_date_range(period, start_date, end_date)
 
-    languages = await sqlite_metrics_service.get_top_languages(
+    languages = await metrics_service.get_top_languages(
         start=start, end=end, limit=limit
     )
 
