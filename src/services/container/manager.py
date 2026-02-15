@@ -180,45 +180,22 @@ class ContainerManager:
         use_wan_access = settings.enable_wan_access
 
         # Security hardening: mask sensitive paths to prevent host info leakage.
-        # docker-py doesn't support MaskedPaths/ReadonlyPaths natively, so we
-        # implement them as bind mounts to /dev/null (masked) or read-only
-        # bind mounts (readonly).
+        # Note: /proc and /sys paths cannot be masked via bind mounts because
+        # the OCI runtime (runc) rejects mount points inside procfs/sysfs.
+        # Those paths are handled by the default Docker MaskedPaths/ReadonlyPaths
+        # in the OCI spec. We only bind-mount non-proc/non-sys paths here.
         hardening_mounts: List[docker.types.Mount] = []
         if settings.container_mask_host_info:
-            masked_paths = [
-                "/proc/version",
-                "/proc/cpuinfo",
-                "/proc/meminfo",
-                "/proc/kcore",
-                "/proc/keys",
-                "/proc/timer_list",
-                "/proc/sched_debug",
-                "/proc/kallsyms",
-                "/proc/modules",
+            # Only non-proc/non-sys paths can be masked via bind mounts
+            maskable_paths = [
                 "/etc/machine-id",
                 "/var/lib/dbus/machine-id",
             ]
-            readonly_paths = [
-                "/proc/bus",
-                "/proc/fs",
-                "/proc/irq",
-                "/proc/sys",
-                "/proc/sysrq-trigger",
-            ]
-            for path in masked_paths:
+            for path in maskable_paths:
                 hardening_mounts.append(
                     docker.types.Mount(
                         target=path,
                         source="/dev/null",
-                        type="bind",
-                        read_only=True,
-                    )
-                )
-            for path in readonly_paths:
-                hardening_mounts.append(
-                    docker.types.Mount(
-                        target=path,
-                        source=path,
                         type="bind",
                         read_only=True,
                     )
@@ -300,11 +277,13 @@ class ContainerManager:
             "security_opt": security_opts,
             "cap_drop": ["ALL"],
             "cap_add": ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"],
-            "read_only": True,
-            "tmpfs": {
-                **settings.docker_tmpfs,
-                "/mnt/data": "rw,nosuid,size=200m",
-            },
+            # read_only must be False because Docker's put_archive API (used to
+            # copy code files and user uploads into containers) requires a writable
+            # rootfs. tmpfs mounts don't help -- put_archive operates on the overlay
+            # layer which read_only locks. The container is still hardened via:
+            # dropped capabilities, seccomp, no-network, pids limit, and tmpfs noexec.
+            "read_only": False,
+            "tmpfs": settings.docker_tmpfs,
             # pids_limit: cgroup-based per-container process limit (prevents fork bombs)
             "pids_limit": settings.max_pids,
             "ulimits": [
