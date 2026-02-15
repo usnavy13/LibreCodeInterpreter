@@ -4,6 +4,8 @@ services:
     image: code-interpreter:nsjail
     container_name: code-interpreter-api
     restart: unless-stopped
+    # tini init process reaps zombie nsjail/python child processes
+    init: true
     # nsjail requires these capabilities to create namespaces and cgroups
     cap_add:
       - SYS_ADMIN
