@@ -2,13 +2,15 @@
 
 # Standard library imports
 import asyncio
+import shutil
+import subprocess
 import time
 from datetime import datetime, timezone
 from enum import Enum
+from pathlib import Path
 from typing import Dict, Any, Optional
 
 # Third-party imports
-import docker
 import redis.asyncio as redis
 import structlog
 from minio import Minio
@@ -73,16 +75,15 @@ class HealthCheckService:
     def __init__(self):
         """Initialize health check service."""
         self._redis_client: Optional[redis.Redis] = None
-        self._docker_client: Optional[docker.DockerClient] = None
         self._minio_client: Optional[Minio] = None
-        self._container_pool = None
+        self._sandbox_pool = None
         self._last_check_time: Optional[datetime] = None
         self._cached_results: Dict[str, HealthCheckResult] = {}
         self._cache_ttl_seconds = 30  # Cache results for 30 seconds
 
-    def set_container_pool(self, pool) -> None:
-        """Set container pool reference for health checks."""
-        self._container_pool = pool
+    def set_sandbox_pool(self, pool) -> None:
+        """Set sandbox pool reference for health checks."""
+        self._sandbox_pool = pool
 
     async def check_all_services(
         self, use_cache: bool = True
@@ -104,14 +105,14 @@ class HealthCheckService:
         tasks = [
             self.check_redis(),
             self.check_minio(),
-            self.check_docker(),
+            self.check_nsjail(),
         ]
-        service_names = ["redis", "minio", "docker"]
+        service_names = ["redis", "minio", "nsjail"]
 
-        # Add container pool check if pool is configured
-        if self._container_pool and settings.container_pool_enabled:
-            tasks.append(self.check_container_pool())
-            service_names.append("container_pool")
+        # Add sandbox pool check if pool is configured
+        if self._sandbox_pool and settings.container_pool_enabled:
+            tasks.append(self.check_sandbox_pool())
+            service_names.append("sandbox_pool")
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -338,77 +339,69 @@ class HealthCheckService:
                 error=str(e),
             )
 
-    async def check_docker(self) -> HealthCheckResult:
-        """Check Docker daemon connectivity and performance."""
+    async def check_nsjail(self) -> HealthCheckResult:
+        """Check nsjail binary availability and sandbox base directory."""
         start_time = time.time()
 
         try:
-            # Create Docker client if not exists
-            if not self._docker_client:
-                try:
-                    # Try to use the default Docker socket
-                    self._docker_client = docker.from_env(
-                        timeout=settings.health_check_timeout
-                    )
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to create Docker client from environment: {e}"
-                    )
-                    # Fallback to explicit socket path
-                    self._docker_client = docker.DockerClient(
-                        base_url="unix://var/run/docker.sock",
-                        timeout=settings.health_check_timeout,
-                    )
-
-            # Test basic connectivity
-            loop = asyncio.get_event_loop()
-            version_info = await loop.run_in_executor(None, self._docker_client.version)
-
-            # Get system info
-            system_info = await loop.run_in_executor(None, self._docker_client.info)
-
-            # List containers to test API functionality
-            containers = await loop.run_in_executor(
-                None, self._docker_client.containers.list, True
-            )
-
-            # Check if we can pull a simple image (test registry connectivity)
-            try:
-                await loop.run_in_executor(
-                    None, self._docker_client.images.pull, "hello-world:latest"
+            # Check if nsjail binary exists
+            nsjail_path = shutil.which(settings.nsjail_binary)
+            if not nsjail_path:
+                response_time = (time.time() - start_time) * 1000
+                return HealthCheckResult(
+                    service="nsjail",
+                    status=HealthStatus.UNHEALTHY,
+                    response_time_ms=response_time,
+                    error=f"nsjail binary not found: {settings.nsjail_binary}",
                 )
-                registry_accessible = True
-            except Exception as e:
-                logger.warning("Docker registry not accessible", error=str(e))
-                registry_accessible = False
+
+            # Get nsjail version
+            version = "unknown"
+            try:
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(
+                    None,
+                    lambda: subprocess.run(
+                        [nsjail_path, "--help"],
+                        capture_output=True,
+                        text=True,
+                        timeout=5,
+                    ),
+                )
+                # nsjail --help outputs to stderr
+                output = result.stderr or result.stdout or ""
+                for line in output.split("\n"):
+                    if "version" in line.lower() or "nsjail" in line.lower():
+                        version = line.strip()
+                        break
+            except Exception:
+                pass
+
+            # Check sandbox base directory
+            sandbox_base = Path(settings.sandbox_base_dir)
+            base_dir_exists = sandbox_base.exists()
+            base_dir_writable = False
+            if base_dir_exists:
+                import os
+                base_dir_writable = os.access(str(sandbox_base), os.W_OK)
 
             response_time = (time.time() - start_time) * 1000
 
             # Determine status
             status = HealthStatus.HEALTHY
-            if response_time > 3000:  # > 3 seconds
+            if not base_dir_exists or not base_dir_writable:
                 status = HealthStatus.DEGRADED
-            elif not registry_accessible:
-                status = HealthStatus.DEGRADED
-
-            # Calculate resource usage
-            total_containers = len(containers)
-            running_containers = len([c for c in containers if c.status == "running"])
 
             details = {
-                "version": version_info.get("Version", "unknown"),
-                "api_version": version_info.get("ApiVersion", "unknown"),
-                "platform": version_info.get("Platform", {}).get("Name", "unknown"),
-                "total_containers": total_containers,
-                "running_containers": running_containers,
-                "registry_accessible": registry_accessible,
-                "server_version": system_info.get("ServerVersion", "unknown"),
-                "memory_total_gb": round(system_info.get("MemTotal", 0) / (1024**3), 2),
-                "cpu_count": system_info.get("NCPU", 0),
+                "binary_path": nsjail_path,
+                "version": version,
+                "sandbox_base_dir": str(sandbox_base),
+                "base_dir_exists": base_dir_exists,
+                "base_dir_writable": base_dir_writable,
             }
 
             return HealthCheckResult(
-                service="docker",
+                service="nsjail",
                 status=status,
                 response_time_ms=response_time,
                 details=details,
@@ -417,32 +410,32 @@ class HealthCheckService:
         except Exception as e:
             response_time = (time.time() - start_time) * 1000
             logger.error(
-                "Docker health check failed",
+                "nsjail health check failed",
                 error=str(e),
                 response_time_ms=response_time,
             )
 
             return HealthCheckResult(
-                service="docker",
+                service="nsjail",
                 status=HealthStatus.UNHEALTHY,
                 response_time_ms=response_time,
                 error=str(e),
             )
 
-    async def check_container_pool(self) -> HealthCheckResult:
-        """Check container pool health and statistics."""
+    async def check_sandbox_pool(self) -> HealthCheckResult:
+        """Check sandbox pool health and statistics."""
         start_time = time.time()
 
         try:
-            if not self._container_pool:
+            if not self._sandbox_pool:
                 return HealthCheckResult(
-                    service="container_pool",
+                    service="sandbox_pool",
                     status=HealthStatus.UNKNOWN,
-                    error="Container pool not configured",
+                    error="Sandbox pool not configured",
                 )
 
             # Get pool statistics
-            stats = self._container_pool.get_stats()
+            stats = self._sandbox_pool.get_stats()
 
             response_time = (time.time() - start_time) * 1000
 
@@ -476,7 +469,7 @@ class HealthCheckService:
 
             details = {
                 "enabled": True,
-                "architecture": "stateless",  # Containers destroyed after each execution
+                "architecture": "stateless",  # Sandboxes destroyed after each execution
                 "total_available": total_available,
                 "total_acquisitions": total_acquisitions,
                 "pool_hits": pool_hits,
@@ -486,7 +479,7 @@ class HealthCheckService:
             }
 
             return HealthCheckResult(
-                service="container_pool",
+                service="sandbox_pool",
                 status=status,
                 response_time_ms=response_time,
                 details=details,
@@ -494,10 +487,10 @@ class HealthCheckService:
 
         except Exception as e:
             response_time = (time.time() - start_time) * 1000
-            logger.error("Container pool health check failed", error=str(e))
+            logger.error("Sandbox pool health check failed", error=str(e))
 
             return HealthCheckResult(
-                service="container_pool",
+                service="sandbox_pool",
                 status=HealthStatus.UNHEALTHY,
                 response_time_ms=response_time,
                 error=str(e),
@@ -538,22 +531,6 @@ class HealthCheckService:
                 except Exception as e:
                     logger.warning(
                         f"Error closing Redis connection during shutdown: {e}"
-                    )
-
-            # Close Docker connection with timeout
-            if self._docker_client:
-                try:
-                    # Docker client close is synchronous, but wrap in executor with timeout
-                    loop = asyncio.get_event_loop()
-                    await asyncio.wait_for(
-                        loop.run_in_executor(None, self._docker_client.close),
-                        timeout=2.0,
-                    )
-                except asyncio.TimeoutError:
-                    logger.warning("Docker connection close timed out during shutdown")
-                except Exception as e:
-                    logger.warning(
-                        f"Error closing Docker connection during shutdown: {e}"
                     )
 
             logger.info("Closed health check service connections")

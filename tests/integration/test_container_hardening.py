@@ -250,9 +250,9 @@ class TestContainerHardening:
 class TestContainerHardeningConfig:
     """Test container hardening configuration integration."""
 
-    def test_hardening_config_applied_to_container(self):
-        """Test that hardening config is used in container creation."""
-        from src.services.container.manager import ContainerManager
+    def test_hardening_config_applied_to_sandbox(self):
+        """Test that hardening config is used in sandbox creation."""
+        from src.services.sandbox.manager import SandboxManager
         from src.config import settings
 
         # Verify settings are correctly configured

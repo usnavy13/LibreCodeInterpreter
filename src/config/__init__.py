@@ -34,6 +34,7 @@ from .minio import MinIOConfig
 from .security import SecurityConfig
 from .resources import ResourcesConfig
 from .logging import LoggingConfig
+from .sandbox import SandboxConfig
 from .languages import (
     LANGUAGES,
     LanguageConfig,
@@ -137,6 +138,28 @@ class Settings(BaseSettings):
     docker_seccomp_profile: Optional[str] = Field(
         default="docker/seccomp-sandbox.json",
         description="Path to seccomp profile JSON file (None to disable)",
+    )
+
+    # Sandbox (nsjail) Configuration
+    nsjail_binary: str = Field(
+        default="nsjail",
+        description="Path to nsjail binary",
+    )
+    sandbox_base_dir: str = Field(
+        default="/var/lib/code-interpreter/sandboxes",
+        description="Root directory for all sandbox instances",
+    )
+    sandbox_tmpfs_size_mb: int = Field(
+        default=100, ge=10, le=1024,
+        description="Size of tmpfs mount for /tmp inside sandboxes (MB)",
+    )
+    sandbox_ttl_minutes: int = Field(
+        default=5, ge=1, le=1440,
+        description="TTL for sandbox directories before cleanup",
+    )
+    sandbox_cleanup_interval_minutes: int = Field(
+        default=5, ge=1, le=60,
+        description="Interval between sandbox cleanup sweeps",
     )
 
     # Resource Limits - Execution
@@ -552,6 +575,17 @@ class Settings(BaseSettings):
         )
 
     @property
+    def sandbox(self) -> SandboxConfig:
+        """Access sandbox (nsjail) configuration group."""
+        return SandboxConfig(
+            nsjail_binary=self.nsjail_binary,
+            sandbox_base_dir=self.sandbox_base_dir,
+            sandbox_tmpfs_size_mb=self.sandbox_tmpfs_size_mb,
+            sandbox_ttl_minutes=self.sandbox_ttl_minutes,
+            sandbox_cleanup_interval_minutes=self.sandbox_cleanup_interval_minutes,
+        )
+
+    @property
     def redis(self) -> RedisConfig:
         """Access Redis configuration group."""
         return RedisConfig(
@@ -711,6 +745,7 @@ __all__ = [
     "SecurityConfig",
     "ResourcesConfig",
     "LoggingConfig",
+    "SandboxConfig",
     # Language configuration
     "LANGUAGES",
     "LanguageConfig",

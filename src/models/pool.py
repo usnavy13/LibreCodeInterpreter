@@ -1,7 +1,7 @@
-"""Container pool data models.
+"""Sandbox pool data models.
 
-These models track containers in the pool. The pool is stateless with respect
-to sessions - containers are provided fresh and destroyed after each execution.
+These models track sandboxes in the pool. The pool is stateless with respect
+to sessions - sandboxes are provided fresh and destroyed after each execution.
 """
 
 from dataclasses import dataclass, field
@@ -10,33 +10,36 @@ from typing import Literal
 
 
 @dataclass
-class PooledContainer:
-    """Represents a container available in the pool.
+class PooledSandbox:
+    """Represents a sandbox available in the pool.
 
-    Containers in the pool are pre-warmed and ready to be used.
-    After use, containers are destroyed (not returned to pool).
+    Sandboxes in the pool are pre-warmed and ready to be used.
+    After use, sandboxes are destroyed (not returned to pool).
     """
 
-    container_id: str
+    sandbox_id: str
     language: str
-    image: str
     created_at: datetime
     status: Literal["available"] = "available"
-    repl_enabled: bool = False  # Whether REPL mode is enabled for this container
-    repl_ready: bool = False  # Whether REPL server is ready and responsive
+    repl_enabled: bool = False
+    repl_ready: bool = False
 
     def __hash__(self):
-        return hash(self.container_id)
+        return hash(self.sandbox_id)
 
     def __eq__(self, other):
-        if not isinstance(other, PooledContainer):
+        if not isinstance(other, PooledSandbox):
             return False
-        return self.container_id == other.container_id
+        return self.sandbox_id == other.sandbox_id
+
+
+# Backward compatibility alias
+PooledContainer = PooledSandbox
 
 
 @dataclass
 class PoolStats:
-    """Container pool statistics for monitoring."""
+    """Sandbox pool statistics for monitoring."""
 
     language: str
     available_count: int = 0
@@ -51,7 +54,7 @@ class PoolStats:
 
 @dataclass
 class PoolConfig:
-    """Configuration for a language-specific container pool."""
+    """Configuration for a language-specific sandbox pool."""
 
     language: str
     size: int  # Single pool size (0 = on-demand only)

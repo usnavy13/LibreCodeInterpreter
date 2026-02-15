@@ -20,23 +20,23 @@ from ..services.interfaces import (
 
 logger = structlog.get_logger(__name__)
 
-# Global reference to container pool (set by main.py lifespan)
-_container_pool = None
+# Global reference to sandbox pool (set by main.py lifespan)
+_sandbox_pool = None
 
 
-def set_container_pool(pool) -> None:
-    """Set the global container pool reference.
+def set_sandbox_pool(pool) -> None:
+    """Set the global sandbox pool reference.
 
     Called by main.py after the pool is initialized in lifespan.
     """
-    global _container_pool
-    _container_pool = pool
-    logger.info("Container pool registered with dependency injection")
+    global _sandbox_pool
+    _sandbox_pool = pool
+    logger.info("Sandbox pool registered with dependency injection")
 
 
-def get_container_pool():
-    """Get the container pool instance (may be None if disabled)."""
-    return _container_pool
+def get_sandbox_pool():
+    """Get the sandbox pool instance (may be None if disabled)."""
+    return _sandbox_pool
 
 
 @lru_cache()
@@ -62,20 +62,20 @@ def get_state_archival_service() -> StateArchivalService:
 def get_execution_service() -> ExecutionServiceInterface:
     """Get execution service instance.
 
-    Note: Container pool is injected separately after creation via set_container_pool.
+    Note: Sandbox pool is injected separately after creation via set_sandbox_pool.
     """
     return CodeExecutionService()
 
 
-def inject_container_pool_to_execution_service():
-    """Inject container pool into the execution service.
+def inject_sandbox_pool_to_execution_service():
+    """Inject sandbox pool into the execution service.
 
     Called after pool is initialized to wire it into the cached execution service.
     """
-    if _container_pool:
+    if _sandbox_pool:
         execution_service = get_execution_service()
-        execution_service.set_container_pool(_container_pool)
-        logger.info("Container pool injected into execution service")
+        execution_service.set_sandbox_pool(_sandbox_pool)
+        logger.info("Sandbox pool injected into execution service")
 
 
 @lru_cache()

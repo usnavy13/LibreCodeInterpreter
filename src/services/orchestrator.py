@@ -587,7 +587,7 @@ class ExecutionOrchestrator:
         if not ctx.mounted_files or not ctx.container:
             return
 
-        container_manager = self.execution_service.container_manager
+        sandbox_manager = self.execution_service.sandbox_manager
 
         for file_info in ctx.mounted_files:
             try:
@@ -624,7 +624,7 @@ class ExecutionOrchestrator:
 
                 # Read current content from container
                 file_path = f"/mnt/data/{filename}"
-                content = await container_manager.get_file_content_from_container(
+                content = sandbox_manager.get_file_content_from_sandbox(
                     ctx.container, file_path
                 )
 
@@ -789,8 +789,8 @@ class ExecutionOrchestrator:
         if not container:
             return f"# Container not found for file: {file_path}\n".encode("utf-8")
 
-        container_manager = self.execution_service.container_manager
-        content = await container_manager.get_file_content_from_container(
+        sandbox_manager = self.execution_service.sandbox_manager
+        content = sandbox_manager.get_file_content_from_sandbox(
             container, file_path
         )
         if content is not None:
@@ -841,31 +841,31 @@ class ExecutionOrchestrator:
         # Destroy container in background for faster response
         if ctx.container:
             try:
-                container_manager = self.execution_service.container_manager
-                container_id = (
+                sandbox_manager = self.execution_service.sandbox_manager
+                sandbox_id = (
                     ctx.container.id[:12] if hasattr(ctx.container, "id") else "unknown"
                 )
                 logger.debug(
-                    "Scheduling container destruction", container_id=container_id
+                    "Scheduling sandbox destruction", sandbox_id=sandbox_id
                 )
 
-                # Fire-and-forget: destroy container in background
+                # Fire-and-forget: destroy sandbox in background
                 async def destroy_background():
                     try:
-                        await container_manager.force_kill_container(ctx.container)
-                        logger.debug("Container destroyed", container_id=container_id)
+                        sandbox_manager.destroy_sandbox(ctx.container)
+                        logger.debug("Sandbox destroyed", sandbox_id=sandbox_id)
                     except Exception as e:
                         logger.warning(
-                            "Background container destruction failed",
-                            container_id=container_id,
+                            "Background sandbox destruction failed",
+                            sandbox_id=sandbox_id,
                             error=str(e),
                         )
 
                 asyncio.create_task(destroy_background())
             except Exception as e:
-                logger.error("Failed to schedule container destruction", error=str(e))
+                logger.error("Failed to schedule sandbox destruction", error=str(e))
         else:
-            logger.debug("No container in context to destroy")
+            logger.debug("No sandbox in context to destroy")
 
         # Publish event for metrics
         try:

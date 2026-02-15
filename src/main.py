@@ -85,72 +85,44 @@ async def _startup_cleanup_tasks() -> None:
         logger.error("Failed to start cleanup scheduler", error=str(e))
 
 
-async def _startup_network(app: FastAPI) -> None:
-    """Initialize WAN network for container internet access if enabled."""
-    if settings.enable_wan_access:
-        try:
-            logger.info("Initializing WAN network for container internet access...")
-            from .services.container.network import WANNetworkManager
-            from .services.container.manager import ContainerManager
-
-            temp_manager = ContainerManager()
-            if temp_manager.is_available():
-                wan_network_manager = WANNetworkManager(temp_manager.client)
-                if await wan_network_manager.initialize():
-                    app.state.wan_network_manager = wan_network_manager
-                    logger.info(
-                        "WAN network initialized successfully",
-                        network_name=settings.wan_network_name,
-                        dns_servers=settings.wan_dns_servers,
-                    )
-                else:
-                    logger.error("Failed to initialize WAN network")
-            else:
-                logger.warning("Docker not available, skipping WAN network setup")
-        except Exception as e:
-            logger.error("Error initializing WAN network", error=str(e))
-    else:
-        logger.info("WAN network access disabled (containers have no network access)")
-
-
-async def _startup_container_pool(app: FastAPI) -> None:
-    """Start the container pool if enabled."""
+async def _startup_sandbox_pool(app: FastAPI) -> None:
+    """Start the sandbox pool if enabled."""
     if settings.container_pool_enabled:
         try:
-            logger.info("Starting container pool...")
-            from .services.container.pool import ContainerPool
-            from .services.container.manager import ContainerManager
+            logger.info("Starting sandbox pool...")
+            from .services.sandbox.pool import SandboxPool
+            from .services.sandbox.manager import SandboxManager
             from .services.cleanup import cleanup_scheduler
             from .dependencies.services import (
-                set_container_pool,
-                inject_container_pool_to_execution_service,
+                set_sandbox_pool,
+                inject_sandbox_pool_to_execution_service,
             )
 
-            container_manager = ContainerManager()
-            container_pool = ContainerPool(container_manager)
-            await container_pool.start()
+            sandbox_manager = SandboxManager()
+            sandbox_pool = SandboxPool(sandbox_manager)
+            await sandbox_pool.start()
 
             # Connect pool to cleanup scheduler
-            cleanup_scheduler.set_container_pool(container_pool)
+            cleanup_scheduler.set_sandbox_pool(sandbox_pool)
 
             # Register pool with dependency injection system
-            set_container_pool(container_pool)
-            inject_container_pool_to_execution_service()
+            set_sandbox_pool(sandbox_pool)
+            inject_sandbox_pool_to_execution_service()
 
             # Register pool with health service for monitoring
-            health_service.set_container_pool(container_pool)
+            health_service.set_sandbox_pool(sandbox_pool)
 
             # Store pool reference in app state
-            app.state.container_pool = container_pool
+            app.state.sandbox_pool = sandbox_pool
 
             logger.info(
-                "Container pool started successfully",
+                "Sandbox pool started successfully",
                 warmup_languages=["py", "js", "ts", "go", "java"],
             )
         except Exception as e:
-            logger.error("Failed to start container pool", error=str(e))
+            logger.error("Failed to start sandbox pool", error=str(e))
     else:
-        logger.info("Container pool disabled by configuration")
+        logger.info("Sandbox pool disabled by configuration")
 
 
 async def _perform_health_checks() -> None:
@@ -180,30 +152,20 @@ async def _perform_health_checks() -> None:
         logger.error("Initial health checks failed", error=str(e))
 
 
-async def _shutdown_network(app: FastAPI) -> None:
-    """Cleanup WAN network resources."""
-    if hasattr(app.state, "wan_network_manager") and app.state.wan_network_manager:
-        try:
-            await app.state.wan_network_manager.cleanup()
-            logger.info("WAN network iptables rules cleaned up")
-        except Exception as e:
-            logger.error("Error cleaning up WAN network", error=str(e))
-
-
 async def _shutdown_services(app: FastAPI) -> None:
-    """Stop monitoring services, container pool, and cleanup scheduler."""
+    """Stop monitoring services, sandbox pool, and cleanup scheduler."""
     try:
         await metrics_service.stop()
         logger.info("Metrics service stopped")
     except Exception as e:
         logger.error("Error stopping metrics service", error=str(e))
 
-    if hasattr(app.state, "container_pool") and app.state.container_pool:
+    if hasattr(app.state, "sandbox_pool") and app.state.sandbox_pool:
         try:
-            await app.state.container_pool.stop()
-            logger.info("Container pool stopped")
+            await app.state.sandbox_pool.stop()
+            logger.info("Sandbox pool stopped")
         except Exception as e:
-            logger.error("Error stopping container pool", error=str(e))
+            logger.error("Error stopping sandbox pool", error=str(e))
 
     try:
         from .services.cleanup import cleanup_scheduler
@@ -239,8 +201,7 @@ async def lifespan(app: FastAPI):
 
     await _startup_monitoring(app)
     await _startup_cleanup_tasks()
-    await _startup_network(app)
-    await _startup_container_pool(app)
+    await _startup_sandbox_pool(app)
     await _perform_health_checks()
 
     logger.info("Code Interpreter API startup completed")
@@ -249,7 +210,6 @@ async def lifespan(app: FastAPI):
 
     logger.info("Shutting down Code Interpreter API")
 
-    await _shutdown_network(app)
     await _shutdown_services(app)
 
     try:

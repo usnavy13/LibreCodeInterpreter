@@ -104,14 +104,14 @@ async def cleanup_active_containers() -> None:
         execution_service = get_execution_service()
 
         # Stop all active executions with shorter timeout to prevent hanging
-        await asyncio.wait_for(execution_service.cleanup_all_containers(), timeout=8.0)
-        logger.info("Container cleanup completed")
+        await asyncio.wait_for(execution_service.cleanup_all_sandboxes(), timeout=8.0)
+        logger.info("Sandbox cleanup completed")
     except asyncio.TimeoutError:
-        logger.warning("Container cleanup timed out after 8 seconds - forcing shutdown")
+        logger.warning("Sandbox cleanup timed out after 8 seconds - forcing shutdown")
     except ImportError as e:
         logger.warning(f"Could not import execution service during shutdown: {e}")
     except Exception as e:
-        logger.error("Error cleaning up containers", error=str(e))
+        logger.error("Error cleaning up sandboxes", error=str(e))
 
 
 async def flush_logs_and_metrics() -> None:
