@@ -1,8 +1,7 @@
 """nsjail configuration and sandbox info dataclass.
 
-SandboxInfo replaces docker.models.containers.Container as the
-handle for a running sandbox. NsjailConfig builds the CLI arguments
-for invoking nsjail.
+SandboxInfo is the handle for a running sandbox. NsjailConfig builds
+the CLI arguments for invoking nsjail.
 """
 
 from dataclasses import dataclass, field
@@ -22,9 +21,8 @@ logger = structlog.get_logger(__name__)
 class SandboxInfo:
     """Represents an nsjail sandbox instance.
 
-    This replaces docker.models.containers.Container as the handle
-    used throughout the codebase to reference a running execution
-    environment.
+    This is the handle used throughout the codebase to reference a
+    running execution environment.
     """
 
     sandbox_id: str
@@ -155,19 +153,19 @@ class NsjailConfig:
         args.extend(["--rlimit_nofile", "256"])   # Max open files
         args.extend(["--rlimit_nproc", "256"])    # Max processes (needs headroom for REPL module imports)
 
-        # Note: per-sandbox cgroup limits are not used because Docker's cgroup
-        # namespace isolation prevents nsjail from writing to cgroup.procs.
-        # Memory/CPU limits are enforced at the container level via compose
+        # Note: per-sandbox cgroup limits are not used because the
+        # containerized environment prevents nsjail from writing to cgroup.procs.
+        # Memory/CPU limits are enforced at the API container level via compose
         # deploy.resources. Per-process rlimits above provide additional
         # per-sandbox enforcement for file size, open files, and process count.
 
         # Namespace configuration:
         # - User namespace disabled: avoids /proc/self/gid_map write errors
-        #   inside Docker. Security is still enforced by PID/mount/net/IPC/UTS
-        #   namespaces and capability dropping.
+        #   in the containerized environment. Security is still enforced by
+        #   PID/mount/net/IPC/UTS namespaces and capability dropping.
         # - Network namespace enabled by default (disables network access).
         # - Mount namespace uses --no_pivotroot with --chroot / since
-        #   pivot_root fails inside Docker containers.
+        #   pivot_root fails in nested container environments.
         args.append("--disable_clone_newuser")
         if not network:
             # Network isolation: new net namespace with no interfaces

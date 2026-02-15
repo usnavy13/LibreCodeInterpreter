@@ -9,12 +9,12 @@ Usage:
 
     # Access grouped settings
     settings.api.host
-    settings.docker.timeout
+    settings.sandbox.nsjail_binary
     settings.redis.get_url()
 
     # Or use the backward-compatible flat access
     settings.api_host
-    settings.docker_timeout
+    settings.nsjail_binary
     settings.get_redis_url()
 """
 
@@ -28,7 +28,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Import grouped configurations
 from .api import APIConfig
-from .docker import DockerConfig
 from .redis import RedisConfig
 from .minio import MinIOConfig
 from .security import SecurityConfig
@@ -41,7 +40,6 @@ from .languages import (
     get_language,
     get_supported_languages,
     is_supported_language,
-    get_image_for_language,
     get_user_id_for_language,
     get_execution_command,
     uses_stdin,
@@ -115,31 +113,6 @@ class Settings(BaseSettings):
     minio_bucket: str = Field(default="code-interpreter-files")
     minio_region: str = Field(default="us-east-1")
 
-    # Docker Configuration
-    docker_base_url: Optional[str] = Field(default=None)
-    docker_image_registry: str = Field(
-        default="code-interpreter",
-        description="Registry/namespace prefix for execution environment images",
-    )
-    docker_image_tag: str = Field(
-        default="latest",
-        description="Tag for execution environment images (e.g. 'latest', 'dev')",
-    )
-    docker_timeout: int = Field(default=60, ge=10)
-    docker_network_mode: str = Field(default="none")
-    docker_security_opt: List[str] = Field(
-        default_factory=lambda: ["no-new-privileges:true"]
-    )
-    docker_cap_drop: List[str] = Field(default_factory=lambda: ["ALL"])
-    docker_read_only: bool = Field(default=True)
-    docker_tmpfs: Dict[str, str] = Field(
-        default_factory=lambda: {"/tmp": "rw,noexec,nosuid,size=100m"}
-    )
-    docker_seccomp_profile: Optional[str] = Field(
-        default="docker/seccomp-sandbox.json",
-        description="Path to seccomp profile JSON file (None to disable)",
-    )
-
     # Sandbox (nsjail) Configuration
     nsjail_binary: str = Field(
         default="nsjail",
@@ -169,13 +142,13 @@ class Settings(BaseSettings):
         default=4.0,
         ge=0.5,
         le=16.0,
-        description="Maximum CPU cores available to execution containers",
+        description="Maximum CPU cores available to sandboxed executions",
     )
     max_pids: int = Field(
         default=512,
         ge=64,
         le=4096,
-        description="Per-container process limit (cgroup pids_limit). Prevents fork bombs.",
+        description="Per-sandbox process limit (cgroup pids_limit). Prevents fork bombs.",
     )
     max_open_files: int = Field(default=1024, ge=64, le=4096)
 
@@ -214,7 +187,7 @@ class Settings(BaseSettings):
         default=5,
         ge=1,
         le=10,
-        description="Number of containers to start in parallel during warmup",
+        description="Number of sandboxes to start in parallel during warmup",
     )
     container_pool_replenish_interval: int = Field(
         default=2, ge=1, le=30, description="Seconds between pool replenishment checks"
@@ -224,42 +197,16 @@ class Settings(BaseSettings):
         description="Trigger immediate replenishment when pool is exhausted",
     )
 
-    # WAN Network Access Configuration
-    # When enabled, execution containers can access the public internet
-    # but are blocked from accessing host, other containers, and private networks
-    enable_wan_access: bool = Field(
-        default=False,
-        description="Enable WAN-only network access for execution containers",
-    )
-    wan_network_name: str = Field(
-        default="code-interpreter-wan",
-        description="Docker network name for WAN-access containers",
-    )
-    wan_dns_servers: List[str] = Field(
-        default_factory=lambda: ["8.8.8.8", "1.1.1.1", "8.8.4.4"],
-        description="Public DNS servers for WAN-access containers",
-    )
-
-    # Container Hardening Configuration
-    container_mask_host_info: bool = Field(
-        default=True,
-        description="Mask sensitive /proc paths to prevent host info leakage",
-    )
-    container_generic_hostname: str = Field(
-        default="sandbox",
-        description="Generic hostname for execution containers",
-    )
-
     # REPL Configuration - Pre-warmed Python interpreter for sub-100ms execution
     repl_enabled: bool = Field(
         default=True,
-        description="Enable REPL mode for Python containers (pre-warmed interpreter)",
+        description="Enable REPL mode for Python sandboxes (pre-warmed interpreter)",
     )
     repl_warmup_timeout_seconds: int = Field(
         default=15,
         ge=5,
         le=60,
-        description="Timeout for REPL server to become ready after container start",
+        description="Timeout for REPL server to become ready after sandbox start",
     )
     repl_health_check_timeout_seconds: int = Field(
         default=5,
@@ -448,19 +395,12 @@ class Settings(BaseSettings):
 
     @validator("supported_languages", pre=True, always=True)
     def _set_supported_languages(cls, v, values):
-        """Initialize supported_languages with registry-prefixed images."""
+        """Initialize supported_languages from the LANGUAGES registry."""
         if v:
             return v
 
-        registry = values.get("docker_image_registry", "code-interpreter")
-        tag = values.get("docker_image_tag", "latest")
         return {
             code: {
-                "image": (
-                    f"{registry}/{lang.image.rsplit(':', 1)[0]}:{tag}"
-                    if registry
-                    else f"{lang.image.rsplit(':', 1)[0]}:{tag}"
-                ),
                 "timeout_multiplier": lang.timeout_multiplier,
                 "memory_multiplier": lang.memory_multiplier,
             }
@@ -538,21 +478,6 @@ class Settings(BaseSettings):
             enable_cors=self.enable_cors,
             cors_origins=self.cors_origins,
             enable_docs=self.enable_docs,
-        )
-
-    @property
-    def docker(self) -> DockerConfig:
-        """Access Docker configuration group."""
-        return DockerConfig(
-            docker_base_url=self.docker_base_url,
-            docker_timeout=self.docker_timeout,
-            docker_network_mode=self.docker_network_mode,
-            docker_security_opt=self.docker_security_opt,
-            docker_cap_drop=self.docker_cap_drop,
-            docker_read_only=self.docker_read_only,
-            docker_tmpfs=self.docker_tmpfs,
-            container_ttl_minutes=self.container_ttl_minutes,
-            container_cleanup_interval_minutes=self.container_cleanup_interval_minutes,
         )
 
     @property
@@ -665,19 +590,6 @@ class Settings(BaseSettings):
         """Get configuration for a specific language."""
         return self.supported_languages.get(language, {})
 
-    def get_image_for_language(self, code: str) -> str:
-        """Get Docker image for a language."""
-        config = self.get_language_config(code)
-        if config and "image" in config:
-            return config["image"]
-
-        # Fallback to languages.py logic if not in settings
-        from .languages import get_image_for_language as get_img
-
-        return get_img(
-            code, registry=self.docker_image_registry, tag=self.docker_image_tag
-        )
-
     def get_execution_timeout(self, language: str) -> int:
         """Get execution timeout for a specific language."""
         multiplier = self.get_language_config(language).get("timeout_multiplier", 1.0)
@@ -720,7 +632,6 @@ __all__ = [
     "settings",
     # Grouped configs
     "APIConfig",
-    "DockerConfig",
     "RedisConfig",
     "MinIOConfig",
     "SecurityConfig",
@@ -733,7 +644,6 @@ __all__ = [
     "get_language",
     "get_supported_languages",
     "is_supported_language",
-    "get_image_for_language",
     "get_user_id_for_language",
     "get_execution_command",
     "uses_stdin",

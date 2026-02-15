@@ -13,7 +13,7 @@ tests/
 │   ├── test_execution_service.py
 │   ├── test_session_service.py
 │   └── ...
-├── integration/             # Integration tests (require Docker, Redis, MinIO)
+├── integration/             # Integration tests (require running API, Redis, MinIO)
 │   ├── test_api_contracts.py
 │   ├── test_librechat_compat.py
 │   ├── test_container_behavior.py
@@ -28,7 +28,7 @@ tests/
 
 Unit tests validate individual components in isolation:
 
-- Mock external dependencies (Docker, Redis, MinIO)
+- Mock external dependencies (Redis, MinIO, sandbox executor)
 - Fast execution (~seconds)
 - No infrastructure required
 
@@ -36,10 +36,10 @@ Unit tests validate individual components in isolation:
 
 Integration tests validate end-to-end behavior:
 
-- Require running Docker, Redis, MinIO
+- Require running API, Redis, MinIO
 - Test actual API endpoints
 - Validate LibreChat compatibility
-- Test container behavior and cleanup
+- Test sandbox behavior and cleanup
 
 ---
 
@@ -64,7 +64,7 @@ Before running tests, ensure:
 
 3. **For integration tests, infrastructure running:**
    ```bash
-   docker-compose up -d
+   docker compose up -d
    ```
 
 ### Running All Tests
@@ -144,13 +144,13 @@ Ensures compatibility with LibreChat's Code Interpreter API:
 - File reference format
 - Response structure matching LibreChat expectations
 
-### Container Behavior Tests
+### Sandbox Behavior Tests
 
 **File:** `tests/integration/test_container_behavior.py`
 
-Tests container lifecycle and execution:
+Tests sandbox lifecycle and execution:
 
-- Container creation and cleanup
+- Sandbox creation and cleanup
 - Resource limit enforcement
 - Timeout handling
 - Output capture
@@ -234,10 +234,9 @@ For unit tests, mock external dependencies:
 from unittest.mock import AsyncMock, patch
 
 @pytest.mark.asyncio
-async def test_execution_with_mocked_docker():
-    with patch("src.services.container.client.docker_client") as mock_docker:
-        mock_container = AsyncMock()
-        mock_docker.containers.run.return_value = mock_container
+async def test_execution_with_mocked_sandbox():
+    with patch("src.services.sandbox.executor.SandboxExecutor") as mock_executor:
+        mock_executor.execute.return_value = ("output", "", 0)
 
         # Test code here
 ```
@@ -372,7 +371,7 @@ pytest --cov=src --cov-report=xml tests/
 1. **Check infrastructure:**
 
    ```bash
-   docker-compose ps  # All services should be "Up"
+   docker compose ps  # All services should be "Up"
    ```
 
 2. **Check API health:**
@@ -383,7 +382,7 @@ pytest --cov=src --cov-report=xml tests/
 
 3. **Check logs:**
    ```bash
-   docker-compose logs api
+   docker compose logs api
    ```
 
 ### Async Test Issues
@@ -398,7 +397,7 @@ If async tests hang:
 
 For tests that occasionally fail:
 
-- Check for race conditions in container cleanup
+- Check for race conditions in sandbox cleanup
 - Ensure proper test isolation
 - Use explicit waits for async operations
 

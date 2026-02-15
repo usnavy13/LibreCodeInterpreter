@@ -1,7 +1,6 @@
 """Command execution in nsjail sandboxes.
 
-Replaces ContainerExecutor. Uses asyncio subprocess to invoke nsjail
-instead of Docker exec.
+Uses asyncio subprocess to invoke nsjail for isolated code execution.
 """
 
 import asyncio
@@ -22,8 +21,7 @@ logger = structlog.get_logger(__name__)
 class SandboxExecutor:
     """Handles command execution inside nsjail sandboxes.
 
-    Replaces ContainerExecutor. Instead of Docker exec, spawns an
-    nsjail subprocess for each command execution.
+    Spawns an nsjail subprocess for each command execution.
     """
 
     def __init__(self, nsjail_config: NsjailConfig):
@@ -65,7 +63,7 @@ class SandboxExecutor:
         shell_command = ["/bin/sh", "-c", command]
 
         # Build nsjail arguments
-        network = settings.enable_wan_access if hasattr(settings, "enable_wan_access") else False
+        network = False  # nsjail sandboxes run without network access
         nsjail_args = self._nsjail_config.build_args(
             sandbox_dir=str(sandbox_info.data_dir),
             command=shell_command,

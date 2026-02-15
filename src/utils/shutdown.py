@@ -92,9 +92,9 @@ async def cleanup_services() -> None:
         logger.error("Error closing health service", error=str(e))
 
 
-async def cleanup_active_containers() -> None:
-    """Cleanup active containers during shutdown."""
-    logger.info("Cleaning up active containers")
+async def cleanup_active_sandboxes() -> None:
+    """Cleanup active sandboxes during shutdown."""
+    logger.info("Cleaning up active sandboxes")
 
     try:
         # Import here to avoid circular imports and handle import errors
@@ -130,7 +130,7 @@ def setup_graceful_shutdown() -> None:
     """Setup graceful shutdown handling."""
     # Add shutdown callbacks in order of execution (reversed during shutdown)
     shutdown_handler.add_shutdown_callback(flush_logs_and_metrics)
-    shutdown_handler.add_shutdown_callback(cleanup_active_containers)
+    shutdown_handler.add_shutdown_callback(cleanup_active_sandboxes)
     shutdown_handler.add_shutdown_callback(cleanup_services)
 
     logger.info("Graceful shutdown handling configured")

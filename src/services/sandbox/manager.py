@@ -1,7 +1,4 @@
-"""Sandbox lifecycle management.
-
-Replaces ContainerManager with nsjail-based sandbox operations.
-"""
+"""Sandbox lifecycle management using nsjail."""
 
 import os
 import shutil
@@ -23,8 +20,8 @@ logger = structlog.get_logger(__name__)
 class SandboxManager:
     """Manages nsjail sandbox lifecycle operations.
 
-    Replaces ContainerManager. Creates sandbox directories on the host
-    filesystem instead of Docker containers.
+    Creates sandbox directories on the host filesystem for isolated
+    code execution via nsjail.
     """
 
     def __init__(self):

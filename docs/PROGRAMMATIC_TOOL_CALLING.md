@@ -207,7 +207,7 @@ The server must maintain execution state between requests:
 class PausedExecution:
     id: str                           # continuation_token
     session_id: str
-    container_id: str                 # Keep container alive
+    sandbox_id: str                   # Keep sandbox alive
     python_state: bytes               # Pickled execution state OR
     execution_socket: Any             # Active socket connection
     pending_tool_calls: List[dict]
@@ -220,7 +220,7 @@ class PausedExecution:
 
 - Redis with TTL (recommended)
 - In-memory with cleanup task
-- Container stays running with paused coroutine
+- Sandbox stays running with paused coroutine
 
 ### 2. Python Environment Setup
 
@@ -231,9 +231,9 @@ The Python execution environment must:
 3. **Capture stdout/stderr** - Buffer output across round-trips
 4. **Handle imports** - Pre-import common libraries
 
-### 3. Container Lifecycle
+### 3. Sandbox Lifecycle
 
-Unlike `/exec`, containers for programmatic execution must:
+Unlike `/exec`, sandboxes for programmatic execution must:
 
 - **Stay alive** between round-trips
 - Have **longer TTL** (match request timeout, up to 5 minutes)
@@ -455,7 +455,7 @@ async def retrieve_execution_state(execution_id: str) -> PausedExecution:
 
 - Return partial stdout/stderr on timeout
 - Continue execution even if some tools error
-- Clean up container on any terminal state
+- Clean up sandbox on any terminal state
 
 ---
 
@@ -468,12 +468,12 @@ async def retrieve_execution_state(execution_id: str) -> PausedExecution:
 - **Validate round-trip count** to prevent replay
 - **Bind to session** to prevent cross-session attacks
 
-### 2. Container Isolation
+### 2. Sandbox Isolation
 
-- Same isolation as `/exec` (network disabled, capabilities dropped)
+- Same isolation as `/exec` (nsjail namespace isolation, seccomp, cgroups)
 - **Longer lifetime** requires monitoring for resource abuse
 - **Memory limits** still enforced
-- Container destroyed on completion/error/timeout
+- Sandbox destroyed on completion/error/timeout
 
 ### 3. Tool Injection
 
@@ -502,7 +502,7 @@ async def retrieve_execution_state(execution_id: str) -> PausedExecution:
 
 1. **Continuation tokens**: Generate and validate
 2. **State storage**: Redis with TTL
-3. **Container persistence**: Keep alive between rounds
+3. **Sandbox persistence**: Keep alive between rounds
 4. **Round-trip limits**: Enforce maximum 20
 
 ### Phase 3: Production Hardening

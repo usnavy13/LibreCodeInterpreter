@@ -1,166 +1,114 @@
 services:
-  # Code Interpreter API
+  # Code Interpreter API (unified image with nsjail sandboxing)
   api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        BUILD_DATE: ${BUILD_DATE:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}
-        VERSION: ${VERSION:-1.0.0}
-        VCS_REF: ${VCS_REF:-$(git rev-parse --short HEAD)}
+    image: code-interpreter:nsjail
     container_name: code-interpreter-api
-    user: "1000:988" # Run as user with docker group access
+    restart: unless-stopped
+    # nsjail requires these capabilities to create namespaces and cgroups
     cap_add:
-      - NET_ADMIN  # Required for iptables management when WAN access is enabled
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
     ports:
       - "${API_PORT:-8000}:8000"
       - "${HTTPS_PORT:-443}:443"
     env_file:
       - .env
     environment:
-      # Container-specific overrides (these override .env values)
-      - API_HOST=0.0.0.0
-      - API_PORT=8000
-
-      # Service discovery (container names)
+      # Container-specific overrides (service discovery within compose network)
       - REDIS_HOST=redis
-      - REDIS_PORT=6379
       - MINIO_ENDPOINT=minio:9000
-
-      # Docker socket path inside container
-      - DOCKER_BASE_URL=unix://var/run/docker.sock
-
-      # SSL paths inside container
+      # SSL configuration
+      - ENABLE_HTTPS=true
       - SSL_CERT_FILE=/app/ssl/cert.pem
       - SSL_KEY_FILE=/app/ssl/key.pem
+      # Sandbox configuration
+      - SANDBOX_BASE_DIR=/var/lib/code-interpreter/sandboxes
+      - REPL_ENABLED=true
+      - CONTAINER_POOL_ENABLED=true
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./logs:/app/logs
-      - app-data:/app/data
-      - ${SSL_CERTS_PATH:-./ssl}:/app/ssl
-      - ./dashboard:/app/dashboard
-      - ./src:/app/src
-      - ./docker:/app/docker:ro  # Seccomp profile for container security
+      - sandbox-data:/var/lib/code-interpreter/sandboxes
+      - ${SSL_CERTS_PATH:-./ssl}:/app/ssl:ro
+    tmpfs:
+      - /app/data:size=100m
+    # Container-level resource limits (all sandboxes share this budget)
+    deploy:
+      resources:
+        limits:
+          memory: ${CONTAINER_MEMORY_LIMIT:-4g}
+          cpus: "${CONTAINER_CPU_LIMIT:-2.0}"
     depends_on:
-      - redis
-      - minio
-    networks:
-      - code-interpreter-network
-    restart: unless-stopped
-    stop_grace_period: 30s # Allow time to cleanup pooled containers
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     healthcheck:
-      test:
-        [
-          "CMD",
-          "sh",
-          "-c",
-          "curl -f -k https://localhost:443/health 2>/dev/null || curl -f http://localhost:8000/health 2>/dev/null || curl -f http://localhost:80/health || exit 1",
-        ]
+      test: ["CMD", "curl", "-fsk", "https://localhost:443/health"]
       interval: 30s
       timeout: 15s
       retries: 3
-      start_period: 15s
+      start_period: 30s
+    # No /var/run/docker.sock mount needed
 
   # Redis for session management
   redis:
     image: redis:7-alpine
     container_name: code-interpreter-redis
+    restart: unless-stopped
     ports:
-      # Expose to localhost for CLI tools
-      - "127.0.0.1:6379:6379"
-    environment:
-      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     command: >
-      sh -c "
-        if [ -n \"$$REDIS_PASSWORD\" ]; then
-          redis-server --requirepass $$REDIS_PASSWORD --appendonly yes --appendfsync everysec
-        else
-          redis-server --appendonly yes --appendfsync everysec
-        fi
-      "
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
     volumes:
       - redis-data:/data
-      - ./docker/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
-    networks:
-      - code-interpreter-network
-    restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # MinIO for file storage
   minio:
     image: minio/minio:latest
     container_name: code-interpreter-minio
+    restart: unless-stopped
     ports:
-      # API port for local testing
-      - "127.0.0.1:9000:9000"
-      # Console only, bound to localhost (access via SSH tunnel)
+      - "127.0.0.1:${MINIO_PORT:-9000}:9000"
       - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
     environment:
-      - MINIO_ROOT_USER=${MINIO_ACCESS_KEY:-minioadmin}
-      - MINIO_ROOT_PASSWORD=${MINIO_SECRET_KEY:-minioadmin}
-      - MINIO_BROWSER_REDIRECT_URL=http://localhost:9001
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
     command: server /data --console-address ":9001"
     volumes:
       - minio-data:/data
-    networks:
-      - code-interpreter-network
-    restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # MinIO bucket initialization
   minio-init:
     image: minio/mc:latest
-    container_name: code-interpreter-minio-init
     depends_on:
-      - minio
-    environment:
-      - MINIO_ENDPOINT=minio:9000
-      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
-      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
-      - MINIO_BUCKET=${MINIO_BUCKET:-code-interpreter-files}
+      minio:
+        condition: service_healthy
     entrypoint: >
-      /bin/sh -c " echo 'Waiting for MinIO to be ready...'; until mc alias set minio http://$$MINIO_ENDPOINT $$MINIO_ACCESS_KEY $$MINIO_SECRET_KEY; do
-        echo 'MinIO not ready, waiting...';
-        sleep 2;
-      done; echo 'MinIO is ready. Creating bucket if it does not exist...'; mc mb minio/$$MINIO_BUCKET --ignore-existing; echo 'Bucket setup complete.'; "
-    networks:
-      - code-interpreter-network
+      /bin/sh -c "
+      mc alias set myminio http://minio:9000 $${MINIO_ACCESS_KEY:-minioadmin} $${MINIO_SECRET_KEY:-minioadmin};
+      mc mb --ignore-existing myminio/$${MINIO_BUCKET:-code-interpreter-files};
+      exit 0;
+      "
+    environment:
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_BUCKET: ${MINIO_BUCKET:-code-interpreter-files}
 
 volumes:
+  sandbox-data:
   redis-data:
-    driver: local
   minio-data:
-    driver: local
-  app-data:
-    driver: local
-
-networks:
-  code-interpreter-network:
-    driver: bridge
-    ipam:
-      config:
-        - subnet: 172.20.0.0/16
-
-  # WAN-only network for execution containers that need internet access
-  # This network is only created when ENABLE_WAN_ACCESS=true
-  code-interpreter-wan:
-    driver: bridge
-    ipam:
-      config:
-        - subnet: 172.30.0.0/16
-    driver_opts:
-      # Enable NAT for outbound internet access
-      com.docker.network.bridge.enable_ip_masquerade: "true"
-      # Disable inter-container communication
-      com.docker.network.bridge.enable_icc: "false"
-    labels:
-      com.code-interpreter.managed: "true"
-      com.code-interpreter.type: "wan-access"

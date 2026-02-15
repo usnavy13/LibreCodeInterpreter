@@ -39,7 +39,7 @@ State persistence uses a hybrid storage architecture:
    ```
    POST /exec {"lang": "py", "code": "x = 42"}
 
-   → Container executes code
+   → Sandbox executes code
    → REPL server captures namespace: {"x": 42}
    → Namespace serialized with cloudpickle
    → Compressed with lz4 (~10x reduction)
@@ -372,7 +372,7 @@ During serialization, memory temporarily doubles:
 - Original object in memory
 - Serialized copy being created
 
-Ensure containers have sufficient memory for state operations.
+Ensure sandboxes have sufficient memory for state operations.
 
 ---
 

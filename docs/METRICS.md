@@ -18,12 +18,12 @@ Track per-execution, per-language, and per-API-key metrics.
 | `GET /metrics/detailed` | Summary with language breakdown |
 | `GET /metrics/by-language` | Per-language execution stats |
 | `GET /metrics/by-api-key/{hash}` | Per-API-key usage |
-| `GET /metrics/pool` | Container pool hit rates |
+| `GET /metrics/pool` | Sandbox pool hit rates |
 
 ## Tracked Metrics
 
 **Per-execution:**
-- Language, execution time, memory usage, status, files generated, container source
+- Language, execution time, memory usage, status, files generated, sandbox source
 
 **Per-language:**
 - Execution count, error rates, average execution times

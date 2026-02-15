@@ -8,18 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Container hardening with host information masking to prevent information leakage
-- Optional WAN-only network access mode for containers with private IP blocking
+- nsjail-based sandboxing for code execution (replaces Docker socket-based approach)
+- Single unified Docker image with all 12 language runtimes
 - Hour and day periods for execution heatmap visualizations
 - MyPy type checking integration with comprehensive type hints
 - Dynamic Content Security Policy headers based on request path
 
 ### Changed
+- Migrated from per-language Docker containers to nsjail sandboxes for isolation
+- Replaced ContainerPool/Manager/Executor with SandboxPool/Manager/Executor
+- Simplified Docker setup: single Dockerfile and docker-compose.yml
 - Improved heatmap UI styling for better visualization
-- Enhanced development environment with source directory mounting in docker-compose
 - Updated Pydantic settings configuration for better type safety
 
 ### Removed
+- Per-language Docker images and build-images.sh script
+- Docker SDK dependency (no Docker socket needed)
+- docker-compose.ghcr.yml (single compose file now)
 - Deprecated baseline performance documentation files
 - Legacy deployment scripts
 
@@ -30,24 +35,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Core Features
 - Multi-language code execution supporting 12 languages: Python, JavaScript, TypeScript, Go, Java, C, C++, PHP, Rust, R, Fortran, and D
 - FastAPI-based REST API with interactive documentation
-- Docker-based sandboxed execution environments with comprehensive security controls
+- Sandboxed execution environments with comprehensive security controls
 - Redis-based session management with automatic cleanup
 - MinIO/S3-compatible storage integration for persistent file storage
 
 #### Performance Features
 - REPL mode for Python with pre-warmed interpreter achieving 20-40ms execution latency
-- Container pooling system with pre-warmed containers for ~3ms acquisition time
-- Per-language container pool sizing for optimized resource allocation
+- Sandbox pooling system with pre-warmed sandboxes for ~3ms acquisition time
 - Thread-safe execution supporting 10+ concurrent requests
 - State persistence for Python sessions with Redis and MinIO archival
 
 #### Security Features
 - API key-based authentication with rate limiting
-- Network isolation with `network_mode: none` by default
-- Read-only filesystem in containers
-- All Linux capabilities dropped (`cap_drop: ALL`)
-- Tmpfs mounts with `noexec,nosuid` flags
-- No-new-privileges security option
+- nsjail-based sandbox isolation with PID, mount, and network namespaces
+- Seccomp syscall filtering
+- Cgroup-based resource limits for CPU, memory, and PID count
+- Non-root code execution (uid 1001)
 - Resource limits for CPU, memory, and execution time
 - Input validation and sanitization
 

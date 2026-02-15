@@ -140,11 +140,11 @@ async def minio_health_check(_: str = Depends(verify_api_key)):
         )
 
 
-@router.get("/health/docker", summary="Docker health check")
-async def docker_health_check(_: str = Depends(verify_api_key)):
-    """Check Docker daemon connectivity and performance."""
+@router.get("/health/nsjail", summary="nsjail health check")
+async def nsjail_health_check(_: str = Depends(verify_api_key)):
+    """Check nsjail sandbox availability and configuration."""
     try:
-        result = await health_service.check_docker()
+        result = await health_service.check_nsjail()
 
         if result.status == HealthStatus.UNHEALTHY:
             return JSONResponse(status_code=503, content=result.to_dict())
@@ -152,13 +152,13 @@ async def docker_health_check(_: str = Depends(verify_api_key)):
             return JSONResponse(status_code=200, content=result.to_dict())
 
     except Exception as e:
-        logger.error("Docker health check failed", error=str(e))
+        logger.error("nsjail health check failed", error=str(e))
         return JSONResponse(
             status_code=503,
             content={
-                "service": "docker",
+                "service": "nsjail",
                 "status": "unhealthy",
-                "error": str(e) if settings.api_debug else "Docker check failed",
+                "error": str(e) if settings.api_debug else "nsjail check failed",
             },
         )
 
@@ -353,9 +353,9 @@ async def get_api_key_metrics(
         )
 
 
-@router.get("/metrics/pool", summary="Container pool metrics")
+@router.get("/metrics/pool", summary="Sandbox pool metrics")
 async def get_pool_metrics(_: str = Depends(verify_api_key)):
-    """Get container pool statistics.
+    """Get sandbox pool statistics.
 
     Returns:
         Pool hit rates, acquisition times, and exhaustion events

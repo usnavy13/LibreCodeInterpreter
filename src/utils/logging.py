@@ -95,7 +95,6 @@ def configure_third_party_loggers() -> None:
     """Configure logging levels for third-party libraries."""
     # Reduce noise from third-party libraries
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
-    logging.getLogger("docker").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("minio").setLevel(logging.WARNING)
 

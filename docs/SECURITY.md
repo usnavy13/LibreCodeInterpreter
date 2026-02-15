@@ -95,121 +95,24 @@ Code is analyzed for potentially dangerous patterns:
 - **File operations**: `open()`, `file()`, etc.
 - **Input functions**: `input()`, `raw_input()`, etc.
 
-**Note**: Dangerous patterns generate warnings but don't block execution, as the code runs in isolated containers.
+**Note**: Dangerous patterns generate warnings but don't block execution, as the code runs in isolated nsjail sandboxes.
 
-#### Container Isolation
+#### nsjail Sandbox Isolation
 
-- **Docker containers**: All code runs in isolated Docker containers
-- **Resource limits**: Memory and CPU limits are enforced
-- **Network isolation**: External network access is blocked by default
-- **Filesystem isolation**: Limited filesystem access within containers
+- **nsjail sandboxes**: All code runs in isolated nsjail sandboxes with namespace separation
+- **PID namespace**: Each sandbox has its own PID 1; processes cannot see or signal other sandboxes
+- **Mount namespace**: Minimal filesystem with read-only bind mounts for language runtimes
+- **Network namespace**: No network access by default
+- **Seccomp filtering**: Restricts available system calls
+- **Cgroup limits**: Memory, CPU, and PID limits enforced
+- **rlimits**: File size, open files, and stack size restricted
+- **Non-root execution**: Code runs as uid 1001 (codeuser)
 
-#### Container Hardening (Host Info Protection)
+**Note**: The API container requires `SYS_ADMIN` capability for nsjail to create namespaces and cgroups. No Docker socket is mounted.
 
-Containers are hardened to prevent information leakage about the host infrastructure.
-This prevents reconnaissance attacks that could reveal details about your cloud provider,
-kernel version, or internal network configuration.
+### Network Isolation
 
-**Currently Implemented**:
-
-| Feature | Protection |
-|---------|------------|
-| Generic hostname | All containers use hostname "sandbox" instead of revealing host info |
-| Empty DNS search domain | WAN containers have empty search domain to prevent Azure/cloud domain leakage |
-| Public DNS only | WAN containers use only public DNS (8.8.8.8, 1.1.1.1) |
-
-**Configuration**:
-
-```bash
-# Enable/disable host info masking (default: true)
-CONTAINER_MASK_HOST_INFO=true
-
-# Custom generic hostname (default: sandbox)
-CONTAINER_GENERIC_HOSTNAME=sandbox
-```
-
-**Note**: Kernel version (`/proc/version`) and CPU/memory info (`/proc/cpuinfo`, `/proc/meminfo`)
-remain accessible because many libraries depend on them. The hostname and DNS hardening above
-addresses the primary concern of revealing cloud provider and internal network details.
-
-### WAN-Only Network Access
-
-The Code Interpreter API supports an optional WAN-only network mode that allows
-execution containers to access the public internet while maintaining strict
-isolation from internal networks.
-
-#### Overview
-
-When enabled via `ENABLE_WAN_ACCESS=true`, execution containers are connected
-to a special Docker network that:
-
-1. **Allows**: Outbound connections to public internet IPs (all ports)
-2. **Blocks**: Access to private IP ranges, Docker host, and other containers
-
-#### Blocked IP Ranges
-
-The following ranges are blocked via iptables rules:
-
-| Range | Description |
-|-------|-------------|
-| `10.0.0.0/8` | Class A private network |
-| `172.16.0.0/12` | Class B private network (includes Docker networks) |
-| `192.168.0.0/16` | Class C private network |
-| `169.254.0.0/16` | Link-local (includes cloud metadata services) |
-| `127.0.0.0/8` | Loopback |
-| `224.0.0.0/4` | Multicast |
-| `240.0.0.0/4` | Reserved |
-
-#### Configuration
-
-```bash
-# Enable WAN access (default: false)
-ENABLE_WAN_ACCESS=true
-
-# Custom network name (optional)
-WAN_NETWORK_NAME=code-interpreter-wan
-
-# Custom DNS servers (optional, defaults to Google and Cloudflare DNS)
-WAN_DNS_SERVERS=8.8.8.8,1.1.1.1,8.8.4.4
-```
-
-#### Security Considerations
-
-1. **iptables Required**: The API container needs `NET_ADMIN` capability to
-   manage iptables rules. This is automatically configured in docker-compose.yml.
-
-2. **Public DNS Only**: Only public DNS servers are used to prevent DNS-based
-   attacks that could leak internal network information.
-
-3. **No Inter-Container Communication**: The WAN network has ICC (inter-container
-   communication) disabled. Containers cannot communicate with each other.
-
-4. **Cloud Metadata Blocked**: The link-local range (169.254.0.0/16) is blocked,
-   which includes cloud metadata endpoints (169.254.169.254) used by AWS, GCP,
-   and Azure.
-
-5. **IPv4 Only**: The current implementation focuses on IPv4. IPv6 would require
-   separate ip6tables rules.
-
-6. **Default Off**: WAN access is disabled by default for maximum security.
-
-#### When to Enable WAN Access
-
-Enable WAN access when:
-- Users need to download packages or dependencies (pip, npm, etc.)
-- Code needs to fetch data from public APIs
-- Web scraping or data collection is required
-
-Keep WAN access disabled (default) when:
-- Maximum security isolation is required
-- All dependencies are pre-installed in container images
-- Code should not have any network access
-
-#### Audit Logging
-
-WAN-enabled containers are tracked via labels:
-- `com.code-interpreter.wan-access=true` on each container
-- Network initialization and iptables rule application are logged at startup
+By default, nsjail sandboxes have no network access. Each sandbox runs in its own network namespace with no connectivity.
 
 ### State Persistence Security
 
@@ -217,8 +120,8 @@ Python state persistence introduces additional security considerations:
 
 #### Serialization Security
 
-- **Serialization inside containers**: State is serialized within the isolated container, not on the host. The host never unpickles user data.
-- **cloudpickle usage**: We use cloudpickle for serialization. While pickle-based formats can execute code during deserialization, this only occurs inside the sandboxed container.
+- **Serialization inside sandboxes**: State is serialized within the isolated nsjail sandbox, not on the host. The host never unpickles user data.
+- **cloudpickle usage**: We use cloudpickle for serialization. While pickle-based formats can execute code during deserialization, this only occurs inside the sandboxed nsjail environment.
 - **Compression**: State is compressed with lz4 before storage, providing minor obfuscation and reducing attack surface.
 - **Base64 encoding**: Final storage uses base64 encoding for safe transport.
 
@@ -332,7 +235,7 @@ If dangerous code patterns are detected:
 1. Review the code content in logs
 2. Check the session and user context
 3. Consider additional code validation rules
-4. Monitor container resource usage
+4. Monitor sandbox resource usage
 
 ### File Upload Issues
 

@@ -4,9 +4,7 @@ This module provides fast code execution by communicating with a
 running Python REPL inside an nsjail sandbox, eliminating interpreter startup.
 
 The REPL server runs as the main process in the sandbox and communicates
-via stdin/stdout using a JSON-based protocol with delimiters. This is
-identical to the Docker version but uses subprocess pipes instead of
-Docker attach sockets.
+via stdin/stdout subprocess pipes using a JSON-based protocol with delimiters.
 """
 
 import asyncio
@@ -28,10 +26,7 @@ DELIMITER = b"\n---END---\n"
 
 @dataclass
 class SandboxREPLProcess:
-    """Represents a running REPL process inside an nsjail sandbox.
-
-    This replaces the Docker Container as the handle for REPL communication.
-    """
+    """Represents a running REPL process inside an nsjail sandbox."""
 
     process: asyncio.subprocess.Process
     sandbox_info: SandboxInfo
@@ -43,8 +38,6 @@ class SandboxREPLExecutor:
     """Executes code via running REPL in an nsjail sandbox.
 
     Uses subprocess stdin/stdout pipes to communicate with the REPL server.
-    This is much simpler than the Docker version since subprocess pipes
-    give clean stdout without Docker stream headers.
     """
 
     def __init__(self):
@@ -204,9 +197,8 @@ class SandboxREPLExecutor:
     ) -> Dict[str, Any]:
         """Send request to REPL and receive response via subprocess pipes.
 
-        Unlike the Docker version, subprocess pipes give clean stdout
-        without multiplexed stream headers, so no _strip_docker_headers
-        is needed.
+        Subprocess pipes give clean stdout without multiplexed stream
+        headers.
 
         Args:
             process: REPL process with stdin/stdout pipes

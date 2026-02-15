@@ -11,7 +11,7 @@ Commands:
   (no args)    Interactive menu
   summary      Show metrics summary
   languages    Per-language breakdown
-  pool         Container pool stats
+  pool         Sandbox pool stats
   watch        Auto-refresh dashboard
 """
 
@@ -128,7 +128,7 @@ async def build_pool_panel() -> Panel:
         style="red" if pool_stats["exhaustion_events"] > 0 else "green"
     ))
 
-    return Panel(table, title="[bold]Container Pool[/bold]", border_style="magenta")
+    return Panel(table, title="[bold]Sandbox Pool[/bold]", border_style="magenta")
 
 
 async def cmd_summary(args):
@@ -219,7 +219,7 @@ async def cmd_interactive(args):
         console.print("[bold]Commands:[/bold]")
         console.print("  [cyan]1[/cyan]  Summary")
         console.print("  [cyan]2[/cyan]  Language breakdown")
-        console.print("  [cyan]3[/cyan]  Container pool stats")
+        console.print("  [cyan]3[/cyan]  Sandbox pool stats")
         console.print("  [cyan]4[/cyan]  Live dashboard (auto-refresh)")
         console.print("  [cyan]q[/cyan]  Quit")
         console.print()
@@ -265,7 +265,7 @@ def main():
     lang_p.add_argument("--hours", type=int, default=24)
 
     # pool
-    subparsers.add_parser("pool", help="Container pool stats")
+    subparsers.add_parser("pool", help="Sandbox pool stats")
 
     # watch
     watch_p = subparsers.add_parser("watch", help="Auto-refresh dashboard")

@@ -780,14 +780,14 @@ class ExecutionOrchestrator:
         return generated
 
     async def _get_file_from_container(self, container: Any, file_path: str) -> bytes:
-        """Get file content from the execution container.
+        """Get file content from the execution sandbox.
 
         Args:
-            container: Docker container object (passed directly, no session lookup needed)
-            file_path: Path to file inside container
+            container: Sandbox object (passed directly, no session lookup needed)
+            file_path: Path to file inside sandbox
         """
         if not container:
-            return f"# Container not found for file: {file_path}\n".encode("utf-8")
+            return f"# Sandbox not found for file: {file_path}\n".encode("utf-8")
 
         sandbox_manager = self.execution_service.sandbox_manager
         content = sandbox_manager.get_file_content_from_sandbox(

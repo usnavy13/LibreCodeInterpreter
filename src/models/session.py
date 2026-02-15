@@ -43,10 +43,10 @@ class Session(BaseModel):
     )
     expires_at: datetime = Field(..., description="Session expiration timestamp")
 
-    # Container information
-    container_id: Optional[str] = Field(default=None, description="Docker container ID")
+    # Sandbox information
+    container_id: Optional[str] = Field(default=None, description="Sandbox ID")
     container_status: Optional[str] = Field(
-        default=None, description="Container status"
+        default=None, description="Sandbox status"
     )
 
     # File management

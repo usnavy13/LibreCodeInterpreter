@@ -37,7 +37,7 @@ class LoadTestRunner:
         )
         self.monitor = ResourceMonitor(
             sample_interval=config.monitor_interval_seconds,
-            enable_docker_stats=config.enable_docker_stats,
+            enable_sandbox_stats=config.enable_sandbox_stats,
         )
         self.progress_callback = progress_callback or (lambda x: None)
 
@@ -95,7 +95,7 @@ class LoadTestRunner:
         # Stop monitoring
         end_time = time.perf_counter()
         system_metrics = await self.monitor.stop()
-        docker_stats = self.monitor.get_docker_summary()
+        sandbox_stats = self.monitor.get_sandbox_summary()
 
         # Process results
         for exec_result in execution_results:
@@ -114,7 +114,7 @@ class LoadTestRunner:
 
         result.duration_seconds = end_time - start_time
         result.system_metrics = system_metrics
-        result.docker_stats = docker_stats
+        result.sandbox_stats = sandbox_stats
 
         return result
 
@@ -294,7 +294,7 @@ class LoadTestRunner:
         # when run_scenario_at_concurrency() calls start()/stop() on self.monitor
         overall_monitor = ResourceMonitor(
             sample_interval=self.config.monitor_interval_seconds,
-            enable_docker_stats=self.config.enable_docker_stats,
+            enable_sandbox_stats=self.config.enable_sandbox_stats,
         )
         await overall_monitor.start()
 

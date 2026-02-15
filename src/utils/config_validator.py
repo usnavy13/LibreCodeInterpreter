@@ -39,7 +39,7 @@ class ConfigValidator:
         # Validate external services
         self._validate_redis_connection()
         self._validate_minio_connection()
-        self._validate_docker_connection()
+        self._validate_nsjail()
 
         # Log results
         if self.warnings:
@@ -74,17 +74,12 @@ class ConfigValidator:
         if not settings.allowed_file_extensions:
             self.warnings.append("No allowed file extensions configured")
 
-        # Validate Docker security settings
+        # Validate sandbox security settings
         if not settings.enable_network_isolation:
             self.warnings.append("Network isolation is disabled - security risk")
 
         if not settings.enable_filesystem_isolation:
             self.warnings.append("Filesystem isolation is disabled - security risk")
-
-        if settings.docker_network_mode != "none":
-            self.warnings.append(
-                f"Docker network mode '{settings.docker_network_mode}' may allow network access"
-            )
 
     def _validate_resource_limits(self):
         """Validate resource limit configuration."""
@@ -166,7 +161,7 @@ class ConfigValidator:
             else:
                 self.errors.append(f"MinIO validation error: {e}")
 
-    def _validate_docker_connection(self):
+    def _validate_nsjail(self):
         """Validate nsjail sandbox availability."""
         nsjail_path = shutil.which("nsjail")
         if not nsjail_path:

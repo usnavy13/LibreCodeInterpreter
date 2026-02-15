@@ -6,7 +6,8 @@ This document provides a comprehensive overview of the Code Interpreter API arch
 
 ```
                                     ┌─────────────────────────────────────────────────────────────┐
-                                    │                      Code Interpreter API                   │
+                                    │                 Code Interpreter API Container               │
+                                    │            (single unified image with nsjail)                │
                                     │                                                             │
   ┌──────────┐    HTTPS/443         │  ┌─────────────┐    ┌─────────────────────────────────┐   │
   │  Client  │ ──────────────────────▶ │   FastAPI   │───▶│     ExecutionOrchestrator       │   │
@@ -18,31 +19,33 @@ This document provides a comprehensive overview of the Code Interpreter API arch
                                     │  ┌─────────────┐    ┌─────────────────────────────────┐   │
                                     │  │ Middleware  │    │           Services               │   │
                                     │  │  - Auth     │    │  ┌─────────┐  ┌─────────────┐   │   │
-                                    │  │  - Headers  │    │  │Container│  │  Execution  │   │   │
+                                    │  │  - Headers  │    │  │ Sandbox │  │  Execution  │   │   │
                                     │  │  - Logging  │    │  │  Pool   │  │   Runner    │   │   │
                                     │  │  - Metrics  │    │  └────┬────┘  └──────┬──────┘   │   │
                                     │  └─────────────┘    │       │              │          │   │
                                     │                     │       ▼              ▼          │   │
                                     │                     │  ┌──────────────────────────┐   │   │
-                                    │                     │  │   Container Manager      │   │   │
+                                    │                     │  │   Sandbox Manager        │   │   │
                                     │                     │  │   + REPL Executor        │   │   │
+                                    │                     │  │   → nsjail (isolation)   │   │   │
                                     │                     │  └──────────────────────────┘   │   │
                                     │                     └─────────────────────────────────┘   │
                                     └────────────────────────────────┬──────────────────────────┘
                                                                      │
-                          ┌──────────────────────────────────────────┼──────────────────────────────┐
-                          │                                          │                              │
-                          ▼                                          ▼                              ▼
-                   ┌──────────────┐                           ┌──────────────┐               ┌──────────────┐
-                   │    Redis     │                           │    Docker    │               │    MinIO     │
-                   │              │                           │    Engine    │               │   (S3-API)   │
-                   │ - Sessions   │                           │              │               │              │
-                   │ - State      │                           │ ┌──────────┐ │               │ - Files      │
-                   │ - Caching    │                           │ │Container │ │               │ - State      │
-                   │              │                           │ │  Pool    │ │               │   Archives   │
-                   └──────────────┘                           │ └──────────┘ │               └──────────────┘
-                                                              └──────────────┘
+                                              ┌──────────────────────┴──────────────────────┐
+                                              │                                              │
+                                              ▼                                              ▼
+                                       ┌──────────────┐                               ┌──────────────┐
+                                       │    Redis     │                               │    MinIO     │
+                                       │              │                               │   (S3-API)   │
+                                       │ - Sessions   │                               │              │
+                                       │ - State      │                               │ - Files      │
+                                       │ - Caching    │                               │ - State      │
+                                       │              │                               │   Archives   │
+                                       └──────────────┘                               └──────────────┘
 ```
+
+**Key architectural change:** The API, all language runtimes, and nsjail run inside a single Docker container. Code execution is isolated via nsjail sandboxes (PID/mount/network namespaces, seccomp, cgroups) rather than separate Docker containers. No Docker socket is mounted.
 
 ## Core Components
 
@@ -74,17 +77,17 @@ Business logic is organized into focused services:
 | **MetricsService**        | `metrics.py`        | Metrics collection               |
 | **CleanupService**        | `cleanup.py`        | Background cleanup tasks         |
 
-### 3. Container Management (`src/services/container/`)
+### 3. Sandbox Management (`src/services/sandbox/`)
 
-Container lifecycle is managed by a dedicated package:
+Sandbox lifecycle is managed by a dedicated package:
 
-| Component             | File               | Purpose                                            |
-| --------------------- | ------------------ | -------------------------------------------------- |
-| **ContainerManager**  | `manager.py`       | Container lifecycle (create, start, stop, destroy) |
-| **ContainerPool**     | `pool.py`          | Pre-warmed container pool per language             |
-| **ContainerExecutor** | `executor.py`      | Command execution in containers                    |
-| **REPLExecutor**      | `repl_executor.py` | Python REPL communication                          |
-| **DockerClient**      | `client.py`        | Docker client factory                              |
+| Component            | File               | Purpose                                              |
+| -------------------- | ------------------ | ---------------------------------------------------- |
+| **SandboxManager**   | `manager.py`       | Sandbox lifecycle (create, destroy)                  |
+| **SandboxPool**      | `pool.py`          | Pre-warmed Python REPL sandbox pool                  |
+| **SandboxExecutor**  | `executor.py`      | Code execution in nsjail sandboxes                   |
+| **REPLExecutor**     | `repl_executor.py` | Python REPL communication                            |
+| **NsjailConfig**     | `nsjail.py`        | nsjail CLI argument builder and SandboxInfo dataclass |
 
 ### 4. Execution Engine (`src/services/execution/`)
 
@@ -106,7 +109,7 @@ class ExecutionStarted(Event): ...
 class SessionCreated(Event): ...
 class SessionDeleted(Event): ...
 class FileUploaded(Event): ...
-class ContainerAcquiredFromPool(Event): ...
+class SandboxAcquiredFromPool(Event): ...
 class PoolWarmedUp(Event): ...
 ```
 
@@ -141,25 +144,25 @@ await event_bus.publish(ExecutionCompleted(session_id=..., execution_id=...))
        │
        ├── 3c. Load state if session_id provided (StateService)
        │
-       ├── 3d. Upload input files to container
+       ├── 3d. Upload input files to sandbox directory
        │
-       ├── 3e. Acquire container from pool
+       ├── 3e. Acquire sandbox from pool
        │         │
-       │         └── ContainerPool.acquire() → returns warm container
+       │         └── SandboxPool.acquire() → returns warm sandbox
        │
        ├── 3f. Execute code
        │         │
        │         ├── Python + REPL: REPLExecutor.execute()
-       │         │     └── Send JSON via Docker attach socket
+       │         │     └── Send JSON via stdin/stdout pipe
        │         │
-       │         └── Other languages: ContainerExecutor.execute()
-       │               └── docker exec with timeout
+       │         └── Other languages: SandboxExecutor.execute()
+       │               └── nsjail subprocess with timeout
        │
        ├── 3g. Save state if Python (StateService)
        │
-       ├── 3h. Download output files from container
+       ├── 3h. Collect output files from sandbox directory
        │
-       └── 3i. Destroy container immediately
+       └── 3i. Destroy sandbox immediately
        │
        ▼
 4. Return ExecResponse with stdout, stderr, files, session_id
@@ -186,45 +189,46 @@ await event_bus.publish(ExecutionCompleted(session_id=..., execution_id=...))
 4. Return session_id and file_id
 ```
 
-## Container Lifecycle
+## Sandbox Lifecycle
 
-### Container Pool
+### Sandbox Pool
 
-The container pool pre-warms containers to eliminate cold start latency:
+The sandbox pool pre-warms Python REPL sandboxes to eliminate cold start latency:
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────┐
-│                           Container Pool                                    │
+│                            Sandbox Pool                                     │
 ├────────────────────────────────────────────────────────────────────────────┤
 │                                                                            │
-│   Python Pool (min: 5, max: 20)         JavaScript Pool (min: 2, max: 8)  │
-│   ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐      ┌─────┐ ┌─────┐                    │
-│   │REPL │ │REPL │ │REPL │ │REPL │      │ JS  │ │ JS  │                    │
-│   │Ready│ │Ready│ │Ready│ │Ready│      │Ready│ │Ready│                    │
-│   └─────┘ └─────┘ └─────┘ └─────┘      └─────┘ └─────┘                    │
+│   Python REPL Pool (configurable size, default: 5)                         │
+│   ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐                                │
+│   │REPL │ │REPL │ │REPL │ │REPL │ │REPL │                                │
+│   │Ready│ │Ready│ │Ready│ │Ready│ │Ready│                                │
+│   └─────┘ └─────┘ └─────┘ └─────┘ └─────┘                                │
 │                                                                            │
-│   Acquisition: O(1) ~3ms               Acquisition: O(1) ~3ms             │
+│   Acquisition: O(1) ~3ms                                                  │
+│   Non-Python languages: one-shot nsjail execution (no pooling)            │
 │                                                                            │
 └────────────────────────────────────────────────────────────────────────────┘
 
 Pool Lifecycle:
 ───────────────
-1. On startup: Pre-warm containers to min pool size
-2. On acquire: Pop container from pool, mark as in-use
-3. On execution complete: Destroy container (no reuse)
-4. Background: Replenish pool to min size when below threshold
+1. On startup: Pre-warm Python REPL sandboxes to configured pool size
+2. On acquire: Pop sandbox from pool, mark as in-use
+3. On execution complete: Destroy sandbox (no reuse)
+4. Background: Replenish pool when below threshold
 ```
 
 ### REPL Server
 
-For Python, containers run a REPL server as PID 1:
+For Python, sandboxes run a REPL server as the main process:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                         Python Container                                     │
+│                         nsjail Sandbox (Python)                              │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│   PID 1: repl_server.py                                                     │
+│   repl_server.py (running inside nsjail)                                    │
 │   ┌───────────────────────────────────────────────────────────────────┐    │
 │   │  Pre-imported: numpy, pandas, matplotlib, scipy, sklearn, etc.   │    │
 │   │                                                                   │    │
@@ -233,16 +237,16 @@ For Python, containers run a REPL server as PID 1:
 │   │  Protocol: JSON-framed via stdin/stdout                          │    │
 │   └───────────────────────────────────────────────────────────────────┘    │
 │                                                                             │
-│   Communication: Docker attach socket (not exec)                            │
+│   Communication: stdin/stdout pipe (subprocess)                             │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 
 REPL Execution (~20-40ms):
 ──────────────────────────
-1. REPLExecutor sends JSON request via attach socket
+1. REPLExecutor sends JSON request via stdin pipe
 2. REPL server executes code in namespace
 3. REPL server captures stdout, stderr, files
-4. REPL server sends JSON response back
+4. REPL server sends JSON response back via stdout
 5. REPLExecutor parses response
 ```
 
@@ -312,7 +316,7 @@ Environment Variables (.env)
 │                                                                             │
 │   Imports and merges:                                                       │
 │   ├── api.py        → API settings (host, port, debug)                     │
-│   ├── docker.py     → Docker settings (base_url, timeout)                  │
+│   ├── sandbox.py    → Sandbox settings (nsjail binary, base dir)            │
 │   ├── redis.py      → Redis settings (host, port, pool)                    │
 │   ├── minio.py      → MinIO settings (endpoint, credentials)               │
 │   ├── security.py   → Security settings (isolation, headers)               │
@@ -346,22 +350,25 @@ settings.max_memory_mb
 
 ## Security Architecture
 
-### Container Isolation
+### nsjail Sandbox Isolation
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                        Container Security Layers                             │
+│                        nsjail Security Layers                                │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│   1. Network Isolation    : network_mode: none (no network access)         │
-│   2. Filesystem Isolation : read_only: true, /tmp as tmpfs                 │
-│   3. Capability Dropping  : cap_drop: ALL                                   │
-│   4. Resource Limits      : memory, cpu, pids, file descriptors            │
-│   5. Security Options     : no-new-privileges:true                          │
-│   6. tmpfs Options        : noexec, nosuid                                  │
+│   1. PID Namespace        : Each sandbox has its own PID 1                 │
+│   2. Mount Namespace      : Minimal filesystem, read-only bind mounts      │
+│   3. Network Namespace    : No network access                              │
+│   4. Seccomp Filtering    : Restricted syscalls                            │
+│   5. Cgroup Limits        : Memory, CPU, pids                              │
+│   6. rlimits              : File size, open files, stack size              │
+│   7. Non-root Execution   : Code runs as uid 1001 (codeuser)              │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+**Note:** The API container requires `SYS_ADMIN` capability for nsjail to create namespaces and cgroups. No Docker socket is mounted.
 
 ### Authentication
 
@@ -391,13 +398,16 @@ Response ← SecurityMiddleware ← AuthMiddleware ← LoggingMiddleware ← Met
 
 ## Key Files Reference
 
-| Component      | Primary File                              | Description                                      |
-| -------------- | ----------------------------------------- | ------------------------------------------------ |
-| FastAPI App    | `src/main.py`                             | Application entry point with lifespan management |
-| Orchestrator   | `src/services/orchestrator.py`            | Execution workflow coordinator                   |
-| Container Pool | `src/services/container/pool.py`          | Pre-warmed container management                  |
-| REPL Executor  | `src/services/container/repl_executor.py` | Python REPL communication                        |
-| REPL Server    | `docker/repl_server.py`                   | In-container Python REPL                         |
-| State Service  | `src/services/state.py`                   | Python state persistence                         |
-| Event Bus      | `src/core/events.py`                      | Async event-driven communication                 |
-| Settings       | `src/config/__init__.py`                  | Unified configuration                            |
+| Component        | Primary File                             | Description                                      |
+| ---------------- | ---------------------------------------- | ------------------------------------------------ |
+| FastAPI App      | `src/main.py`                            | Application entry point with lifespan management |
+| Orchestrator     | `src/services/orchestrator.py`           | Execution workflow coordinator                   |
+| Sandbox Pool     | `src/services/sandbox/pool.py`           | Pre-warmed Python REPL sandbox management        |
+| Sandbox Manager  | `src/services/sandbox/manager.py`        | Sandbox lifecycle (create, destroy)              |
+| Sandbox Executor | `src/services/sandbox/executor.py`       | Code execution in nsjail sandboxes               |
+| REPL Executor    | `src/services/sandbox/repl_executor.py`  | Python REPL communication                        |
+| nsjail Config    | `src/services/sandbox/nsjail.py`         | nsjail CLI builder and SandboxInfo dataclass      |
+| REPL Server      | `docker/repl_server.py`                  | In-sandbox Python REPL                           |
+| State Service    | `src/services/state.py`                  | Python state persistence                         |
+| Event Bus        | `src/core/events.py`                     | Async event-driven communication                 |
+| Settings         | `src/config/__init__.py`                 | Unified configuration                            |

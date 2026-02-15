@@ -11,7 +11,7 @@ Features:
   - Real-time metrics dashboard
   - API key management (create, list, revoke, update)
   - Per-language and per-API-key usage stats
-  - Container pool monitoring
+  - Sandbox pool monitoring
 """
 
 import argparse
@@ -181,7 +181,7 @@ async def build_pool_panel() -> Panel:
     table.add_row("Exhaustion Events", Text(str(pool_stats["exhaustion_events"]),
                                             style="red" if pool_stats["exhaustion_events"] > 0 else "green"))
 
-    return Panel(table, title="[bold]Container Pool[/bold]", border_style="magenta")
+    return Panel(table, title="[bold]Sandbox Pool[/bold]", border_style="magenta")
 
 
 async def build_hourly_table(hours: int = 12) -> Table:
@@ -324,7 +324,7 @@ async def metrics_menu():
         console.print("  [cyan]1[/cyan]  Summary")
         console.print("  [cyan]2[/cyan]  Language breakdown")
         console.print("  [cyan]3[/cyan]  Hourly breakdown")
-        console.print("  [cyan]4[/cyan]  Container pool stats")
+        console.print("  [cyan]4[/cyan]  Sandbox pool stats")
         console.print("  [cyan]5[/cyan]  Live dashboard (auto-refresh)")
         console.print("  [cyan]b[/cyan]  Back to main menu")
         console.print()

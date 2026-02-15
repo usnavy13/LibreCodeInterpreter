@@ -167,7 +167,7 @@ class CodeExecutionRunner:
             # Check if this is a REPL sandbox (for optimization)
             is_repl = self._is_repl_sandbox(sandbox_info, request.language)
 
-            # nsjail doesn't expose container stats the way Docker does
+            # nsjail doesn't expose detailed per-sandbox resource stats
             initial_stats = None
 
             # Execute code with optional state persistence (Python REPL only)
@@ -203,7 +203,7 @@ class CodeExecutionRunner:
 
             execution_time_ms = int((end_time - start_time).total_seconds() * 1000)
 
-            # nsjail doesn't provide memory stats like Docker
+            # nsjail doesn't provide per-sandbox memory stats
             memory_peak_mb = None
 
             # Process outputs

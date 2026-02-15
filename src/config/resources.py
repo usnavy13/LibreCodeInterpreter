@@ -14,13 +14,13 @@ class ResourcesConfig(BaseSettings):
         default=4.0,
         ge=0.5,
         le=16.0,
-        description="Maximum CPU cores available to execution containers",
+        description="Maximum CPU cores available to sandboxed executions",
     )
     max_pids: int = Field(
         default=512,
         ge=64,
         le=4096,
-        description="Per-container process limit (cgroup pids_limit). Prevents fork bombs.",
+        description="Per-sandbox process limit (cgroup pids_limit). Prevents fork bombs.",
     )
     max_open_files: int = Field(default=1024, ge=64, le=4096)
 
