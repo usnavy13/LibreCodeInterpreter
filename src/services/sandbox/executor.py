@@ -144,7 +144,7 @@ class SandboxExecutor:
         elif normalized_lang == "java":
             env_whitelist.update(
                 {
-                    "CLASSPATH": "/mnt/data:/opt/java/lib/*",
+                    "CLASSPATH": ".:/opt/java/lib/*",
                     "JAVA_OPTS": "-Xmx512m -Xms128m",
                     "PATH": "/opt/java/openjdk/bin:/usr/local/bin:/usr/bin:/bin",
                 }
@@ -155,7 +155,7 @@ class SandboxExecutor:
                     "GO111MODULE": "on",
                     "GOPROXY": "https://proxy.golang.org,direct",
                     "GOSUMDB": "sum.golang.org",
-                    "GOCACHE": "/mnt/data/go-build",
+                    "GOCACHE": "/tmp/go-build",
                     "PATH": "/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin",
                 }
             )
@@ -180,7 +180,7 @@ class SandboxExecutor:
                 {
                     "CARGO_HOME": "/usr/local/cargo",
                     "RUSTUP_HOME": "/usr/local/rustup",
-                    "PATH": "/usr/local/cargo/bin:/usr/local/rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin:/usr/local/bin:/usr/bin:/bin",
+                    "PATH": "/usr/local/cargo/bin:/usr/local/bin:/usr/bin:/bin",
                 }
             )
         elif normalized_lang == "r":

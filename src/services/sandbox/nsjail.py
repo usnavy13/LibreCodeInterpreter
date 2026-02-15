@@ -137,6 +137,12 @@ class NsjailConfig:
         # Suppress nsjail diagnostic output
         args.append("--really_quiet")
 
+        # REPL mode: skip setsid() so stdin pipes stay connected.
+        # By default nsjail calls setsid() which creates a new session
+        # and detaches the child from the pipe's session, breaking stdin.
+        if repl_mode:
+            args.append("--skip_setsid")
+
         # Time limit (0 = no limit for REPL mode)
         if repl_mode:
             args.extend(["--time_limit", "0"])
@@ -144,7 +150,10 @@ class NsjailConfig:
             args.extend(["--time_limit", str(timeout)])
 
         # Resource limits
-        args.extend(["--rlimit_as", str(settings.max_memory_mb)])
+        # Disable nsjail's default rlimits (which are very restrictive,
+        # e.g. rlimit_fsize=1MB, rlimit_nofile=32) and rely on the
+        # Docker container's own limits for resource control.
+        args.append("--disable_rlimits")
 
         # Namespace configuration:
         # - User namespace disabled: avoids /proc/self/gid_map write errors

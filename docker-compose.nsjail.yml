@@ -25,8 +25,8 @@ services:
       - SSL_KEY_FILE=/app/ssl/key.pem
       # Sandbox configuration
       - SANDBOX_BASE_DIR=/var/lib/code-interpreter/sandboxes
-      - REPL_ENABLED=false
-      - CONTAINER_POOL_ENABLED=false
+      - REPL_ENABLED=true
+      - CONTAINER_POOL_ENABLED=true
     volumes:
       - sandbox-data:/var/lib/code-interpreter/sandboxes
       - app-data:/app/data

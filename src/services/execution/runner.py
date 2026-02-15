@@ -595,7 +595,8 @@ class CodeExecutionRunner:
 
         repl_executor = SandboxREPLExecutor()
         return await repl_executor.execute(
-            repl_process, code, timeout=timeout, working_dir="/mnt/data", args=args
+            repl_process, code, timeout=timeout,
+            working_dir=str(sandbox_info.data_dir), args=args
         )
 
     async def _execute_via_repl_with_state(
@@ -639,7 +640,7 @@ class CodeExecutionRunner:
             repl_process,
             code,
             timeout=timeout,
-            working_dir="/mnt/data",
+            working_dir=str(sandbox_info.data_dir),
             initial_state=initial_state,
             capture_state=capture_state,
             args=args,

@@ -323,11 +323,12 @@ class SandboxREPLExecutor:
         timeout: float = 10.0,
         poll_interval: float = 0.1,
     ) -> bool:
-        """Wait for REPL to be ready.
+        """Wait for REPL to be ready by consuming its ready signal.
 
-        The REPL server sends a ready signal when it has finished
-        pre-loading libraries. This method waits for that signal
-        or falls back to health check.
+        The REPL server sends a ready signal (a JSON message with
+        ``"status": "ready"``) on stdout after pre-loading libraries.
+        This method reads that signal directly so it does not interfere
+        with subsequent request/response pairs.
 
         Args:
             process: REPL process
@@ -338,21 +339,52 @@ class SandboxREPLExecutor:
             True if REPL is ready, False if timeout
         """
         start_time = time.perf_counter()
+        proc = process.process
 
-        while (time.perf_counter() - start_time) < timeout:
-            # Try health check
-            if await self.check_health(process, timeout=2.0):
-                elapsed = time.perf_counter() - start_time
-                logger.info(
-                    "REPL ready",
+        if proc.stdout is None:
+            return False
+
+        # Read the ready signal directly from stdout
+        response_bytes = b""
+
+        async def _read_ready_signal():
+            nonlocal response_bytes
+            while DELIMITER not in response_bytes:
+                chunk = await proc.stdout.read(4096)
+                if not chunk:
+                    break
+                response_bytes += chunk
+
+        try:
+            await asyncio.wait_for(_read_ready_signal(), timeout=timeout)
+        except asyncio.TimeoutError:
+            logger.warning(
+                "REPL ready timeout waiting for ready signal",
+                sandbox_id=process.sandbox_info.sandbox_id[:12],
+                timeout=timeout,
+            )
+            return False
+
+        if DELIMITER in response_bytes:
+            json_part = response_bytes.split(DELIMITER)[0]
+            try:
+                ready_msg = json.loads(json_part.decode("utf-8", errors="replace"))
+                if ready_msg.get("status") == "ready":
+                    elapsed = time.perf_counter() - start_time
+                    logger.info(
+                        "REPL ready",
+                        sandbox_id=process.sandbox_info.sandbox_id[:12],
+                        elapsed_ms=f"{elapsed * 1000:.1f}",
+                        preloaded=ready_msg.get("preloaded_modules"),
+                    )
+                    process.ready = True
+                    return True
+            except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                logger.warning(
+                    "REPL ready signal parse error",
                     sandbox_id=process.sandbox_info.sandbox_id[:12],
-                    elapsed_ms=f"{elapsed * 1000:.1f}",
+                    error=str(e),
                 )
-                process.ready = True
-                return True
-
-            # Wait before next check
-            await asyncio.sleep(poll_interval)
 
         logger.warning(
             "REPL ready timeout",

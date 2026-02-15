@@ -59,8 +59,8 @@ LANGUAGES: Dict[str, LanguageConfig] = {
         image="nodejs:latest",
         user_id=1001,
         file_extension="ts",
-        execution_command="tsc /mnt/data/code.ts --outDir /mnt/data --module commonjs "
-        "--target ES2019 && node /mnt/data/code.js",
+        execution_command="tsc code.ts --outDir . --module commonjs "
+        "--target ES2019 && node code.js",
         uses_stdin=False,
         timeout_multiplier=1.2,
         memory_multiplier=1.0,
@@ -137,8 +137,8 @@ LANGUAGES: Dict[str, LanguageConfig] = {
         image="r:latest",
         user_id=1001,
         file_extension="r",
-        execution_command="Rscript /dev/stdin",
-        uses_stdin=True,
+        execution_command="Rscript code.r",
+        uses_stdin=False,
         timeout_multiplier=1.5,
         memory_multiplier=1.2,
     ),
