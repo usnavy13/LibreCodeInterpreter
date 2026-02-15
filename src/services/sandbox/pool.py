@@ -360,7 +360,7 @@ class SandboxPool:
             env = self._sandbox_manager.executor._build_sanitized_env("py")
             nsjail_args = self._nsjail_config.build_args(
                 sandbox_dir=str(sandbox_info.data_dir),
-                command=["python3", "/opt/repl_server.py"],
+                command=["/usr/bin/python3", "/opt/repl_server.py"],
                 language="py",
                 repl_mode=True,
                 env=env,

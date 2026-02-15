@@ -14,6 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git cmake build-essential pkg-config \
     libprotobuf-dev protobuf-compiler \
     libnl-3-dev libnl-route-3-dev \
+    flex bison \
     # Common system tools
     curl wget ca-certificates gnupg software-properties-common \
     # Shared libraries needed across languages
@@ -55,7 +56,7 @@ COPY docker/requirements/python-new.txt /tmp/python-new.txt
 
 # Install Python build tooling
 RUN --mount=type=cache,target=/root/.cache/pip \
-    python3 -m pip install --break-system-packages \
+    python3 -m pip install --break-system-packages --ignore-installed \
     "pip<24.1" "setuptools<70" wheel "packaging<24"
 
 # Install Python packages in layers (most stable first)
@@ -290,11 +291,12 @@ COPY requirements.txt /tmp/requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
     grep -v '^docker==' /tmp/requirements.txt | \
     grep -v '^requests-unixsocket==' | \
-    pip install --break-system-packages -r /dev/stdin && \
+    pip install --break-system-packages --ignore-installed -r /dev/stdin && \
     rm -f /tmp/requirements.txt
 
-# Copy API source code
+# Copy API source code and dashboard
 COPY src/ /app/src/
+COPY dashboard/ /app/dashboard/
 
 # ============================================
 # Final PATH and environment
@@ -302,5 +304,5 @@ COPY src/ /app/src/
 ENV PATH="/usr/local/cargo/bin:/usr/local/go/bin:/opt/composer/global/vendor/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH}" \
     SANDBOX_BASE_DIR=/var/lib/code-interpreter/sandboxes
 
-EXPOSE 8000
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]
+EXPOSE 8000 443
+CMD ["python3", "-m", "src.main"]

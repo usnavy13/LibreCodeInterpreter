@@ -59,7 +59,8 @@ class SandboxExecutor:
         sanitized_env = self._build_sanitized_env(language)
 
         # Wrap the command in a shell for consistent behavior
-        shell_command = ["sh", "-c", command]
+        # Use absolute path since nsjail uses execve (no PATH search)
+        shell_command = ["/bin/sh", "-c", command]
 
         # Build nsjail arguments
         network = settings.enable_wan_access if hasattr(settings, "enable_wan_access") else False

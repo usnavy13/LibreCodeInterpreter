@@ -1,9 +1,7 @@
 services:
   # Code Interpreter API (unified image with nsjail sandboxing)
   api:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.unified
+    image: code-interpreter:nsjail
     container_name: code-interpreter-api
     restart: unless-stopped
     # nsjail requires these capabilities to create namespaces and cgroups
@@ -14,24 +12,26 @@ services:
       - apparmor:unconfined
     ports:
       - "${API_PORT:-8000}:8000"
+      - "${HTTPS_PORT:-443}:443"
+    env_file:
+      - .env
     environment:
-      - API_HOST=0.0.0.0
-      - API_PORT=8000
-      - API_KEY=${API_KEY:-test-api-key}
-      # Service discovery
+      # Container-specific overrides (service discovery within compose network)
       - REDIS_HOST=redis
-      - REDIS_PORT=6379
       - MINIO_ENDPOINT=minio:9000
-      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
-      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
-      - MINIO_BUCKET=${MINIO_BUCKET:-code-interpreter-files}
+      # SSL configuration
+      - ENABLE_HTTPS=true
+      - SSL_CERT_FILE=/app/ssl/cert.pem
+      - SSL_KEY_FILE=/app/ssl/key.pem
       # Sandbox configuration
       - SANDBOX_BASE_DIR=/var/lib/code-interpreter/sandboxes
-      - CONTAINER_POOL_ENABLED=${CONTAINER_POOL_ENABLED:-true}
-      - REPL_ENABLED=${REPL_ENABLED:-true}
+      - REPL_ENABLED=false
+      - CONTAINER_POOL_ENABLED=false
     volumes:
       - sandbox-data:/var/lib/code-interpreter/sandboxes
       - app-data:/app/data
+      - ${SSL_CERTS_PATH:-./ssl}:/app/ssl:ro
+      - ./logs:/var/log
     depends_on:
       redis:
         condition: service_healthy

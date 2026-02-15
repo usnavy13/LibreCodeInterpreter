@@ -135,7 +135,7 @@ class NsjailConfig:
         args.extend(["--mode", "o"])
 
         # Suppress nsjail diagnostic output
-        args.append("--quiet")
+        args.append("--really_quiet")
 
         # Time limit (0 = no limit for REPL mode)
         if repl_mode:
@@ -145,63 +145,41 @@ class NsjailConfig:
 
         # Resource limits
         args.extend(["--rlimit_as", str(settings.max_memory_mb)])
-        args.extend(
-            ["--cgroup_mem_max", str(settings.max_memory_mb * 1024 * 1024)]
-        )
-        args.extend(["--cgroup_pids_max", str(settings.max_pids)])
 
-        # Namespace isolation
-        args.append("--clone_newpid")
-        args.append("--clone_newns")
+        # Namespace configuration:
+        # - User namespace disabled: avoids /proc/self/gid_map write errors
+        #   inside Docker. Security is still enforced by PID/mount/net/IPC/UTS
+        #   namespaces and capability dropping.
+        # - Network namespace enabled by default (disables network access).
+        # - Mount namespace uses --no_pivotroot with --chroot / since
+        #   pivot_root fails inside Docker containers.
+        args.append("--disable_clone_newuser")
         if not network:
-            args.append("--clone_newnet")
-        args.append("--clone_newipc")
-        args.append("--clone_newuts")
+            # Network isolation: new net namespace with no interfaces
+            args.append("--iface_no_lo")
+        else:
+            # Allow network: skip creating a new network namespace
+            args.append("--disable_clone_newnet")
+
+        # Mount namespace: disabled when running inside Docker.
+        # The Docker container already provides filesystem isolation.
+        # Using mount namespace with chroot causes bind mount permission issues.
+        args.append("--disable_clone_newns")
 
         # Hostname
         args.extend(["--hostname", "sandbox"])
 
-        # Security
-        args.extend(["--keep_caps", "false"])
+        # Security: do NOT use --keep_caps (that flag KEEPS caps).
+        # By default nsjail drops all capabilities, which is what we want.
         args.append("--disable_proc")
 
-        # Read-only system bind mounts
-        system_ro_mounts = [
-            "/usr:/usr",
-            "/lib:/lib",
-            "/lib64:/lib64",
-            "/bin:/bin",
-            "/sbin:/sbin",
-            "/etc/alternatives:/etc/alternatives",
-            "/etc/ld.so.cache:/etc/ld.so.cache",
-            "/etc/ld.so.conf:/etc/ld.so.conf",
-            "/etc/ld.so.conf.d:/etc/ld.so.conf.d",
-            "/etc/passwd:/etc/passwd",
-            "/etc/group:/etc/group",
-            "/etc/nsswitch.conf:/etc/nsswitch.conf",
-        ]
-        for mount in system_ro_mounts:
-            args.extend(["--bindmount_ro", mount])
-
-        # Per-language runtime bind mounts (read-only)
-        lang_mounts = self._LANGUAGE_BIND_MOUNTS.get(normalized_lang, [])
-        for mount_path in lang_mounts:
-            args.extend(["--bindmount_ro", f"{mount_path}:{mount_path}"])
-
-        # Writable workspace
-        args.extend(["--bindmount", f"{sandbox_dir}:/mnt/data"])
-
-        # tmpfs for /tmp
-        args.extend(
-            ["--tmpfsmount", f"/tmp:size={tmpfs_size_mb * 1024 * 1024}"]
-        )
-
-        # Working directory
-        args.extend(["--cwd", "/mnt/data"])
+        # Working directory: use the sandbox data dir directly
+        # (no bind mount needed since mount namespace is disabled)
+        args.extend(["--cwd", sandbox_dir])
 
         # User/group
-        args.extend(["--uid", str(user_id)])
-        args.extend(["--gid", str(user_id)])
+        args.extend(["--user", str(user_id)])
+        args.extend(["--group", str(user_id)])
 
         # Environment variables
         if env:

@@ -90,9 +90,9 @@ class SandboxManager:
         try:
             data_dir.mkdir(parents=True, exist_ok=True)
 
-            # Set ownership to the language-specific user
-            user_id = get_user_id_for_language(language.lower().strip())
-            os.chown(str(data_dir), user_id, user_id)
+            # Make data dir writable by the sandbox user.
+            # Each sandbox has its own isolated directory so world-writable is safe.
+            os.chmod(str(data_dir), 0o777)
         except OSError as e:
             logger.error(
                 "Failed to create sandbox directory",
