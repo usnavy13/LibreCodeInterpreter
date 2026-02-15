@@ -64,33 +64,6 @@ class TestFileInfoStateFields:
         assert file_info.last_used_at is None
 
 
-class TestRequestFileRestoreState:
-    """Tests for Issue 3: RequestFile model includes restore_state field."""
-
-    def test_request_file_has_restore_state_field(self):
-        """Test that RequestFile model includes restore_state field."""
-        from src.models.exec import RequestFile
-
-        file_ref = RequestFile(
-            id="file-123",
-            session_id="session-456",
-            name="data.txt",
-            restore_state=True,
-        )
-        assert file_ref.restore_state is True
-
-    def test_request_file_restore_state_defaults_false(self):
-        """Test that restore_state defaults to False."""
-        from src.models.exec import RequestFile
-
-        file_ref = RequestFile(
-            id="file-123",
-            session_id="session-456",
-            name="data.txt",
-        )
-        assert file_ref.restore_state is False
-
-
 class TestExecuteCodeRequestArgs:
     """Tests for Issue 2: ExecuteCodeRequest model includes args field."""
 
@@ -345,7 +318,6 @@ class TestUploadedFileStateRestoration:
 
     Uploaded files should share the same behavior as generated files:
     - After first use in execution, they get a state_hash
-    - On subsequent use with restore_state=true, that state is restored
     """
 
     def test_uploaded_file_no_initial_state_hash(self):
@@ -428,51 +400,3 @@ class TestUploadedFileStateRestoration:
         assert mapping["execution_id"] == "exec-abc"
         assert "last_used_at" in mapping
 
-    def test_restore_state_flag_works_with_state_hash(self):
-        """Test that RequestFile with restore_state=True works when file has state_hash."""
-        from src.models.exec import RequestFile
-
-        # Uploaded file reference with restore_state flag
-        file_ref = RequestFile(
-            id="uploaded-file-123",
-            session_id="session-456",
-            name="data.csv",
-            restore_state=True,  # Request state restoration
-        )
-        assert file_ref.restore_state is True
-
-    def test_restore_state_requires_state_hash_to_be_set(self):
-        """Test that state restoration requires file to have state_hash.
-
-        This documents expected behavior: if an uploaded file hasn't been used
-        yet (no state_hash), restore_state=True is effectively ignored until
-        the file is used in an execution.
-        """
-        # File with no state_hash (never used in execution)
-        file_info_no_state = FileInfo(
-            file_id="uploaded-file-123",
-            filename="data.csv",
-            size=1024,
-            content_type="text/csv",
-            created_at=datetime.now(timezone.utc),
-            path="/data.csv",
-        )
-
-        # The mount logic checks: file_info.state_hash is truthy
-        # For uploaded files that haven't been used, this will be None/False
-        can_restore = bool(file_info_no_state.state_hash)
-        assert can_restore is False
-
-        # After first use, file has state_hash
-        file_info_with_state = FileInfo(
-            file_id="uploaded-file-123",
-            filename="data.csv",
-            size=1024,
-            content_type="text/csv",
-            created_at=datetime.now(timezone.utc),
-            path="/data.csv",
-            state_hash="abc123def456",
-        )
-
-        can_restore_now = bool(file_info_with_state.state_hash)
-        assert can_restore_now is True

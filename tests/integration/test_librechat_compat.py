@@ -203,8 +203,6 @@ class TestLibreChatExecResponse:
     - stdout: string (required)
     - stderr: string (required)
     - files?: Array<{id, name, path?}>
-
-    Additional fields (has_state, state_size, state_hash) are allowed and ignored.
     """
 
     @patch("src.services.orchestrator.ExecutionOrchestrator.execute")
@@ -213,8 +211,6 @@ class TestLibreChatExecResponse:
         Test LibreChat response has required fields: session_id, files, stdout, stderr.
 
         LibreChat reads these 4 fields from the response (from @librechat/agents ExecuteResult type).
-        Additional fields (like has_state, state_size, state_hash for Python) are allowed
-        and will be ignored by LibreChat.
         """
         mock_execute.return_value = ExecResponse(
             session_id="resp-session-123", stdout="test output\n", stderr="", files=[]

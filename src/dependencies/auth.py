@@ -5,8 +5,7 @@ from typing import Optional
 
 # Third-party imports
 import structlog
-from fastapi import Request, HTTPException, Depends, Header
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import Request, HTTPException, Header
 
 # Local application imports
 from ..config import settings
@@ -14,12 +13,10 @@ from ..services.auth import get_auth_service
 from ..utils.request_helpers import extract_api_key
 
 logger = structlog.get_logger(__name__)
-security = HTTPBearer(auto_error=False)
 
 
 async def verify_api_key(
     request: Request,
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ) -> str:
     """
     Verify API key authentication.
@@ -36,7 +33,7 @@ async def verify_api_key(
         logger.warning("No API key provided in request")
         raise HTTPException(
             status_code=401,
-            detail="API key required. Provide it in x-api-key header or Authorization header.",
+            detail="API key required. Provide it in the x-api-key header.",
         )
 
     # Validate API key
@@ -63,14 +60,13 @@ async def verify_master_key(x_api_key: str = Header(...)):
 
 async def verify_api_key_optional(
     request: Request,
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ) -> Optional[str]:
     """
     Optional API key verification for endpoints that may not require authentication.
     Returns None if no API key is provided, raises exception if invalid key is provided.
     """
     try:
-        return await verify_api_key(request, credentials)
+        return await verify_api_key(request)
     except HTTPException as e:
         if "required" in e.detail:
             return None  # No API key provided, which is OK for optional endpoints

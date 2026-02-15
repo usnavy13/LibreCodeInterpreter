@@ -81,13 +81,12 @@ class TestSecurityIntegration:
             405,
         ]  # Either allowed or method not allowed
 
-    def test_authorization_header_fallback(self, client):
-        """Test that Authorization header works as fallback for API key."""
-        # Use the test API key from conftest
+    def test_authorization_header_not_accepted(self, client):
+        """Test that Authorization header is not accepted for authentication."""
         headers = {"Authorization": "Bearer test-api-key-for-testing-12345"}
         response = client.get("/sessions", headers=headers)
-        # Should not be 401 (auth failure)
-        assert response.status_code != 401
+        # Only x-api-key header is accepted
+        assert response.status_code == 401
 
     def test_request_size_limit(self, client):
         """Test request size limiting."""
@@ -111,21 +110,21 @@ class TestSecurityIntegration:
         response = client.post("/sessions", data="<xml></xml>", headers=headers)
         assert response.status_code == 415  # Unsupported Media Type
 
-    def test_multiple_auth_methods(self, client):
-        """Test that multiple authentication methods work."""
+    def test_only_x_api_key_accepted(self, client):
+        """Test that only x-api-key header is accepted for authentication."""
         test_key = "test-api-key-for-testing-12345"
 
-        # Test x-api-key header
+        # Test x-api-key header - should work
         response1 = client.get("/sessions", headers={"x-api-key": test_key})
 
-        # Test Authorization Bearer header
+        # Test Authorization Bearer header - should be rejected
         response2 = client.get(
             "/sessions", headers={"Authorization": f"Bearer {test_key}"}
         )
 
-        # Both should have same result (not 401)
-        assert response1.status_code == response2.status_code
+        # x-api-key should work, Bearer should be rejected
         assert response1.status_code != 401
+        assert response2.status_code == 401
 
     def test_case_insensitive_headers(self, client):
         """Test that header names are case insensitive."""

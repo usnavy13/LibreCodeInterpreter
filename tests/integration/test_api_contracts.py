@@ -133,7 +133,6 @@ def mock_file_service():
         path="/test.txt",
     )
     service.download_file.return_value = "https://minio.example.com/download-url"
-    service.delete_file.return_value = True
     return service
 
 
@@ -473,29 +472,6 @@ class TestFileDownloadContract:
         assert response.status_code == 404
 
 
-class TestFileDeleteContract:
-    """Test file deletion endpoint contract."""
-
-    def test_delete_success(self, client, auth_headers, mock_file_service):
-        """Test successful file deletion."""
-        response = client.delete(
-            "/files/test-session/test-file-id-123", headers=auth_headers
-        )
-
-        # API returns 200 with empty body for LibreChat compatibility
-        assert response.status_code == 200
-
-    def test_delete_not_found(self, client, auth_headers, mock_file_service):
-        """Test deletion of non-existent file."""
-        mock_file_service.get_file_info.return_value = None
-
-        response = client.delete(
-            "/files/test-session/nonexistent", headers=auth_headers
-        )
-
-        assert response.status_code == 404
-
-
 # =============================================================================
 # HEALTH ENDPOINTS
 # =============================================================================
@@ -585,23 +561,23 @@ class TestAuthenticationMethods:
 
         assert response.status_code != 401
 
-    def test_authorization_bearer(self, client):
-        """Test Authorization Bearer authentication."""
+    def test_authorization_bearer_rejected(self, client):
+        """Test Authorization Bearer header is not accepted for authentication."""
         headers = {"Authorization": "Bearer test-api-key-for-testing-12345"}
         response = client.post(
             "/exec", json={"code": "print('test')", "lang": "py"}, headers=headers
         )
 
-        assert response.status_code != 401
+        assert response.status_code == 401
 
-    def test_authorization_apikey(self, client):
-        """Test Authorization ApiKey authentication."""
+    def test_authorization_apikey_rejected(self, client):
+        """Test Authorization ApiKey header is not accepted for authentication."""
         headers = {"Authorization": "ApiKey test-api-key-for-testing-12345"}
         response = client.post(
             "/exec", json={"code": "print('test')", "lang": "py"}, headers=headers
         )
 
-        assert response.status_code != 401
+        assert response.status_code == 401
 
     def test_no_auth_rejected(self, client):
         """Test requests without auth are rejected."""

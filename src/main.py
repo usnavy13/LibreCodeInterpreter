@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse
 from pydantic import ValidationError
 
 # Local application imports
-from .api import files, exec, health, state, admin, dashboard_metrics
+from .api import files, exec, health, admin, dashboard_metrics
 from .config import settings
 from .middleware.security import SecurityMiddleware, RequestLoggingMiddleware
 from .middleware.metrics import MetricsMiddleware
@@ -315,8 +315,6 @@ app.include_router(files.router, tags=["files"])
 app.include_router(exec.router, tags=["exec"])
 
 app.include_router(health.router, tags=["health", "monitoring"])
-
-app.include_router(state.router, tags=["state"])
 
 app.include_router(admin.router, prefix="/api/v1", tags=["admin"])
 

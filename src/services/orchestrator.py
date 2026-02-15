@@ -16,7 +16,6 @@ Usage:
 """
 
 import asyncio
-import base64
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -305,9 +304,7 @@ class ExecutionOrchestrator:
         2. If no request.files[] but session_id exists, auto-mount ALL session files
         3. If neither, return empty list
 
-        Also handles restore_state flag for state-file linking:
-        - If a file has restore_state=True, loads the state associated with that file
-        - Tracks mounted file references for updating state_hash after execution
+        Tracks mounted file references for updating state_hash after execution.
         """
         # If explicit files provided, mount those (existing behavior)
         if ctx.request.files:
@@ -322,16 +319,10 @@ class ExecutionOrchestrator:
     async def _mount_explicit_files(
         self, ctx: ExecutionContext
     ) -> List[Dict[str, Any]]:
-        """Mount explicitly requested files from request.files[].
-
-        This preserves the original file mounting behavior with restore_state support.
-        """
+        """Mount explicitly requested files from request.files[]."""
         mounted = []
         mounted_ids = set()
         file_refs = []  # Track for state-file linking
-        restore_state_hash = (
-            None  # Hash of state to restore (from first restore_state file)
-        )
 
         for file_ref in ctx.request.files:
             # Get file info
@@ -377,26 +368,8 @@ class ExecutionOrchestrator:
                 }
             )
 
-            # Check for restore_state flag (only for Python, use first file's state)
-            if (
-                file_ref.restore_state
-                and ctx.request.lang == "py"
-                and restore_state_hash is None
-                and file_info.state_hash
-            ):
-                restore_state_hash = file_info.state_hash
-                logger.debug(
-                    "Will restore state from file",
-                    file_id=file_info.file_id,
-                    state_hash=file_info.state_hash[:12],
-                )
-
         # Store file refs for later state_hash update
         ctx.mounted_file_refs = file_refs
-
-        # If a file requested state restoration, load that state
-        if restore_state_hash and settings.state_persistence_enabled:
-            await self._load_state_by_hash(ctx, restore_state_hash)
 
         return mounted
 
@@ -461,50 +434,10 @@ class ExecutionOrchestrator:
 
         return mounted
 
-    async def _load_state_by_hash(self, ctx: ExecutionContext, state_hash: str) -> None:
-        """Load state by its hash for state-file restoration.
-
-        Tries Redis first, then MinIO cold storage.
-        """
-        try:
-            # Try Redis first
-            state = await self.state_service.get_state_by_hash(state_hash)
-
-            if (
-                not state
-                and self.state_archival_service
-                and settings.state_archive_enabled
-            ):
-                # Try MinIO cold storage
-                state = await self.state_archival_service.restore_state_by_hash(
-                    state_hash
-                )
-
-            if state:
-                ctx.initial_state = state
-                logger.info(
-                    "Restored state from file reference",
-                    session_id=ctx.session_id[:12] if ctx.session_id else "none",
-                    state_hash=state_hash[:12],
-                    state_size=len(state),
-                )
-            else:
-                logger.warning(
-                    "State not found for hash",
-                    state_hash=state_hash[:12],
-                )
-        except Exception as e:
-            logger.error(
-                "Failed to load state by hash",
-                state_hash=state_hash[:12],
-                error=str(e),
-            )
-
     async def _load_state(self, ctx: ExecutionContext) -> None:
         """Load previous state from Redis (or MinIO fallback) for Python sessions.
 
         Priority order:
-        0. State already loaded via restore_state file reference (highest priority)
         1. Recently uploaded state via POST /state (client-side cache restore)
         2. Redis hot storage (within 2-hour TTL)
         3. MinIO cold storage (archived state)
@@ -515,10 +448,10 @@ class ExecutionOrchestrator:
         if ctx.request.lang != "py":
             return
 
-        # Skip if state was already loaded via restore_state file reference
+        # Skip if state was already loaded by another mechanism
         if ctx.initial_state:
             logger.debug(
-                "State already loaded (from file restore_state)",
+                "State already loaded",
                 session_id=ctx.session_id[:12],
             )
             return
@@ -891,31 +824,12 @@ class ExecutionOrchestrator:
             ctx.stdout += "\n"
 
     def _build_response(self, ctx: ExecutionContext) -> ExecResponse:
-        """Build the LibreChat-compatible response with state info."""
-        # Compute state info for Python executions
-        has_state = False
-        state_size = None
-        state_hash = None
-
-        if ctx.new_state and ctx.request.lang == "py":
-            has_state = True
-            # new_state is base64-encoded, decode to get raw bytes for size and hash
-            try:
-                raw_bytes = base64.b64decode(ctx.new_state)
-                state_size = len(raw_bytes)
-                state_hash = self.state_service.compute_hash(raw_bytes)
-            except Exception:
-                # Fallback to base64 string length if decode fails
-                state_size = len(ctx.new_state)
-
+        """Build the LibreChat-compatible response."""
         return ExecResponse(
             session_id=ctx.session_id,
             files=ctx.generated_files or [],
             stdout=ctx.stdout,
             stderr=ctx.stderr,
-            has_state=has_state,
-            state_size=state_size,
-            state_hash=state_hash,
         )
 
     async def _cleanup(self, ctx: ExecutionContext) -> None:

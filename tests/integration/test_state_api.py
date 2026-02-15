@@ -222,34 +222,3 @@ class TestDeleteState:
         assert response.status_code == 204
 
 
-class TestExecResponseStateFields:
-    """Tests for state fields in /exec response."""
-
-    def test_exec_response_includes_state_fields_for_python(self, client, auth_headers):
-        """Test that Python execution response includes state fields."""
-        # This is a more complex integration test that requires full stack
-        # For now, we test the model structure
-        from src.models.exec import ExecResponse
-
-        response = ExecResponse(
-            session_id="test-session",
-            stdout="output",
-            stderr="",
-            has_state=True,
-            state_size=1024,
-            state_hash="abc123",
-        )
-
-        assert response.has_state is True
-        assert response.state_size == 1024
-        assert response.state_hash == "abc123"
-
-    def test_exec_response_defaults_state_fields(self):
-        """Test that state fields have correct defaults."""
-        from src.models.exec import ExecResponse
-
-        response = ExecResponse(session_id="test-session", stdout="", stderr="")
-
-        assert response.has_state is False
-        assert response.state_size is None
-        assert response.state_hash is None

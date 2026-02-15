@@ -32,7 +32,6 @@ from .errors import (
     ServiceUnavailableError,
 )
 from .pool import PooledContainer, PoolStats, PoolConfig
-from .state import StateInfo, StateUploadResponse
 
 __all__ = [
     # Session models
@@ -70,7 +69,4 @@ __all__ = [
     "PooledContainer",
     "PoolStats",
     "PoolConfig",
-    # State models
-    "StateInfo",
-    "StateUploadResponse",
 ]

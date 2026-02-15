@@ -45,7 +45,7 @@ X-API-Key: {api_key}
 
 ### Authentication
 
-Same as `/exec` endpoint - uses `X-API-Key` header (also supports `Authorization: Bearer` and `Authorization: ApiKey`).
+Same as `/exec` endpoint - uses `X-API-Key` header.
 
 ---
 

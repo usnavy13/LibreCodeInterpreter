@@ -280,10 +280,10 @@ class TestExplicitFileMounting:
     """Tests for explicit file mounting behavior."""
 
     @pytest.mark.asyncio
-    async def test_explicit_mount_with_restore_state(
+    async def test_explicit_mount_files(
         self, orchestrator, mock_file_service
     ):
-        """Explicit mount should handle restore_state flag."""
+        """Explicit mount should mount requested files."""
         from src.models.exec import RequestFile
 
         mock_file_service.get_file_info = AsyncMock(
@@ -294,7 +294,6 @@ class TestExplicitFileMounting:
                 content_type="text/csv",
                 created_at=datetime.now(),
                 path="/mnt/data/data.csv",
-                state_hash="abc123",
             )
         )
 
@@ -306,7 +305,6 @@ class TestExplicitFileMounting:
                     id="file-1",
                     session_id="test-session",
                     name="data.csv",
-                    restore_state=True,
                 ),
             ],
         )
@@ -316,19 +314,11 @@ class TestExplicitFileMounting:
             session_id="test-session",
         )
 
-        # Mock the state loading
-        with patch.object(
-            orchestrator, "_load_state_by_hash", new_callable=AsyncMock
-        ) as mock_load:
-            with patch("src.services.orchestrator.settings") as mock_settings:
-                mock_settings.state_persistence_enabled = True
-
-                result = await orchestrator._mount_explicit_files(ctx)
-
-                # Verify state loading was triggered
-                mock_load.assert_called_once_with(ctx, "abc123")
+        result = await orchestrator._mount_explicit_files(ctx)
 
         assert len(result) == 1
+        assert result[0]["file_id"] == "file-1"
+        assert result[0]["filename"] == "data.csv"
 
     @pytest.mark.asyncio
     async def test_explicit_mount_fallback_to_name_lookup(

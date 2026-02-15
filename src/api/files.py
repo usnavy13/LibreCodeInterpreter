@@ -9,7 +9,7 @@ from urllib.parse import quote
 # Third-party imports
 import structlog
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Query
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import StreamingResponse
 from unidecode import unidecode
 
 # Local application imports
@@ -314,34 +314,3 @@ async def download_file(
             error=str(e),
         )
         raise HTTPException(status_code=404, detail="File not found")
-
-
-@router.delete("/files/{session_id}/{file_id}")
-async def delete_file(
-    session_id: str, file_id: str, file_service: FileServiceDep = None
-):
-    """Delete a file from the session - LibreChat compatible."""
-    try:
-        # Get file info before deletion
-        file_info = await file_service.get_file_info(session_id, file_id)
-        if not file_info:
-            raise HTTPException(status_code=404, detail="File not found")
-
-        success = await file_service.delete_file(session_id, file_id)
-
-        if success:
-            # Return 200 with empty response for LibreChat compatibility
-            return Response(status_code=200)
-        else:
-            raise HTTPException(status_code=500, detail="Failed to delete file")
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(
-            "Failed to delete file",
-            session_id=session_id,
-            file_id=file_id,
-            error=str(e),
-        )
-        raise HTTPException(status_code=500, detail="Failed to delete file")

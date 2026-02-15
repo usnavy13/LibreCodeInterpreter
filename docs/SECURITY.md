@@ -12,18 +12,11 @@ All API endpoints (except health checks and documentation) require authenticatio
 
 #### Providing API Key
 
-The API key can be provided in two ways:
+The API key is provided via the `x-api-key` header:
 
-1. **x-api-key header** (recommended):
-
-   ```bash
-   curl -H "x-api-key: your-api-key" https://api.example.com/sessions
-   ```
-
-2. **Authorization header**:
-   ```bash
-   curl -H "Authorization: Bearer your-api-key" https://api.example.com/sessions
-   ```
+```bash
+curl -H "x-api-key: your-api-key" https://api.example.com/sessions
+```
 
 #### Configuration
 

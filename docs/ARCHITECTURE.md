@@ -50,12 +50,11 @@ This document provides a comprehensive overview of the Code Interpreter API arch
 
 The API layer contains thin endpoint handlers that delegate to the orchestrator:
 
-| File        | Purpose                                                                 |
-| ----------- | ----------------------------------------------------------------------- |
-| `exec.py`   | Code execution endpoint, delegates to `ExecutionOrchestrator`           |
-| `files.py`  | File upload, download, list, and delete operations                      |
-| `state.py`  | Python state download, upload, info, and delete for client-side caching |
-| `health.py` | Health checks and metrics endpoints                                     |
+| File        | Purpose                                                       |
+| ----------- | ------------------------------------------------------------- |
+| `exec.py`   | Code execution endpoint, delegates to `ExecutionOrchestrator` |
+| `files.py`  | File upload, download, and list operations                    |
+| `health.py` | Health checks and metrics endpoints                           |
 
 **Design principle:** Endpoints are intentionally thin (~70 lines each). All business logic resides in services.
 
@@ -68,8 +67,8 @@ Business logic is organized into focused services:
 | **ExecutionOrchestrator** | `orchestrator.py`   | Coordinates execution workflow   |
 | **SessionService**        | `session.py`        | Redis session management         |
 | **FileService**           | `file.py`           | MinIO file storage               |
-| **StateService**          | `state.py`          | Python state persistence (Redis) |
-| **StateArchivalService**  | `state_archival.py` | State archival (MinIO)           |
+| **StateService**          | `state.py`          | Internal Python state persistence (Redis, no external API) |
+| **StateArchivalService**  | `state_archival.py` | Internal state archival (MinIO)           |
 | **AuthService**           | `auth.py`           | API key authentication           |
 | **HealthService**         | `health.py`         | Health checks                    |
 | **MetricsService**        | `metrics.py`        | Metrics collection               |
@@ -186,37 +185,6 @@ await event_bus.publish(ExecutionCompleted(session_id=..., execution_id=...))
        ▼
 4. Return session_id and file_id
 ```
-
-### State Persistence Flow
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         State Persistence Flow                               │
-└─────────────────────────────────────────────────────────────────────────────┘
-
-First Execution (no session_id):
-─────────────────────────────────
-1. Execute Python code → variables created in REPL namespace
-2. REPL server serializes namespace with cloudpickle + lz4
-3. StateService stores compressed state in Redis (2-hour TTL)
-4. Response includes session_id for future use
-
-Subsequent Execution (with session_id):
-────────────────────────────────────────
-1. StateService loads state from Redis
-   └── If not in Redis, check MinIO archives
-2. REPL server deserializes state into namespace
-3. Execute Python code with existing variables
-4. Save updated state to Redis
-
-Background Archival:
-────────────────────
-1. CleanupService runs periodic check (every 5 min)
-2. For states inactive > 1 hour:
-   └── StateArchivalService archives to MinIO (7-day TTL)
-```
-
----
 
 ## Container Lifecycle
 

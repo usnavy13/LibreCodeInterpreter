@@ -184,13 +184,6 @@ class TestStatePersistence:
         assert r.status_code == 200
         data = r.json()
 
-        # State fields should be present for Python
-        assert "has_state" in data
-        # If state was captured, additional fields should be present
-        if data.get("has_state"):
-            assert "state_size" in data or data["state_size"] is None
-            assert "state_hash" in data or data["state_hash"] is None
-
     @pytest.mark.asyncio
     async def test_dataframe_persists_across_executions(
         self, async_client, auth_headers, unique_entity_id
