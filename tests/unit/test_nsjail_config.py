@@ -21,32 +21,26 @@ class TestNsjailConfigBuildArgs:
         )
         assert "--mode" in args
         assert "o" in args
-        assert "--clone_newpid" in args
-        assert "--clone_newnet" in args
         assert "--cwd" in args
         assert "/mnt/data" in args
         assert "python3" in args
         assert "code.py" in args
-        # Verify sandbox_dir is bind-mounted
-        assert "--bindmount" in args
-        bind_idx = [
-            i for i, a in enumerate(args) if a == "--bindmount"
-        ]
-        bind_values = [args[i + 1] for i in bind_idx]
-        assert any("/tmp/sandbox/data:/mnt/data" in v for v in bind_values)
 
     def test_network_disabled_by_default(self):
-        """Test that network is disabled by default."""
+        """Test that network namespace is created by default (no network access)."""
         config = NsjailConfig()
         args = config.build_args(
             sandbox_dir="/tmp/sandbox/data",
             command=["python3", "code.py"],
             language="py",
         )
-        assert "--clone_newnet" in args
+        # Network isolation is on by default (iface_no_lo disables loopback)
+        assert "--iface_no_lo" in args
+        # Should NOT have --disable_clone_newnet
+        assert "--disable_clone_newnet" not in args
 
     def test_network_enabled(self):
-        """Test network access when enabled (no --clone_newnet)."""
+        """Test network access when enabled (disable network namespace)."""
         config = NsjailConfig()
         args = config.build_args(
             sandbox_dir="/tmp/sandbox/data",
@@ -54,8 +48,9 @@ class TestNsjailConfigBuildArgs:
             language="py",
             network=True,
         )
-        # When network=True, --clone_newnet should NOT be present
-        assert "--clone_newnet" not in args
+        # When network=True, network namespace is disabled
+        assert "--disable_clone_newnet" in args
+        assert "--iface_no_lo" not in args
 
     def test_timeout_set(self):
         """Test timeout is passed correctly."""
@@ -71,7 +66,7 @@ class TestNsjailConfigBuildArgs:
         assert args[idx + 1] == "60"
 
     def test_repl_mode_timeout_zero(self):
-        """Test REPL mode sets timeout to 0."""
+        """Test REPL mode sets timeout to 0 and enables skip_setsid."""
         config = NsjailConfig()
         args = config.build_args(
             sandbox_dir="/tmp/sandbox/data",
@@ -82,6 +77,7 @@ class TestNsjailConfigBuildArgs:
         assert "--time_limit" in args
         idx = args.index("--time_limit")
         assert args[idx + 1] == "0"
+        assert "--skip_setsid" in args
 
     def test_different_languages(self):
         """Test args generation for different languages."""
@@ -97,31 +93,36 @@ class TestNsjailConfigBuildArgs:
             assert "echo" in args
             assert "test" in args
 
-    def test_keeps_caps_false(self):
-        """Test capabilities are dropped."""
+    def test_capabilities_dropped_by_default(self):
+        """Test capabilities are dropped (no --keep_caps flag)."""
         config = NsjailConfig()
         args = config.build_args(
             sandbox_dir="/tmp/sandbox/data",
             command=["echo", "test"],
             language="py",
         )
-        assert "--keep_caps" in args
-        idx = args.index("--keep_caps")
-        assert args[idx + 1] == "false"
+        # nsjail drops all caps by default. --keep_caps would KEEP them.
+        assert "--keep_caps" not in args
 
-    def test_namespace_isolation_flags(self):
-        """Test all namespace isolation flags are present."""
+    def test_user_namespace_disabled(self):
+        """Test user namespace is disabled (Docker compatibility)."""
         config = NsjailConfig()
         args = config.build_args(
             sandbox_dir="/tmp/sandbox/data",
             command=["echo", "test"],
             language="py",
         )
-        assert "--clone_newpid" in args
-        assert "--clone_newns" in args
-        assert "--clone_newnet" in args
-        assert "--clone_newipc" in args
-        assert "--clone_newuts" in args
+        assert "--disable_clone_newuser" in args
+
+    def test_mount_namespace_disabled(self):
+        """Test mount namespace is disabled (executor handles /mnt/data via unshare)."""
+        config = NsjailConfig()
+        args = config.build_args(
+            sandbox_dir="/tmp/sandbox/data",
+            command=["echo", "test"],
+            language="py",
+        )
+        assert "--disable_clone_newns" in args
 
     def test_hostname_set_to_sandbox(self):
         """Test hostname is set to 'sandbox'."""
@@ -145,16 +146,6 @@ class TestNsjailConfigBuildArgs:
         )
         assert "--disable_proc" in args
 
-    def test_quiet_mode(self):
-        """Test quiet mode is set."""
-        config = NsjailConfig()
-        args = config.build_args(
-            sandbox_dir="/tmp/sandbox/data",
-            command=["echo", "test"],
-            language="py",
-        )
-        assert "--quiet" in args
-
     def test_command_separator(self):
         """Test command separator '--' is present before the command."""
         config = NsjailConfig()
@@ -165,7 +156,6 @@ class TestNsjailConfigBuildArgs:
         )
         assert "--" in args
         separator_idx = args.index("--")
-        # Command should follow the separator
         assert args[separator_idx + 1] == "python3"
         assert args[separator_idx + 2] == "code.py"
 
@@ -184,46 +174,6 @@ class TestNsjailConfigBuildArgs:
         assert "MY_VAR=my_value" in env_values
         assert "ANOTHER=val2" in env_values
 
-    def test_system_bind_mounts_present(self):
-        """Test required system bind mounts are present."""
-        config = NsjailConfig()
-        args = config.build_args(
-            sandbox_dir="/tmp/sandbox/data",
-            command=["echo", "test"],
-            language="py",
-        )
-        # Check key system mounts
-        ro_indices = [i for i, a in enumerate(args) if a == "--bindmount_ro"]
-        ro_values = [args[i + 1] for i in ro_indices]
-        assert any("/usr:/usr" in v for v in ro_values)
-        assert any("/lib:/lib" in v for v in ro_values)
-        assert any("/bin:/bin" in v for v in ro_values)
-
-    def test_python_language_bind_mounts(self):
-        """Test Python-specific bind mounts."""
-        config = NsjailConfig()
-        args = config.build_args(
-            sandbox_dir="/tmp/sandbox/data",
-            command=["python3", "code.py"],
-            language="py",
-        )
-        ro_indices = [i for i, a in enumerate(args) if a == "--bindmount_ro"]
-        ro_values = [args[i + 1] for i in ro_indices]
-        # Python should have python3 bind mounts
-        assert any("python3" in v for v in ro_values)
-
-    def test_tmpfs_mount(self):
-        """Test tmpfs mount is present."""
-        config = NsjailConfig()
-        args = config.build_args(
-            sandbox_dir="/tmp/sandbox/data",
-            command=["echo", "test"],
-            language="py",
-        )
-        assert "--tmpfsmount" in args
-        idx = args.index("--tmpfsmount")
-        assert args[idx + 1].startswith("/tmp:")
-
     def test_user_id_set(self):
         """Test user and group IDs are set."""
         config = NsjailConfig()
@@ -232,8 +182,19 @@ class TestNsjailConfigBuildArgs:
             command=["echo", "test"],
             language="py",
         )
-        assert "--uid" in args
-        assert "--gid" in args
+        assert "--user" in args
+        assert "--group" in args
+
+    def test_cwd_is_mnt_data(self):
+        """Test working directory is /mnt/data."""
+        config = NsjailConfig()
+        args = config.build_args(
+            sandbox_dir="/tmp/sandbox/data",
+            command=["echo", "test"],
+            language="py",
+        )
+        idx = args.index("--cwd")
+        assert args[idx + 1] == "/mnt/data"
 
 
 class TestSandboxInfo:

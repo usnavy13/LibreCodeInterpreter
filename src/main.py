@@ -116,8 +116,7 @@ async def _startup_sandbox_pool(app: FastAPI) -> None:
             app.state.sandbox_pool = sandbox_pool
 
             logger.info(
-                "Sandbox pool started successfully",
-                warmup_languages=["py", "js", "ts", "go", "java"],
+                "Sandbox pool started successfully (Python REPL only)",
             )
         except Exception as e:
             logger.error("Failed to start sandbox pool", error=str(e))

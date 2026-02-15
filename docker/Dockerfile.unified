@@ -274,7 +274,8 @@ RUN chmod +x /opt/repl_server.py /opt/entrypoint.sh
 # Sandbox directory structure
 # ============================================
 RUN mkdir -p /var/lib/code-interpreter/sandboxes && \
-    mkdir -p /mnt/data
+    mkdir -p /mnt/data && \
+    mkdir -p /tmp/empty_proc
 
 # Create non-root user for code execution (uid 1001)
 RUN groupadd -g 1001 codeuser && \
@@ -303,6 +304,10 @@ COPY dashboard/ /app/dashboard/
 # ============================================
 ENV PATH="/usr/local/cargo/bin:/usr/local/go/bin:/opt/composer/global/vendor/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH}" \
     SANDBOX_BASE_DIR=/var/lib/code-interpreter/sandboxes
+
+# Security: strip SUID/SGID bits from all binaries
+RUN find / -path /proc -prune -o -path /sys -prune -o \
+    \( -perm -4000 -o -perm -2000 \) -type f -exec chmod u-s,g-s {} + 2>/dev/null || true
 
 EXPOSE 8000 443
 CMD ["python3", "-m", "src.main"]

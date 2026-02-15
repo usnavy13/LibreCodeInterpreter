@@ -838,10 +838,11 @@ class ExecutionOrchestrator:
         - Destroys the container in background (non-blocking for faster response)
         - Publishes ExecutionCompleted event for metrics
         """
-        # Destroy container in background for faster response
+        # Destroy sandbox in background for faster response.
+        # Use sandbox_pool.destroy_sandbox() which kills the REPL process
+        # AND removes the directory. Without this, REPL processes leak.
         if ctx.container:
             try:
-                sandbox_manager = self.execution_service.sandbox_manager
                 sandbox_id = (
                     ctx.container.id[:12] if hasattr(ctx.container, "id") else "unknown"
                 )
@@ -849,10 +850,16 @@ class ExecutionOrchestrator:
                     "Scheduling sandbox destruction", sandbox_id=sandbox_id
                 )
 
-                # Fire-and-forget: destroy sandbox in background
+                # Use pool destroy (kills process + removes dir) or manager (dir only)
+                sandbox_pool = getattr(self.execution_service, "sandbox_pool", None)
+                sandbox_manager = self.execution_service.sandbox_manager
+
                 async def destroy_background():
                     try:
-                        sandbox_manager.destroy_sandbox(ctx.container)
+                        if sandbox_pool:
+                            await sandbox_pool.destroy_sandbox(ctx.container)
+                        else:
+                            sandbox_manager.destroy_sandbox(ctx.container)
                         logger.debug("Sandbox destroyed", sandbox_id=sandbox_id)
                     except Exception as e:
                         logger.warning(

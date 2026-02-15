@@ -7,7 +7,6 @@ services:
     # nsjail requires these capabilities to create namespaces and cgroups
     cap_add:
       - SYS_ADMIN
-      - SYS_PTRACE
     security_opt:
       - apparmor:unconfined
     ports:
@@ -29,20 +28,26 @@ services:
       - CONTAINER_POOL_ENABLED=true
     volumes:
       - sandbox-data:/var/lib/code-interpreter/sandboxes
-      - app-data:/app/data
       - ${SSL_CERTS_PATH:-./ssl}:/app/ssl:ro
-      - ./logs:/var/log
+    tmpfs:
+      - /app/data:size=100m
+    # Container-level resource limits (all sandboxes share this budget)
+    deploy:
+      resources:
+        limits:
+          memory: ${CONTAINER_MEMORY_LIMIT:-4g}
+          cpus: "${CONTAINER_CPU_LIMIT:-2.0}"
     depends_on:
       redis:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-fsk", "https://localhost:443/health"]
       interval: 30s
       timeout: 15s
       retries: 3
-      start_period: 15s
+      start_period: 30s
     # No /var/run/docker.sock mount needed
 
   # Redis for session management
@@ -107,4 +112,3 @@ volumes:
   sandbox-data:
   redis-data:
   minio-data:
-  app-data:

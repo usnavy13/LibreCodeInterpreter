@@ -219,20 +219,15 @@ Docker is used for secure code execution in containers.
 
 ### Container Pool Configuration
 
-Pre-warmed containers significantly reduce execution latency by eliminating cold start time.
+Pre-warmed Python REPL sandboxes reduce execution latency by eliminating interpreter startup and library import time. Only Python supports REPL pooling; all other languages use one-shot nsjail execution.
 
 | Variable                           | Default | Description                            |
 | ---------------------------------- | ------- | -------------------------------------- |
-| `CONTAINER_POOL_ENABLED`           | `true`  | Enable container pooling               |
-| `CONTAINER_POOL_MIN_SIZE`          | `2`     | Default minimum pool size per language |
-| `CONTAINER_POOL_MAX_SIZE`          | `15`    | Default maximum pool size per language |
-| `CONTAINER_POOL_WARMUP_ON_STARTUP` | `true`  | Pre-warm containers at startup         |
-| `CONTAINER_POOL_PY_MIN`            | `5`     | Minimum Python containers in pool      |
-| `CONTAINER_POOL_PY_MAX`            | `20`    | Maximum Python containers in pool      |
-| `CONTAINER_POOL_JS_MIN`            | `2`     | Minimum JavaScript containers in pool  |
-| `CONTAINER_POOL_JS_MAX`            | `8`     | Maximum JavaScript containers in pool  |
+| `CONTAINER_POOL_ENABLED`           | `true`  | Enable Python REPL pool               |
+| `CONTAINER_POOL_WARMUP_ON_STARTUP` | `true`  | Pre-warm Python REPLs at startup       |
+| `CONTAINER_POOL_PY`                | `5`     | Number of pre-warmed Python REPLs      |
 
-**Note:** Containers are destroyed immediately after execution - there is no TTL-based cleanup. The pool is automatically replenished in the background.
+**Note:** Sandboxes are destroyed immediately after execution. The pool is automatically replenished in the background. Non-Python languages do not use pooling.
 
 ### REPL Configuration (Python Fast Execution)
 

@@ -149,11 +149,17 @@ class NsjailConfig:
         else:
             args.extend(["--time_limit", str(timeout)])
 
-        # Resource limits
-        # Disable nsjail's default rlimits (which are very restrictive,
-        # e.g. rlimit_fsize=1MB, rlimit_nofile=32) and rely on the
-        # Docker container's own limits for resource control.
-        args.append("--disable_rlimits")
+        # Per-process resource limits (rlimits)
+        args.extend(["--rlimit_as", "hard"])      # Virtual address space (Go needs unlimited)
+        args.extend(["--rlimit_fsize", "100"])    # Max file size: 100MB
+        args.extend(["--rlimit_nofile", "256"])   # Max open files
+        args.extend(["--rlimit_nproc", "256"])    # Max processes (needs headroom for REPL module imports)
+
+        # Note: per-sandbox cgroup limits are not used because Docker's cgroup
+        # namespace isolation prevents nsjail from writing to cgroup.procs.
+        # Memory/CPU limits are enforced at the container level via compose
+        # deploy.resources. Per-process rlimits above provide additional
+        # per-sandbox enforcement for file size, open files, and process count.
 
         # Namespace configuration:
         # - User namespace disabled: avoids /proc/self/gid_map write errors
@@ -170,9 +176,10 @@ class NsjailConfig:
             # Allow network: skip creating a new network namespace
             args.append("--disable_clone_newnet")
 
-        # Mount namespace: disabled when running inside Docker.
-        # The Docker container already provides filesystem isolation.
-        # Using mount namespace with chroot causes bind mount permission issues.
+        # Mount namespace: disabled for nsjail itself. The executor wraps nsjail
+        # in `unshare --mount` + `mount --bind` to map sandbox_dir to /mnt/data.
+        # This gives each execution its own mount namespace where /mnt/data points
+        # to the correct sandbox dir (concurrent-safe).
         args.append("--disable_clone_newns")
 
         # Hostname
@@ -182,9 +189,14 @@ class NsjailConfig:
         # By default nsjail drops all capabilities, which is what we want.
         args.append("--disable_proc")
 
-        # Working directory: use the sandbox data dir directly
-        # (no bind mount needed since mount namespace is disabled)
-        args.extend(["--cwd", sandbox_dir])
+        # Seccomp policy: block dangerous syscalls
+        # - ptrace: prevents process inspection/debugging (BUG-006a)
+        # - bind: prevents opening server sockets even with network access (BUG-006c)
+        # Using ERRNO(1) so the process gets EPERM rather than SIGSYS
+        args.extend(["--seccomp_string", "POLICY policy { ERRNO(1) { ptrace, bind } } USE policy DEFAULT ALLOW"])
+
+        # Working directory: /mnt/data (bind-mounted by the executor wrapper)
+        args.extend(["--cwd", "/mnt/data"])
 
         # User/group
         args.extend(["--user", str(user_id)])

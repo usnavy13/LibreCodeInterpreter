@@ -3,6 +3,7 @@
 import asyncio
 import os
 import shlex
+import signal
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -360,7 +361,13 @@ class CodeExecutionRunner:
                 repl_proc = self._repl_processes.pop(old_sandbox.sandbox_id, None)
                 if repl_proc and repl_proc.process.returncode is None:
                     try:
-                        repl_proc.process.kill()
+                        os.killpg(repl_proc.process.pid, signal.SIGKILL)
+                    except (ProcessLookupError, PermissionError):
+                        try:
+                            repl_proc.process.kill()
+                        except ProcessLookupError:
+                            pass
+                    try:
                         await repl_proc.process.wait()
                     except Exception:
                         pass
@@ -420,16 +427,32 @@ class CodeExecutionRunner:
             env = self.sandbox_manager.executor._build_sanitized_env("py")
             nsjail_args = nsjail_config.build_args(
                 sandbox_dir=str(sandbox_info.data_dir),
-                command=["python3", "/opt/repl_server.py"],
+                command=["/usr/bin/python3", "/opt/repl_server.py"],
                 language="py",
                 repl_mode=True,
                 env=env,
             )
 
-            # Start the nsjail subprocess with REPL
+            # Wrap nsjail in unshare+mount for security isolation
+            nsjail_cmd = " ".join(
+                shlex.quote(str(a)) for a in [settings.nsjail_binary] + nsjail_args
+            )
+            wrapper_cmd = (
+                f"mount --bind {shlex.quote(str(sandbox_info.data_dir))} /mnt/data && "
+                f"mount -t tmpfs -o size=1k tmpfs /var/lib/code-interpreter/sandboxes && "
+                f"mount -t tmpfs -o size=1k tmpfs /app/data && "
+                f"mount -t tmpfs -o size=1k tmpfs /var/log && "
+                f"mount -t tmpfs -o size=1k tmpfs /app/ssl && "
+                f"mount -t tmpfs -o size=1k tmpfs /app/dashboard && "
+                f"mount -t tmpfs -o size=1k tmpfs /app/src && "
+                # BUG-003: Bind /dev/null over mountinfo to hide mount details
+                f"mount --bind /dev/null /proc/self/mountinfo && "
+                f"{nsjail_cmd}"
+            )
+
+            # Start the nsjail subprocess with REPL via unshare wrapper
             proc = await asyncio.create_subprocess_exec(
-                settings.nsjail_binary,
-                *nsjail_args,
+                "unshare", "--mount", "--", "/bin/sh", "-c", wrapper_cmd,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -596,7 +619,7 @@ class CodeExecutionRunner:
         repl_executor = SandboxREPLExecutor()
         return await repl_executor.execute(
             repl_process, code, timeout=timeout,
-            working_dir=str(sandbox_info.data_dir), args=args
+            working_dir="/mnt/data", args=args
         )
 
     async def _execute_via_repl_with_state(
@@ -640,7 +663,7 @@ class CodeExecutionRunner:
             repl_process,
             code,
             timeout=timeout,
-            working_dir=str(sandbox_info.data_dir),
+            working_dir="/mnt/data",
             initial_state=initial_state,
             capture_state=capture_state,
             args=args,
@@ -770,7 +793,13 @@ class CodeExecutionRunner:
                 repl_proc = self._repl_processes.pop(sandbox_info.sandbox_id, None)
                 if repl_proc and repl_proc.process.returncode is None:
                     try:
-                        repl_proc.process.kill()
+                        os.killpg(repl_proc.process.pid, signal.SIGKILL)
+                    except (ProcessLookupError, PermissionError):
+                        try:
+                            repl_proc.process.kill()
+                        except ProcessLookupError:
+                            pass
+                    try:
                         await repl_proc.process.wait()
                     except Exception:
                         pass
@@ -807,7 +836,13 @@ class CodeExecutionRunner:
                 repl_proc = self._repl_processes.pop(sandbox_info.sandbox_id, None)
                 if repl_proc and repl_proc.process.returncode is None:
                     try:
-                        repl_proc.process.kill()
+                        os.killpg(repl_proc.process.pid, signal.SIGKILL)
+                    except (ProcessLookupError, PermissionError):
+                        try:
+                            repl_proc.process.kill()
+                        except ProcessLookupError:
+                            pass
+                    try:
                         await repl_proc.process.wait()
                     except Exception:
                         pass

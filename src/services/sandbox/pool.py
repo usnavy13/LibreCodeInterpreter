@@ -10,6 +10,8 @@ The pool continuously replenishes to maintain warm sandboxes.
 """
 
 import asyncio
+import os
+import signal
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -105,15 +107,12 @@ class SandboxPool:
         self._running = True
         logger.info("Starting sandbox pool (simplified, no session tracking)")
 
-        # Initialize queues for all supported languages and track those needing warmup
-        all_languages = [
-            "py", "js", "ts", "go", "java", "c", "cpp", "php", "rs", "r", "f90", "d",
-        ]
-        for lang in all_languages:
-            self._available[lang] = asyncio.Queue()
-            config = PoolConfig.from_settings(lang)
-            if config.warmup_on_startup and config.size > 0:
-                self._warmup_languages.add(lang)
+        # Only Python supports REPL pool pre-warming.
+        # Other languages use one-shot nsjail execution with no pooling.
+        config = PoolConfig.from_settings("py")
+        self._available["py"] = asyncio.Queue()
+        if config.warmup_on_startup and config.size > 0:
+            self._warmup_languages.add("py")
 
         # Subscribe to exhaustion events for immediate replenishment
         if settings.container_pool_exhaustion_trigger:
@@ -159,11 +158,17 @@ class SandboxPool:
             if count > 0:
                 logger.info(f"Destroyed {count} pooled {lang} sandboxes")
 
-        # Kill tracked REPL processes
+        # Kill tracked REPL process trees
         for sandbox_id, repl_process in list(self._repl_processes.items()):
             try:
                 if repl_process.process.returncode is None:
-                    repl_process.process.kill()
+                    try:
+                        os.killpg(repl_process.process.pid, signal.SIGKILL)
+                    except (ProcessLookupError, PermissionError):
+                        try:
+                            repl_process.process.kill()
+                        except ProcessLookupError:
+                            pass
                     await repl_process.process.wait()
             except Exception:
                 pass
@@ -255,14 +260,23 @@ class SandboxPool:
     async def destroy_sandbox(self, sandbox_info: SandboxInfo) -> None:
         """Destroy a sandbox after use.
 
-        Kills the REPL process if tracked, then removes the sandbox directory.
+        Kills the entire REPL process tree (unshare → nsjail → python),
+        then removes the sandbox directory.
         """
         if sandbox_info:
-            # Kill REPL process if tracked
+            # Kill REPL process tree if tracked
             repl_process = self._repl_processes.pop(sandbox_info.sandbox_id, None)
             if repl_process and repl_process.process.returncode is None:
                 try:
-                    repl_process.process.kill()
+                    # Kill the entire process group (unshare + nsjail + python)
+                    os.killpg(repl_process.process.pid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    # Process already dead or not a group leader
+                    try:
+                        repl_process.process.kill()
+                    except ProcessLookupError:
+                        pass
+                try:
                     await repl_process.process.wait()
                 except Exception:
                     pass
@@ -366,13 +380,36 @@ class SandboxPool:
                 env=env,
             )
 
-            # Start the nsjail subprocess with REPL
+            # Wrap nsjail in unshare+mount so /mnt/data resolves to sandbox dir
+            import shlex
+            nsjail_cmd = " ".join(
+                shlex.quote(str(a)) for a in [settings.nsjail_binary] + nsjail_args
+            )
+            wrapper_cmd = (
+                # Bind sandbox dir to /mnt/data (before hiding sandboxes dir)
+                f"mount --bind {shlex.quote(str(sandbox_info.data_dir))} /mnt/data && "
+                # BUG-001: Hide other sessions' sandbox directories
+                f"mount -t tmpfs -o size=1k tmpfs /var/lib/code-interpreter/sandboxes && "
+                # BUG-002: Hide metrics database
+                f"mount -t tmpfs -o size=1k tmpfs /app/data && "
+                # BUG-004: Hide log directory
+                f"mount -t tmpfs -o size=1k tmpfs /var/log && "
+                # BUG-005: Hide SSL certs and application source
+                f"mount -t tmpfs -o size=1k tmpfs /app/ssl && "
+                f"mount -t tmpfs -o size=1k tmpfs /app/dashboard && "
+                f"mount -t tmpfs -o size=1k tmpfs /app/src && "
+                # BUG-003: Hide /proc (REPL is Python-only, always safe to mask)
+                f"mount --bind /tmp/empty_proc /proc && "
+                # Execute nsjail
+                f"{nsjail_cmd}"
+            )
+
             proc = await asyncio.create_subprocess_exec(
-                settings.nsjail_binary,
-                *nsjail_args,
+                "unshare", "--mount", "--", "/bin/sh", "-c", wrapper_cmd,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                start_new_session=True,  # New process group for clean killpg
             )
 
             repl_process = SandboxREPLProcess(
@@ -402,10 +439,16 @@ class SandboxPool:
             return None
 
     async def _destroy_pooled_sandbox(self, pooled: PooledSandbox) -> None:
-        """Destroy a pooled sandbox including its REPL process."""
+        """Destroy a pooled sandbox including its entire REPL process tree."""
         if pooled.repl_process and pooled.repl_process.process.returncode is None:
             try:
-                pooled.repl_process.process.kill()
+                os.killpg(pooled.repl_process.process.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                try:
+                    pooled.repl_process.process.kill()
+                except ProcessLookupError:
+                    pass
+            try:
                 await pooled.repl_process.process.wait()
             except Exception:
                 pass

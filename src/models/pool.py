@@ -62,26 +62,15 @@ class PoolConfig:
 
     @classmethod
     def from_settings(cls, language: str) -> "PoolConfig":
-        """Create pool config from settings for a specific language."""
+        """Create pool config from settings for a specific language.
+
+        Only Python supports REPL pool pre-warming. All other languages
+        use one-shot nsjail execution with no pooling.
+        """
         from ..config import settings
 
-        # Map language to its pool size setting
-        pool_sizes = {
-            "py": settings.container_pool_py,
-            "js": settings.container_pool_js,
-            "ts": settings.container_pool_ts,
-            "go": settings.container_pool_go,
-            "java": settings.container_pool_java,
-            "c": settings.container_pool_c,
-            "cpp": settings.container_pool_cpp,
-            "php": settings.container_pool_php,
-            "rs": settings.container_pool_rs,
-            "r": settings.container_pool_r,
-            "f90": settings.container_pool_f90,
-            "d": settings.container_pool_d,
-        }
-
-        size = pool_sizes.get(language, 0)
+        # Only Python has a configurable pool size
+        size = settings.container_pool_py if language == "py" else 0
         return cls(
             language=language,
             size=size,

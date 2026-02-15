@@ -204,29 +204,10 @@ class Settings(BaseSettings):
     container_pool_enabled: bool = Field(default=True)
     container_pool_warmup_on_startup: bool = Field(default=True)
 
-    # Per-language pool sizes (0 = on-demand only, no pre-warming)
+    # Python REPL pool size (only Python supports REPL pre-warming)
     container_pool_py: int = Field(
-        default=5, ge=0, le=50, description="Python pool size"
+        default=5, ge=0, le=50, description="Python REPL pool size"
     )
-    container_pool_js: int = Field(
-        default=2, ge=0, le=50, description="JavaScript pool size"
-    )
-    container_pool_ts: int = Field(
-        default=0, ge=0, le=50, description="TypeScript pool size"
-    )
-    container_pool_go: int = Field(default=0, ge=0, le=50, description="Go pool size")
-    container_pool_java: int = Field(
-        default=0, ge=0, le=50, description="Java pool size"
-    )
-    container_pool_c: int = Field(default=0, ge=0, le=50, description="C pool size")
-    container_pool_cpp: int = Field(default=0, ge=0, le=50, description="C++ pool size")
-    container_pool_php: int = Field(default=0, ge=0, le=50, description="PHP pool size")
-    container_pool_rs: int = Field(default=0, ge=0, le=50, description="Rust pool size")
-    container_pool_r: int = Field(default=0, ge=0, le=50, description="R pool size")
-    container_pool_f90: int = Field(
-        default=0, ge=0, le=50, description="Fortran pool size"
-    )
-    container_pool_d: int = Field(default=0, ge=0, le=50, description="D pool size")
 
     # Pool Optimization Configuration
     container_pool_parallel_batch: int = Field(

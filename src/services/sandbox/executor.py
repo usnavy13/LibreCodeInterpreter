@@ -5,8 +5,10 @@ instead of Docker exec.
 """
 
 import asyncio
+import os
 import re
 import shlex
+import signal
 from typing import Dict, List, Optional, Tuple
 
 import structlog
@@ -74,13 +76,48 @@ class SandboxExecutor:
         )
 
         try:
-            # Create subprocess
+            # Wrap nsjail in unshare+mount to bind sandbox_dir to /mnt/data.
+            # This gives each execution its own mount namespace so /mnt/data
+            # resolves to the correct sandbox dir (concurrent-safe).
+            nsjail_cmd = " ".join(
+                shlex.quote(str(a)) for a in [settings.nsjail_binary] + nsjail_args
+            )
+            # BUG-003: Mask /proc for most languages.
+            # Java and Rust need /proc/self/exe to locate shared libraries
+            # (JVM needs libjli.so, rustc needs its own binary path).
+            # For these languages, /proc remains accessible (known limitation).
+            lang = sandbox_info.language.lower().strip()
+            if lang in ("java", "rs"):
+                proc_mask = ""
+            else:
+                proc_mask = "mount --bind /tmp/empty_proc /proc && "
+
+            wrapper_cmd = (
+                # Bind sandbox dir to /mnt/data (before hiding sandboxes dir)
+                f"mount --bind {shlex.quote(str(sandbox_info.data_dir))} /mnt/data && "
+                # BUG-001: Hide other sessions' sandbox directories
+                f"mount -t tmpfs -o size=1k tmpfs /var/lib/code-interpreter/sandboxes && "
+                # BUG-002: Hide metrics database
+                f"mount -t tmpfs -o size=1k tmpfs /app/data && "
+                # BUG-004: Hide log directory
+                f"mount -t tmpfs -o size=1k tmpfs /var/log && "
+                # BUG-005: Hide SSL certs and application source
+                f"mount -t tmpfs -o size=1k tmpfs /app/ssl && "
+                f"mount -t tmpfs -o size=1k tmpfs /app/dashboard && "
+                f"mount -t tmpfs -o size=1k tmpfs /app/src && "
+                # BUG-003: Hide /proc (except Java which needs /proc/self/exe)
+                f"{proc_mask}"
+                # Execute nsjail
+                f"{nsjail_cmd}"
+            )
+
+            # Create subprocess via unshare --mount for per-process mount namespace
             proc = await asyncio.create_subprocess_exec(
-                settings.nsjail_binary,
-                *nsjail_args,
+                "unshare", "--mount", "--", "/bin/sh", "-c", wrapper_cmd,
                 stdin=asyncio.subprocess.PIPE if stdin_payload else None,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                start_new_session=True,  # New process group for clean cleanup
             )
 
             # Communicate with timeout
@@ -91,7 +128,10 @@ class SandboxExecutor:
                     timeout=timeout + 5,  # Grace period beyond nsjail's own limit
                 )
             except asyncio.TimeoutError:
-                proc.kill()
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    proc.kill()
                 await proc.wait()
                 logger.warning(
                     "Sandbox execution timed out",
@@ -153,6 +193,7 @@ class SandboxExecutor:
             env_whitelist.update(
                 {
                     "GO111MODULE": "on",
+                    "GOROOT": "/usr/local/go",
                     "GOPROXY": "https://proxy.golang.org,direct",
                     "GOSUMDB": "sum.golang.org",
                     "GOCACHE": "/tmp/go-build",
