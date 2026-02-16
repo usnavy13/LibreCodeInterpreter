@@ -25,12 +25,6 @@ services:
       - ${SSL_CERTS_PATH:-./ssl}:/app/ssl:ro
     tmpfs:
       - /app/data:size=100m
-    # Container-level resource limits (all sandboxes share this budget)
-    deploy:
-      resources:
-        limits:
-          memory: ${CONTAINER_MEMORY_LIMIT:-4g}
-          cpus: "${CONTAINER_CPU_LIMIT:-2.0}"
     depends_on:
       redis:
         condition: service_healthy
