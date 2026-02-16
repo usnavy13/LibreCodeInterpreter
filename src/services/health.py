@@ -110,7 +110,7 @@ class HealthCheckService:
         service_names = ["redis", "minio", "nsjail"]
 
         # Add sandbox pool check if pool is configured
-        if self._sandbox_pool and settings.container_pool_enabled:
+        if self._sandbox_pool and settings.sandbox_pool_enabled:
             tasks.append(self.check_sandbox_pool())
             service_names.append("sandbox_pool")
 
@@ -383,6 +383,7 @@ class HealthCheckService:
             base_dir_writable = False
             if base_dir_exists:
                 import os
+
                 base_dir_writable = os.access(str(sandbox_base), os.W_OK)
 
             response_time = (time.time() - start_time) * 1000

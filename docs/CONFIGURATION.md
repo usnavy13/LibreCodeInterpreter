@@ -48,7 +48,6 @@ Configures SSL/TLS support for secure HTTPS connections.
 | `ENABLE_HTTPS`   | `false`  | Enable HTTPS/SSL support                                 |
 | `HTTPS_PORT`     | `443`    | HTTPS server port                                        |
 | `SSL_CERTS_PATH` | `./ssl`  | Host path to directory containing `cert.pem` and `key.pem` |
-| `SSL_REDIRECT`   | `false`  | Redirect HTTP traffic to HTTPS                           |
 
 > **Note:** The certificate files are automatically mapped to `/app/ssl/` inside the API container via `docker-compose.yml`. You only need to set `SSL_CERTS_PATH` to point to your certificates directory on the host.
 
@@ -69,7 +68,6 @@ Configures SSL/TLS support for secure HTTPS connections.
    ```bash
    ENABLE_HTTPS=true
    HTTPS_PORT=443
-   SSL_REDIRECT=true  # Optional: redirect HTTP to HTTPS
 
    # If using the default ./ssl directory, no additional config needed.
    # If your certs are elsewhere, set the path:
@@ -88,8 +86,6 @@ Configures SSL/TLS support for secure HTTPS connections.
 - Use certificates from trusted Certificate Authorities in production
 - Keep private keys secure and never commit them to version control
 - Consider using Let's Encrypt for free SSL certificates
-- Enable `SSL_REDIRECT` to automatically redirect HTTP to HTTPS
-
 ### Authentication Configuration
 
 Manages API key authentication and security.
@@ -98,8 +94,6 @@ Manages API key authentication and security.
 | ------------------- | -------------- | -------------------------------------- |
 | `API_KEY`           | `test-api-key` | Primary API key (CHANGE IN PRODUCTION) |
 | `API_KEYS`          | -              | Additional API keys (comma-separated)  |
-| `API_KEY_HEADER`    | `x-api-key`    | HTTP header name for API key           |
-| `API_KEY_CACHE_TTL` | `300`          | API key validation cache TTL (seconds) |
 
 **Security Notes:**
 
@@ -139,7 +133,6 @@ MinIO provides S3-compatible object storage for files.
 | `MINIO_SECRET_KEY` | `minioadmin`             | MinIO secret key                    |
 | `MINIO_SECURE`     | `false`                  | Use HTTPS for MinIO connections     |
 | `MINIO_BUCKET`     | `code-interpreter-files` | Bucket name for file storage        |
-| `MINIO_REGION`     | `us-east-1`              | MinIO region                        |
 
 ### Sandbox Configuration
 
@@ -163,38 +156,26 @@ nsjail is used for secure code execution in isolated sandboxes.
 
 #### Execution Limits
 
-| Variable             | Default | Description                                                      |
-| -------------------- | ------- | ---------------------------------------------------------------- |
-| `MAX_EXECUTION_TIME` | `30`    | Maximum code execution time (seconds)                            |
-| `MAX_MEMORY_MB`      | `512`   | Maximum memory per execution (MB)                                |
-| `MAX_CPUS`           | `4.0`   | Maximum CPU cores available to sandbox execution                 |
-| `MAX_PIDS`           | `512`   | Per-sandbox process limit (cgroup pids_limit, prevents fork bombs)   |
-| `MAX_OPEN_FILES`     | `1024`  | Maximum open files per sandbox                                   |
+| Variable             | Default | Description                           |
+| -------------------- | ------- | ------------------------------------- |
+| `MAX_EXECUTION_TIME` | `30`    | Maximum code execution time (seconds) |
+| `MAX_MEMORY_MB`      | `512`   | Maximum memory per execution (MB)     |
 
 #### File Limits
 
-| Variable                 | Default | Description                              |
-| ------------------------ | ------- | ---------------------------------------- |
-| `MAX_FILE_SIZE_MB`       | `10`    | Maximum individual file size (MB)        |
-| `MAX_TOTAL_FILE_SIZE_MB` | `50`    | Maximum total file size per session (MB) |
-| `MAX_FILES_PER_SESSION`  | `50`    | Maximum files per session                |
-| `MAX_OUTPUT_FILES`       | `10`    | Maximum output files per execution       |
-| `MAX_FILENAME_LENGTH`    | `255`   | Maximum filename length                  |
-
-#### Session Limits
-
-| Variable                    | Default | Description                        |
-| --------------------------- | ------- | ---------------------------------- |
-| `MAX_CONCURRENT_EXECUTIONS` | `10`    | Maximum concurrent code executions |
-| `MAX_SESSIONS_PER_ENTITY`   | `100`   | Maximum sessions per entity        |
+| Variable                | Default | Description                        |
+| ----------------------- | ------- | ---------------------------------- |
+| `MAX_FILE_SIZE_MB`      | `10`    | Maximum individual file size (MB)  |
+| `MAX_FILES_PER_SESSION` | `50`    | Maximum files per session          |
+| `MAX_OUTPUT_FILES`      | `10`    | Maximum output files per execution |
+| `MAX_FILENAME_LENGTH`   | `255`   | Maximum filename length            |
 
 ### Session Configuration
 
 | Variable                           | Default | Description                  |
 | ---------------------------------- | ------- | ---------------------------- |
 | `SESSION_TTL_HOURS`                | `24`    | Session time-to-live (hours) |
-| `SESSION_CLEANUP_INTERVAL_MINUTES` | `60`    | Cleanup interval (minutes)   |
-| `SESSION_ID_LENGTH`                | `32`    | Session ID length            |
+| `SESSION_CLEANUP_INTERVAL_MINUTES` | `10`    | Cleanup interval (minutes)   |
 
 ### Sandbox Pool Configuration
 
@@ -202,9 +183,9 @@ Pre-warmed Python REPL sandboxes reduce execution latency by eliminating interpr
 
 | Variable                           | Default | Description                            |
 | ---------------------------------- | ------- | -------------------------------------- |
-| `CONTAINER_POOL_ENABLED`           | `true`  | Enable Python REPL pool               |
-| `CONTAINER_POOL_WARMUP_ON_STARTUP` | `true`  | Pre-warm Python REPLs at startup       |
-| `CONTAINER_POOL_PY`                | `5`     | Number of pre-warmed Python REPLs      |
+| `SANDBOX_POOL_ENABLED`             | `true`  | Enable Python REPL pool                |
+| `SANDBOX_POOL_WARMUP_ON_STARTUP`   | `true`  | Pre-warm Python REPLs at startup       |
+| `SANDBOX_POOL_PY`                  | `5`     | Number of pre-warmed Python REPLs      |
 
 **Note:** Sandboxes are destroyed immediately after execution. The pool is automatically replenished in the background. Non-Python languages do not use pooling.
 
@@ -212,11 +193,10 @@ Pre-warmed Python REPL sandboxes reduce execution latency by eliminating interpr
 
 REPL mode keeps a Python interpreter running inside pooled sandboxes with common libraries pre-imported, reducing execution latency from ~3,500ms to ~20-40ms.
 
-| Variable                            | Default | Description                             |
-| ----------------------------------- | ------- | --------------------------------------- |
-| `REPL_ENABLED`                      | `true`  | Enable pre-warmed Python REPL           |
-| `REPL_WARMUP_TIMEOUT_SECONDS`       | `15`    | Timeout for REPL server to become ready |
-| `REPL_HEALTH_CHECK_TIMEOUT_SECONDS` | `5`     | Timeout for REPL health checks          |
+| Variable                      | Default | Description                             |
+| ----------------------------- | ------- | --------------------------------------- |
+| `REPL_ENABLED`                | `true`  | Enable pre-warmed Python REPL           |
+| `REPL_WARMUP_TIMEOUT_SECONDS` | `15`    | Timeout for REPL server to become ready |
 
 ### State Persistence Configuration (Python)
 
@@ -226,7 +206,6 @@ Python sessions can persist variables, functions, and objects across executions 
 | --------------------------- | ------- | ------------------------------------ |
 | `STATE_PERSISTENCE_ENABLED` | `true`  | Enable Python state persistence      |
 | `STATE_TTL_SECONDS`         | `7200`  | Redis hot storage TTL (2 hours)      |
-| `STATE_MAX_SIZE_MB`         | `50`    | Maximum serialized state size        |
 | `STATE_CAPTURE_ON_ERROR`    | `false` | Save state even on execution failure |
 
 ### State Archival Configuration (Python)
@@ -258,13 +237,6 @@ Inactive states are automatically archived to MinIO for long-term storage.
 | `LOG_BACKUP_COUNT`     | `5`     | Number of log file backups                  |
 | `ENABLE_ACCESS_LOGS`   | `true`  | Enable HTTP access logs                     |
 | `ENABLE_SECURITY_LOGS` | `true`  | Enable security event logs                  |
-
-### Health Check Configuration
-
-| Variable                | Default | Description                     |
-| ----------------------- | ------- | ------------------------------- |
-| `HEALTH_CHECK_INTERVAL` | `30`    | Health check interval (seconds) |
-| `HEALTH_CHECK_TIMEOUT`  | `5`     | Health check timeout (seconds)  |
 
 ### Development Configuration
 
@@ -354,7 +326,6 @@ if validate_configuration():
 ### State Persistence (Python)
 
 - [ ] Configure `STATE_TTL_SECONDS` based on session patterns
-- [ ] Set `STATE_MAX_SIZE_MB` limit appropriate for use case
 - [ ] Enable state archival for long-term session resumption
 - [ ] Configure archival TTL (`STATE_ARCHIVE_TTL_DAYS`)
 

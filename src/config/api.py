@@ -17,7 +17,6 @@ class APIConfig(BaseSettings):
     https_port: int = Field(default=443, ge=1, le=65535)
     ssl_cert_file: str | None = Field(default=None)
     ssl_key_file: str | None = Field(default=None)
-    ssl_redirect: bool = Field(default=False)
     ssl_ca_certs: str | None = Field(default=None)
 
     # CORS Configuration

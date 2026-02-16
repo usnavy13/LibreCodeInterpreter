@@ -83,11 +83,7 @@ class ConfigValidator:
 
     def _validate_resource_limits(self):
         """Validate resource limit configuration."""
-        # Check critical limit conflicts
-        if settings.max_total_file_size_mb < settings.max_file_size_mb:
-            self.errors.append(
-                "Total file size limit is less than individual file size limit"
-            )
+        pass
 
     def _validate_file_config(self):
         """Validate file handling configuration."""
@@ -133,7 +129,6 @@ class ConfigValidator:
                 access_key=settings.minio_access_key,
                 secret_key=settings.minio_secret_key,
                 secure=settings.minio_secure,
-                region=settings.minio_region,
             )
 
             # Test connection by listing buckets

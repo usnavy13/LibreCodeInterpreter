@@ -16,7 +16,6 @@ class MinIOConfig(BaseSettings):
     )
     secure: bool = Field(default=False, alias="minio_secure")
     bucket: str = Field(default="code-interpreter-files", alias="minio_bucket")
-    region: str = Field(default="us-east-1", alias="minio_region")
 
     @validator("endpoint")
     def validate_endpoint(cls, v):

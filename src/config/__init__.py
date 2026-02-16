@@ -74,7 +74,6 @@ class Settings(BaseSettings):
     https_port: int = Field(default=443, ge=1, le=65535)
     ssl_cert_file: Optional[str] = Field(default=None)
     ssl_key_file: Optional[str] = Field(default=None)
-    ssl_redirect: bool = Field(default=False)
     ssl_ca_certs: Optional[str] = Field(default=None)
 
     # Authentication Configuration
@@ -83,8 +82,6 @@ class Settings(BaseSettings):
         min_length=16,
     )
     api_keys: Optional[str] = Field(default=None)
-    api_key_header: str = Field(default="x-api-key")
-    api_key_cache_ttl: int = Field(default=300, ge=60)
 
     # API Key Management Configuration
     master_api_key: Optional[str] = Field(
@@ -111,7 +108,6 @@ class Settings(BaseSettings):
     minio_secret_key: str = Field(default="test-secret-key", min_length=8)
     minio_secure: bool = Field(default=False)
     minio_bucket: str = Field(default="code-interpreter-files")
-    minio_region: str = Field(default="us-east-1")
 
     # Sandbox (nsjail) Configuration
     nsjail_binary: str = Field(
@@ -123,76 +119,59 @@ class Settings(BaseSettings):
         description="Root directory for all sandbox instances",
     )
     sandbox_tmpfs_size_mb: int = Field(
-        default=100, ge=10, le=1024,
+        default=100,
+        ge=10,
+        le=1024,
         description="Size of tmpfs mount for /tmp inside sandboxes (MB)",
     )
     sandbox_ttl_minutes: int = Field(
-        default=5, ge=1, le=1440,
+        default=5,
+        ge=1,
+        le=1440,
         description="TTL for sandbox directories before cleanup",
     )
     sandbox_cleanup_interval_minutes: int = Field(
-        default=5, ge=1, le=60,
+        default=5,
+        ge=1,
+        le=60,
         description="Interval between sandbox cleanup sweeps",
     )
 
     # Resource Limits - Execution
     max_execution_time: int = Field(default=30, ge=1, le=300)
     max_memory_mb: int = Field(default=512, ge=64, le=4096)
-    max_cpus: float = Field(
-        default=4.0,
-        ge=0.5,
-        le=16.0,
-        description="Maximum CPU cores available to sandboxed executions",
-    )
-    max_pids: int = Field(
-        default=512,
-        ge=64,
-        le=4096,
-        description="Per-sandbox process limit (cgroup pids_limit). Prevents fork bombs.",
-    )
-    max_open_files: int = Field(default=1024, ge=64, le=4096)
 
     # Resource Limits - Files
     max_file_size_mb: int = Field(default=10, ge=1, le=100)
-    max_total_file_size_mb: int = Field(default=50, ge=10, le=500)
     max_files_per_session: int = Field(default=50, ge=1, le=200)
     max_output_files: int = Field(default=10, ge=1, le=50)
     max_filename_length: int = Field(default=255, ge=1, le=255)
 
-    # Resource Limits - Sessions
-    max_concurrent_executions: int = Field(default=10, ge=1, le=50)
-    max_sessions_per_entity: int = Field(default=100, ge=1, le=1000)
-
     # Session Configuration
     session_ttl_hours: int = Field(default=24, ge=1, le=168)
     session_cleanup_interval_minutes: int = Field(default=10, ge=1, le=1440)
-    session_id_length: int = Field(default=32, ge=16, le=64)
     enable_orphan_minio_cleanup: bool = Field(default=False)
 
-    # Container Configuration
-    container_ttl_minutes: int = Field(default=5, ge=1, le=1440)
-    container_cleanup_interval_minutes: int = Field(default=5, ge=1, le=60)
-
-    # Container Pool Configuration
-    container_pool_enabled: bool = Field(default=True)
-    container_pool_warmup_on_startup: bool = Field(default=True)
+    # Sandbox Pool Configuration
+    sandbox_pool_enabled: bool = Field(default=True)
+    sandbox_pool_warmup_on_startup: bool = Field(default=True)
 
     # Python REPL pool size (only Python supports REPL pre-warming)
-    container_pool_py: int = Field(
+    sandbox_pool_py: int = Field(
         default=5, ge=0, le=50, description="Python REPL pool size"
     )
 
     # Pool Optimization Configuration
-    container_pool_parallel_batch: int = Field(
+    sandbox_pool_parallel_batch: int = Field(
         default=5,
         ge=1,
         le=10,
         description="Number of sandboxes to start in parallel during warmup",
     )
-    container_pool_replenish_interval: int = Field(
+    sandbox_pool_replenish_interval: int = Field(
         default=2, ge=1, le=30, description="Seconds between pool replenishment checks"
     )
-    container_pool_exhaustion_trigger: bool = Field(
+    sandbox_pool_exhaustion_trigger: bool = Field(
         default=True,
         description="Trigger immediate replenishment when pool is exhausted",
     )
@@ -208,13 +187,6 @@ class Settings(BaseSettings):
         le=60,
         description="Timeout for REPL server to become ready after sandbox start",
     )
-    repl_health_check_timeout_seconds: int = Field(
-        default=5,
-        ge=1,
-        le=30,
-        description="Timeout for REPL health check during warmup",
-    )
-
     # State Persistence Configuration - Python session state across executions
     state_persistence_enabled: bool = Field(
         default=True, description="Enable Python session state persistence via Redis"
@@ -224,9 +196,6 @@ class Settings(BaseSettings):
         ge=60,
         le=86400,
         description="TTL for persisted Python session state in Redis (seconds). Default: 2 hours",
-    )
-    state_max_size_mb: int = Field(
-        default=50, ge=1, le=200, description="Maximum size for serialized state in MB"
     )
     state_capture_on_error: bool = Field(
         default=False, description="Capture and persist state even when execution fails"
@@ -259,22 +228,6 @@ class Settings(BaseSettings):
     detailed_metrics_enabled: bool = Field(
         default=True,
         description="Enable detailed per-key, per-language metrics tracking",
-    )
-    metrics_buffer_size: int = Field(
-        default=10000,
-        ge=1000,
-        le=100000,
-        description="Maximum number of recent metrics to buffer in memory",
-    )
-    metrics_archive_enabled: bool = Field(
-        default=True,
-        description="Enable archiving metrics to MinIO for long-term storage",
-    )
-    metrics_archive_retention_days: int = Field(
-        default=90,
-        ge=7,
-        le=365,
-        description="Keep archived metrics in MinIO for this many days",
     )
 
     # SQLite Metrics Configuration
@@ -416,10 +369,6 @@ class Settings(BaseSettings):
     enable_access_logs: bool = Field(default=True)
     enable_security_logs: bool = Field(default=True)
 
-    # Health Check Configuration
-    health_check_interval: int = Field(default=30, ge=10)
-    health_check_timeout: int = Field(default=5, ge=1)
-
     # Development Configuration
     enable_cors: bool = Field(default=False)
     cors_origins: List[str] = Field(default_factory=list)
@@ -473,7 +422,6 @@ class Settings(BaseSettings):
             https_port=self.https_port,
             ssl_cert_file=self.ssl_cert_file,
             ssl_key_file=self.ssl_key_file,
-            ssl_redirect=self.ssl_redirect,
             ssl_ca_certs=self.ssl_ca_certs,
             enable_cors=self.enable_cors,
             cors_origins=self.cors_origins,
@@ -514,7 +462,6 @@ class Settings(BaseSettings):
             minio_secret_key=self.minio_secret_key,
             minio_secure=self.minio_secure,
             minio_bucket=self.minio_bucket,
-            minio_region=self.minio_region,
         )
 
     @property
@@ -523,8 +470,6 @@ class Settings(BaseSettings):
         return SecurityConfig(
             api_key=self.api_key,
             api_keys=self.api_keys if isinstance(self.api_keys, str) else None,
-            api_key_header=self.api_key_header,
-            api_key_cache_ttl=self.api_key_cache_ttl,
             enable_network_isolation=self.enable_network_isolation,
             enable_filesystem_isolation=self.enable_filesystem_isolation,
             enable_security_logs=self.enable_security_logs,
@@ -536,19 +481,12 @@ class Settings(BaseSettings):
         return ResourcesConfig(
             max_execution_time=self.max_execution_time,
             max_memory_mb=self.max_memory_mb,
-            max_cpus=self.max_cpus,
-            max_pids=self.max_pids,
-            max_open_files=self.max_open_files,
             max_file_size_mb=self.max_file_size_mb,
-            max_total_file_size_mb=self.max_total_file_size_mb,
             max_files_per_session=self.max_files_per_session,
             max_output_files=self.max_output_files,
             max_filename_length=self.max_filename_length,
-            max_concurrent_executions=self.max_concurrent_executions,
-            max_sessions_per_entity=self.max_sessions_per_entity,
             session_ttl_hours=self.session_ttl_hours,
             session_cleanup_interval_minutes=self.session_cleanup_interval_minutes,
-            session_id_length=self.session_id_length,
             enable_orphan_minio_cleanup=self.enable_orphan_minio_cleanup,
         )
 
@@ -562,8 +500,6 @@ class Settings(BaseSettings):
             log_max_size_mb=self.log_max_size_mb,
             log_backup_count=self.log_backup_count,
             enable_access_logs=self.enable_access_logs,
-            health_check_interval=self.health_check_interval,
-            health_check_timeout=self.health_check_timeout,
         )
 
     # ========================================================================
@@ -586,27 +522,9 @@ class Settings(BaseSettings):
         """Get all valid API keys including the primary key."""
         return self.security.get_valid_api_keys()
 
-    def get_language_config(self, language: str) -> Dict[str, Any]:
-        """Get configuration for a specific language."""
-        return self.supported_languages.get(language, {})
-
-    def get_execution_timeout(self, language: str) -> int:
-        """Get execution timeout for a specific language."""
-        multiplier = self.get_language_config(language).get("timeout_multiplier", 1.0)
-        return int(self.max_execution_time * multiplier)
-
-    def get_memory_limit(self, language: str) -> int:
-        """Get memory limit for a specific language in MB."""
-        multiplier = self.get_language_config(language).get("memory_multiplier", 1.0)
-        return int(self.max_memory_mb * multiplier)
-
     def get_session_ttl_minutes(self) -> int:
         """Get session TTL in minutes for backward compatibility."""
         return self.session_ttl_hours * 60
-
-    def get_container_ttl_minutes(self) -> int:
-        """Get container TTL in minutes."""
-        return self.container_ttl_minutes
 
     def is_file_allowed(self, filename: str) -> bool:
         """Check if a file is allowed based on extension and patterns."""

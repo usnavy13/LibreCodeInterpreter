@@ -115,7 +115,7 @@ class SandboxPool:
             self._warmup_languages.add("py")
 
         # Subscribe to exhaustion events for immediate replenishment
-        if settings.container_pool_exhaustion_trigger:
+        if settings.sandbox_pool_exhaustion_trigger:
             event_bus.register_handler(PoolExhausted, self._on_pool_exhausted)
 
         # Start warmup background task
@@ -124,9 +124,9 @@ class SandboxPool:
         logger.info(
             "Sandbox pool started",
             warmup_languages=list(self._warmup_languages),
-            parallel_batch=settings.container_pool_parallel_batch,
-            replenish_interval=settings.container_pool_replenish_interval,
-            exhaustion_trigger=settings.container_pool_exhaustion_trigger,
+            parallel_batch=settings.sandbox_pool_parallel_batch,
+            replenish_interval=settings.sandbox_pool_replenish_interval,
+            exhaustion_trigger=settings.sandbox_pool_exhaustion_trigger,
         )
 
     async def stop(self) -> None:
@@ -193,13 +193,16 @@ class SandboxPool:
         start_time = datetime.utcnow()
 
         # Try to get from pool
-        if settings.container_pool_enabled:
+        if settings.sandbox_pool_enabled:
             queue = self._available.get(language)
             if queue and not queue.empty():
                 try:
                     pooled = queue.get_nowait()
                     # Verify the REPL process is still alive
-                    if pooled.repl_process and pooled.repl_process.process.returncode is None:
+                    if (
+                        pooled.repl_process
+                        and pooled.repl_process.process.returncode is None
+                    ):
                         acquire_time = (
                             datetime.utcnow() - start_time
                         ).total_seconds() * 1000
@@ -244,7 +247,7 @@ class SandboxPool:
 
         # Create fresh sandbox (fallback)
         sandbox_info = await self._create_fresh_sandbox(session_id, language)
-        reason = "pool_empty" if settings.container_pool_enabled else "pool_disabled"
+        reason = "pool_empty" if settings.sandbox_pool_enabled else "pool_disabled"
         await event_bus.publish(
             ContainerCreatedFresh(
                 container_id=sandbox_info.sandbox_id,
@@ -315,9 +318,7 @@ class SandboxPool:
                 self._stats[lang].available_count = available
                 stats[lang] = self._stats[lang]
             else:
-                stats[lang] = PoolStats(
-                    language=lang, available_count=available
-                )
+                stats[lang] = PoolStats(language=lang, available_count=available)
         return stats
 
     # =========================================================================
@@ -382,6 +383,7 @@ class SandboxPool:
 
             # Wrap nsjail in unshare+mount so /mnt/data resolves to sandbox dir
             import shlex
+
             nsjail_cmd = " ".join(
                 shlex.quote(str(a)) for a in [settings.nsjail_binary] + nsjail_args
             )
@@ -405,7 +407,12 @@ class SandboxPool:
             )
 
             proc = await asyncio.create_subprocess_exec(
-                "unshare", "--mount", "--", "/bin/sh", "-c", wrapper_cmd,
+                "unshare",
+                "--mount",
+                "--",
+                "/bin/sh",
+                "-c",
+                wrapper_cmd,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -459,7 +466,7 @@ class SandboxPool:
         # Initial warmup
         await asyncio.sleep(2)  # Let the app start
 
-        replenish_interval = settings.container_pool_replenish_interval
+        replenish_interval = settings.sandbox_pool_replenish_interval
 
         while self._running:
             try:
@@ -467,7 +474,7 @@ class SandboxPool:
                     await self._warmup_language(language)
 
                 # Wait for either timeout OR exhaustion event (if enabled)
-                if settings.container_pool_exhaustion_trigger:
+                if settings.sandbox_pool_exhaustion_trigger:
                     try:
                         await asyncio.wait_for(
                             self._replenish_event.wait(),
@@ -512,7 +519,7 @@ class SandboxPool:
         use_repl_mode = language == "py" and settings.repl_enabled
 
         # Parallel sandbox creation in batches
-        batch_size = settings.container_pool_parallel_batch
+        batch_size = settings.sandbox_pool_parallel_batch
 
         for batch_start in range(0, needed, batch_size):
             batch_end = min(batch_start + batch_size, needed)

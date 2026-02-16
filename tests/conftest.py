@@ -169,8 +169,6 @@ def mock_settings():
         mock_settings.redis_url = None
         mock_settings.session_ttl_hours = 24
         mock_settings.session_cleanup_interval_minutes = 60
-        mock_settings.container_ttl_minutes = 5
-        mock_settings.container_cleanup_interval_minutes = 5
         mock_settings.minio_endpoint = "localhost:9000"
         mock_settings.minio_access_key = "test_key"
         mock_settings.minio_secret_key = "test_secret"
@@ -181,12 +179,9 @@ def mock_settings():
         mock_settings.max_file_size_mb = 10
         mock_settings.max_output_files = 10
 
-        # Add helper methods for backward compatibility
+        # Add helper methods
         mock_settings.get_session_ttl_minutes = (
             lambda: mock_settings.session_ttl_hours * 60
-        )
-        mock_settings.get_container_ttl_minutes = (
-            lambda: mock_settings.container_ttl_minutes
         )
 
         yield mock_settings

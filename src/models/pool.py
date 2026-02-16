@@ -70,9 +70,9 @@ class PoolConfig:
         from ..config import settings
 
         # Only Python has a configurable pool size
-        size = settings.container_pool_py if language == "py" else 0
+        size = settings.sandbox_pool_py if language == "py" else 0
         return cls(
             language=language,
             size=size,
-            warmup_on_startup=size > 0 and settings.container_pool_warmup_on_startup,
+            warmup_on_startup=size > 0 and settings.sandbox_pool_warmup_on_startup,
         )

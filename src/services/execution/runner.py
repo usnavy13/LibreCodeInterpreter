@@ -66,7 +66,7 @@ class CodeExecutionRunner:
             Tuple of (SandboxInfo, source) where source is 'pool_hit' or 'pool_miss'
         """
         # Try pool first if enabled
-        if self.sandbox_pool and settings.container_pool_enabled:
+        if self.sandbox_pool and settings.sandbox_pool_enabled:
             logger.debug(
                 "Acquiring sandbox from pool",
                 session_id=session_id[:12],
@@ -85,7 +85,7 @@ class CodeExecutionRunner:
             logger.debug(
                 "Pool not available",
                 has_pool=self.sandbox_pool is not None,
-                pool_enabled=settings.container_pool_enabled,
+                pool_enabled=settings.sandbox_pool_enabled,
             )
 
         # Fallback: create fresh sandbox (original behavior)
@@ -159,7 +159,9 @@ class CodeExecutionRunner:
 
             # Mount files if provided
             if files:
-                await self._mount_files_to_sandbox(sandbox_info, files, request.language)
+                await self._mount_files_to_sandbox(
+                    sandbox_info, files, request.language
+                )
 
             # Execute the code
             start_time = datetime.utcnow()
@@ -452,7 +454,12 @@ class CodeExecutionRunner:
 
             # Start the nsjail subprocess with REPL via unshare wrapper
             proc = await asyncio.create_subprocess_exec(
-                "unshare", "--mount", "--", "/bin/sh", "-c", wrapper_cmd,
+                "unshare",
+                "--mount",
+                "--",
+                "/bin/sh",
+                "-c",
+                wrapper_cmd,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -516,7 +523,9 @@ class CodeExecutionRunner:
         # Check if sandbox is REPL-enabled for faster execution
         if self._is_repl_sandbox(sandbox_info, language):
             logger.debug(
-                "Using REPL executor", sandbox_id=sandbox_info.sandbox_id[:12], language=language
+                "Using REPL executor",
+                sandbox_id=sandbox_info.sandbox_id[:12],
+                language=language,
             )
             return await self._execute_via_repl(
                 sandbox_info, code, execution_timeout, args=args
@@ -618,8 +627,7 @@ class CodeExecutionRunner:
 
         repl_executor = SandboxREPLExecutor()
         return await repl_executor.execute(
-            repl_process, code, timeout=timeout,
-            working_dir="/mnt/data", args=args
+            repl_process, code, timeout=timeout, working_dir="/mnt/data", args=args
         )
 
     async def _execute_via_repl_with_state(
@@ -670,7 +678,10 @@ class CodeExecutionRunner:
         )
 
     async def _mount_files_to_sandbox(
-        self, sandbox_info: SandboxInfo, files: List[Dict[str, Any]], language: str = "py"
+        self,
+        sandbox_info: SandboxInfo,
+        files: List[Dict[str, Any]],
+        language: str = "py",
     ) -> None:
         """Mount files to sandbox workspace."""
         try:
@@ -731,7 +742,10 @@ class CodeExecutionRunner:
             normalized_filename = OutputProcessor.sanitize_filename(filename)
             placeholder = f"# File: {filename}\n# This is a placeholder - original file could not be retrieved\n"
             self.sandbox_manager.copy_content_to_sandbox(
-                sandbox_info, placeholder.encode(), f"/mnt/data/{normalized_filename}", "py"
+                sandbox_info,
+                placeholder.encode(),
+                f"/mnt/data/{normalized_filename}",
+                "py",
             )
         except Exception as e:
             logger.error(f"Failed to create placeholder file: {e}")

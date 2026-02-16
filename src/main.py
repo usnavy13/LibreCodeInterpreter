@@ -87,7 +87,7 @@ async def _startup_cleanup_tasks() -> None:
 
 async def _startup_sandbox_pool(app: FastAPI) -> None:
     """Start the sandbox pool if enabled."""
-    if settings.container_pool_enabled:
+    if settings.sandbox_pool_enabled:
         try:
             logger.info("Starting sandbox pool...")
             from .services.sandbox.pool import SandboxPool

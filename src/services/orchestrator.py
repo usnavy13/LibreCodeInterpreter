@@ -790,9 +790,7 @@ class ExecutionOrchestrator:
             return f"# Sandbox not found for file: {file_path}\n".encode("utf-8")
 
         sandbox_manager = self.execution_service.sandbox_manager
-        content = sandbox_manager.get_file_content_from_sandbox(
-            container, file_path
-        )
+        content = sandbox_manager.get_file_content_from_sandbox(container, file_path)
         if content is not None:
             return content
         return f"# Failed to retrieve file: {file_path}\n".encode("utf-8")
@@ -846,9 +844,7 @@ class ExecutionOrchestrator:
                 sandbox_id = (
                     ctx.container.id[:12] if hasattr(ctx.container, "id") else "unknown"
                 )
-                logger.debug(
-                    "Scheduling sandbox destruction", sandbox_id=sandbox_id
-                )
+                logger.debug("Scheduling sandbox destruction", sandbox_id=sandbox_id)
 
                 # Use pool destroy (kills process + removes dir) or manager (dir only)
                 sandbox_pool = getattr(self.execution_service, "sandbox_pool", None)
@@ -940,7 +936,7 @@ class ExecutionOrchestrator:
             repl_mode = (
                 ctx.request.lang == "py"
                 and settings.repl_enabled
-                and settings.container_pool_enabled
+                and settings.sandbox_pool_enabled
             )
 
             metrics = DetailedExecutionMetrics(
