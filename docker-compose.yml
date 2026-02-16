@@ -1,6 +1,7 @@
 services:
   # Code Interpreter API (unified image with nsjail sandboxing)
   api:
+    build: .
     image: code-interpreter:nsjail
     container_name: code-interpreter-api
     restart: unless-stopped
