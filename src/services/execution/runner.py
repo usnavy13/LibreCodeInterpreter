@@ -115,7 +115,7 @@ class CodeExecutionRunner:
         """
         execution_id = generate_execution_id()
 
-        logger.info(
+        logger.debug(
             "Starting code execution",
             execution_id=execution_id[:8],
             session_id=session_id,
@@ -258,9 +258,13 @@ class CodeExecutionRunner:
                     exit_code, stderr
                 )
 
-            logger.info(
-                f"Code execution {execution_id} completed: status={execution.status}, "
-                f"exit_code={exit_code}, time={execution_time_ms}ms, source={container_source}"
+            logger.debug(
+                "Code execution completed",
+                execution_id=execution_id[:8],
+                status=execution.status.value,
+                exit_code=exit_code,
+                time_ms=execution_time_ms,
+                source=container_source,
             )
 
             # Log state info if captured
@@ -402,7 +406,7 @@ class CodeExecutionRunner:
                 )
 
         self.session_sandboxes[session_id] = sandbox_info
-        logger.info(
+        logger.debug(
             "Fresh sandbox created",
             session_id=session_id,
             sandbox_id=sandbox_info.sandbox_id[:12],
@@ -713,7 +717,7 @@ class CodeExecutionRunner:
                         if self.sandbox_manager.copy_content_to_sandbox(
                             sandbox_info, file_content, dest_path, language=language
                         ):
-                            logger.info(
+                            logger.debug(
                                 "Mounted file",
                                 filename=filename,
                                 size=len(file_content),
@@ -871,7 +875,7 @@ class CodeExecutionRunner:
             for eid in execution_ids:
                 del self.active_executions[eid]
 
-            logger.info("Cleaned up session resources", session_id=session_id)
+            logger.debug("Cleaned up session resources", session_id=session_id)
             return True
 
         except Exception as e:
@@ -897,7 +901,10 @@ class CodeExecutionRunner:
         for eid in expired:
             del self.active_executions[eid]
 
-        logger.info(f"Cleaned up {len(expired)} expired executions")
+        if expired:
+            logger.info(f"Cleaned up {len(expired)} expired executions")
+        else:
+            logger.debug("No expired executions to clean up")
         return len(expired)
 
     async def cleanup_all_sandboxes(self) -> None:

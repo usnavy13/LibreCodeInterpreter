@@ -40,10 +40,9 @@ logger = structlog.get_logger()
 async def _startup_monitoring(app: FastAPI) -> None:
     """Start metrics and monitoring services."""
     try:
-        logger.info("Starting metrics service...")
         await metrics_service.start()
         metrics_service.register_event_handlers()
-        logger.info("Metrics service started successfully")
+        logger.info("Metrics service started")
     except Exception as e:
         logger.error("Failed to start metrics service", error=str(e))
 
@@ -51,17 +50,15 @@ async def _startup_monitoring(app: FastAPI) -> None:
 async def _startup_cleanup_tasks() -> None:
     """Start session cleanup and event-driven cleanup scheduler."""
     try:
-        logger.info("Starting session cleanup task...")
         from .dependencies.services import get_session_service
 
         session_service = get_session_service()
         await session_service.start_cleanup_task()
-        logger.info("Session cleanup task started successfully")
+        logger.info("Session cleanup task started")
     except Exception as e:
         logger.error("Failed to start session cleanup task", error=str(e))
 
     try:
-        logger.info("Starting cleanup scheduler...")
         from .services.cleanup import cleanup_scheduler
         from .dependencies.services import (
             get_execution_service,
@@ -77,10 +74,7 @@ async def _startup_cleanup_tasks() -> None:
             ),
         )
         cleanup_scheduler.start()
-        logger.info(
-            "Cleanup scheduler started successfully",
-            state_archival_enabled=settings.state_archive_enabled,
-        )
+        logger.info("Cleanup scheduler started")
     except Exception as e:
         logger.error("Failed to start cleanup scheduler", error=str(e))
 
@@ -89,7 +83,6 @@ async def _startup_sandbox_pool(app: FastAPI) -> None:
     """Start the sandbox pool if enabled."""
     if settings.sandbox_pool_enabled:
         try:
-            logger.info("Starting sandbox pool...")
             from .services.sandbox.pool import SandboxPool
             from .services.sandbox.manager import SandboxManager
             from .services.cleanup import cleanup_scheduler
@@ -115,25 +108,22 @@ async def _startup_sandbox_pool(app: FastAPI) -> None:
             # Store pool reference in app state
             app.state.sandbox_pool = sandbox_pool
 
-            logger.info(
-                "Sandbox pool started successfully (Python REPL only)",
-            )
+            logger.info("Sandbox pool started")
         except Exception as e:
             logger.error("Failed to start sandbox pool", error=str(e))
     else:
-        logger.info("Sandbox pool disabled by configuration")
+        logger.info("Sandbox pool disabled")
 
 
 async def _perform_health_checks() -> None:
     """Perform initial health checks on all services."""
     try:
-        logger.info("Performing initial health checks...")
         health_results = await health_service.check_all_services(use_cache=False)
 
         for service_name, result in health_results.items():
             if result.status.value == "healthy":
-                logger.info(
-                    f"{service_name} health check passed",
+                logger.debug(
+                    f"{service_name} healthy",
                     response_time_ms=result.response_time_ms,
                 )
             else:
@@ -144,9 +134,7 @@ async def _perform_health_checks() -> None:
                 )
 
         overall_status = health_service.get_overall_status(health_results)
-        logger.info(
-            "Initial health checks completed", overall_status=overall_status.value
-        )
+        logger.info("Health checks completed", overall_status=overall_status.value)
     except Exception as e:
         logger.error("Initial health checks failed", error=str(e))
 
@@ -191,12 +179,8 @@ async def lifespan(app: FastAPI):
     if settings.api_debug:
         logger.warning("Debug mode is enabled - disable in production")
     if settings.master_api_key:
-        logger.info("API key management enabled (MASTER_API_KEY configured)")
-    else:
-        logger.info("API key management: CLI disabled (no MASTER_API_KEY set)")
-    logger.info(
-        "Rate limiting configuration", rate_limit_enabled=settings.rate_limit_enabled
-    )
+        logger.info("API key management enabled")
+    logger.debug("Rate limiting", enabled=settings.rate_limit_enabled)
 
     await _startup_monitoring(app)
     await _startup_cleanup_tasks()

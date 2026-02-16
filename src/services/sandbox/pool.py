@@ -226,7 +226,7 @@ class SandboxPool:
                         self._record_stats(
                             language, pool_hit=True, acquire_time_ms=acquire_time
                         )
-                        logger.info(
+                        logger.debug(
                             "Acquired sandbox from pool",
                             session_id=session_id[:12] if session_id else "none",
                             sandbox_id=pooled.sandbox_info.sandbox_id[:12],
@@ -349,7 +349,7 @@ class SandboxPool:
                     language=language,
                 )
 
-        logger.info(
+        logger.debug(
             "Created fresh sandbox",
             session_id=session_id[:12] if session_id else "none",
             sandbox_id=sandbox_info.sandbox_id[:12],
@@ -548,13 +548,12 @@ class SandboxPool:
             await event_bus.publish(
                 PoolWarmedUp(language=language, container_count=created)
             )
-            logger.info(
-                "Warmed up sandboxes (parallel)",
+            logger.debug(
+                "Warmed up sandboxes",
                 language=language,
                 created=created,
                 total=queue.qsize(),
                 repl_mode=use_repl_mode,
-                batch_size=batch_size,
             )
 
     async def _create_pooled_sandbox(

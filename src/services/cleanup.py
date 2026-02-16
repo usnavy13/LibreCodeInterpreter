@@ -60,7 +60,7 @@ class CleanupScheduler:
         Note: With simplified pool, sandboxes are destroyed immediately
         after execution. Pool reference is no longer used for cleanup.
         """
-        logger.info(
+        logger.debug(
             "Cleanup scheduler initialized (sandboxes destroyed after each execution)"
         )
 

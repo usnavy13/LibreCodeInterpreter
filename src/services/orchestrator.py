@@ -228,7 +228,7 @@ class ExecutionOrchestrator:
             try:
                 existing = await self.session_service.get_session(request.session_id)
                 if existing and existing.status.value == "active":
-                    logger.info(
+                    logger.debug(
                         "Reusing session from request",
                         session_id=request.session_id[:12],
                     )
@@ -249,7 +249,7 @@ class ExecutionOrchestrator:
                             file_ref.session_id
                         )
                         if existing and existing.status.value == "active":
-                            logger.info(
+                            logger.debug(
                                 "Reusing session from file reference",
                                 session_id=file_ref.session_id,
                             )
@@ -270,7 +270,7 @@ class ExecutionOrchestrator:
                 if entity_sessions:
                     existing = entity_sessions[0]
                     if existing.status.value == "active":
-                        logger.info(
+                        logger.debug(
                             "Reusing session by entity_id",
                             session_id=existing.session_id[:12],
                             entity_id=request.entity_id,
@@ -385,7 +385,7 @@ class ExecutionOrchestrator:
         SECURITY: All files are from the current session, so cross-session
         isolation is maintained.
         """
-        logger.info(
+        logger.debug(
             "Auto-mounting all session files",
             session_id=ctx.session_id[:12] if ctx.session_id else None,
         )
@@ -425,7 +425,7 @@ class ExecutionOrchestrator:
         ctx.mounted_file_refs = file_refs
 
         if mounted:
-            logger.info(
+            logger.debug(
                 "Auto-mounted session files",
                 session_id=ctx.session_id[:12] if ctx.session_id else None,
                 file_count=len(mounted),
@@ -463,7 +463,7 @@ class ExecutionOrchestrator:
                 if ctx.initial_state:
                     # Clear marker so subsequent executions use normal flow
                     await self.state_service.clear_upload_marker(ctx.session_id)
-                    logger.info(
+                    logger.debug(
                         "Using client-uploaded state",
                         session_id=ctx.session_id[:12],
                         state_size=len(ctx.initial_state),
@@ -710,8 +710,8 @@ class ExecutionOrchestrator:
             capture_state=use_state,
         )
 
-        logger.info(
-            "Code execution completed",
+        logger.debug(
+            "Code execution completed in sandbox",
             session_id=ctx.session_id,
             status=execution.status.value,
             container_id=(
@@ -764,7 +764,7 @@ class ExecutionOrchestrator:
                         session_id=ctx.session_id,  # Include for cross-message persistence
                     )
                 )
-                logger.info(
+                logger.debug(
                     "Generated file stored",
                     session_id=ctx.session_id,
                     filename=filename,

@@ -204,8 +204,7 @@ class SecurityMiddleware:
                         max(
                             int(
                                 (
-                                    exceeded.resets_at
-                                    - datetime.now(timezone.utc)
+                                    exceeded.resets_at - datetime.now(timezone.utc)
                                 ).total_seconds()
                             ),
                             60,
@@ -277,10 +276,15 @@ class RequestLoggingMiddleware:
         finally:
             if not skip_logging:
                 duration = time.time() - start_time
-                logger.info(
-                    "Request processed",
+                log_kwargs = dict(
                     method=request.method,
                     path=request.url.path,
                     status=response_status,
                     duration_ms=round(duration * 1000, 2),
                 )
+                if response_status and response_status >= 500:
+                    logger.error("Request failed", **log_kwargs)
+                elif response_status and response_status >= 400:
+                    logger.warning("Request error", **log_kwargs)
+                else:
+                    logger.debug("Request processed", **log_kwargs)

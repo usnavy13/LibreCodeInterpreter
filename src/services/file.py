@@ -222,7 +222,7 @@ class FileService(FileServiceInterface):
 
             await self._store_file_metadata(session_id, file_id, metadata)
 
-            logger.info(
+            logger.debug(
                 "Generated file upload URL",
                 session_id=session_id,
                 file_id=file_id,
@@ -256,7 +256,7 @@ class FileService(FileServiceInterface):
             metadata["size"] = stat.size
             await self._store_file_metadata(session_id, file_id, metadata)
 
-            logger.info(
+            logger.debug(
                 "Confirmed file upload",
                 session_id=session_id,
                 file_id=file_id,
@@ -376,7 +376,7 @@ class FileService(FileServiceInterface):
             # Delete metadata from Redis
             await self._delete_file_metadata(session_id, file_id)
 
-            logger.info("Deleted file", session_id=session_id, file_id=file_id)
+            logger.debug("Deleted file", session_id=session_id, file_id=file_id)
             return True
 
         except S3Error as e:
@@ -436,7 +436,7 @@ class FileService(FileServiceInterface):
                         error=str(e),
                     )
 
-            logger.info(
+            logger.debug(
                 "Cleaned up session files",
                 session_id=session_id,
                 deleted_count=deleted_count,
@@ -518,13 +518,12 @@ class FileService(FileServiceInterface):
 
             await self._store_file_metadata(session_id, file_id, metadata)
 
-            logger.info(
+            logger.debug(
                 "Stored execution output file",
                 session_id=session_id,
                 file_id=file_id,
                 filename=filename,
                 size=len(content),
-                state_hash=state_hash[:12] if state_hash else None,
             )
 
             return file_id
@@ -631,7 +630,7 @@ class FileService(FileServiceInterface):
 
             await self._store_file_metadata(session_id, file_id, metadata)
 
-            logger.info(
+            logger.debug(
                 "Stored uploaded file",
                 session_id=session_id,
                 file_id=file_id,
