@@ -70,10 +70,12 @@ class Settings(BaseSettings):
     api_reload: bool = Field(default=False)
 
     # SSL/HTTPS Configuration
-    enable_https: bool = Field(default=False)
+    # HTTPS is auto-enabled when ssl_cert_file and ssl_key_file exist on disk.
+    # Override with ENABLE_HTTPS=false to force HTTP even if certs are present.
+    enable_https: Optional[bool] = Field(default=None)
     https_port: int = Field(default=443, ge=1, le=65535)
-    ssl_cert_file: Optional[str] = Field(default=None)
-    ssl_key_file: Optional[str] = Field(default=None)
+    ssl_cert_file: str = Field(default="/app/ssl/fullchain.pem")
+    ssl_key_file: str = Field(default="/app/ssl/privkey.pem")
     ssl_ca_certs: Optional[str] = Field(default=None)
 
     # Authentication Configuration
@@ -138,19 +140,19 @@ class Settings(BaseSettings):
     )
 
     # Resource Limits - Execution
-    max_execution_time: int = Field(default=30, ge=1, le=300)
+    max_execution_time: int = Field(default=120, ge=1, le=300)
     max_memory_mb: int = Field(default=512, ge=64, le=4096)
 
     # Resource Limits - Files
-    max_file_size_mb: int = Field(default=10, ge=1, le=100)
+    max_file_size_mb: int = Field(default=100, ge=1, le=500)
     max_files_per_session: int = Field(default=50, ge=1, le=200)
     max_output_files: int = Field(default=10, ge=1, le=50)
     max_filename_length: int = Field(default=255, ge=1, le=255)
 
     # Session Configuration
     session_ttl_hours: int = Field(default=24, ge=1, le=168)
-    session_cleanup_interval_minutes: int = Field(default=10, ge=1, le=1440)
-    enable_orphan_minio_cleanup: bool = Field(default=False)
+    session_cleanup_interval_minutes: int = Field(default=60, ge=1, le=1440)
+    enable_orphan_minio_cleanup: bool = Field(default=True)
 
     # Sandbox Pool Configuration
     sandbox_pool_enabled: bool = Field(default=True)
@@ -158,7 +160,7 @@ class Settings(BaseSettings):
 
     # Python REPL pool size (only Python supports REPL pre-warming)
     sandbox_pool_py: int = Field(
-        default=5, ge=0, le=50, description="Python REPL pool size"
+        default=2, ge=0, le=50, description="Python REPL pool size"
     )
 
     # Pool Optimization Configuration
@@ -506,12 +508,21 @@ class Settings(BaseSettings):
     # HELPER METHODS (preserved from original)
     # ========================================================================
 
+    @property
+    def https_enabled(self) -> bool:
+        """Check if HTTPS should be enabled.
+
+        Auto-detects: if enable_https is not explicitly set, returns True
+        when both ssl_cert_file and ssl_key_file exist on disk.
+        """
+        if self.enable_https is not None:
+            return self.enable_https
+        return Path(self.ssl_cert_file).exists() and Path(self.ssl_key_file).exists()
+
     def validate_ssl_files(self) -> bool:
         """Validate that SSL files exist when HTTPS is enabled."""
-        if not self.enable_https:
+        if not self.https_enabled:
             return True
-        if not self.ssl_cert_file or not self.ssl_key_file:
-            return False
         return Path(self.ssl_cert_file).exists() and Path(self.ssl_key_file).exists()
 
     def get_redis_url(self) -> str:

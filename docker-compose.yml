@@ -20,14 +20,6 @@ services:
       # Container-specific overrides (service discovery within compose network)
       - REDIS_HOST=redis
       - MINIO_ENDPOINT=minio:9000
-      # SSL configuration
-      - ENABLE_HTTPS=true
-      - SSL_CERT_FILE=/app/ssl/cert.pem
-      - SSL_KEY_FILE=/app/ssl/key.pem
-      # Sandbox configuration
-      - SANDBOX_BASE_DIR=/var/lib/code-interpreter/sandboxes
-      - REPL_ENABLED=true
-      - CONTAINER_POOL_ENABLED=true
     volumes:
       - sandbox-data:/var/lib/code-interpreter/sandboxes
       - ${SSL_CERTS_PATH:-./ssl}:/app/ssl:ro

@@ -300,7 +300,7 @@ async def get_admin_dashboard_deep_link(rest_of_path: str):
 
 
 def run_server():
-    if settings.enable_https:
+    if settings.https_enabled:
         # Validate SSL files exist
         if not settings.validate_ssl_files():
             logger.error("SSL configuration invalid - missing certificate files")
