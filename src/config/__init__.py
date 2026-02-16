@@ -368,7 +368,7 @@ class Settings(BaseSettings):
     log_file: Optional[str] = Field(default=None)
     log_max_size_mb: int = Field(default=100, ge=1)
     log_backup_count: int = Field(default=5, ge=1)
-    enable_access_logs: bool = Field(default=True)
+    enable_access_logs: bool = Field(default=False)
     enable_security_logs: bool = Field(default=True)
 
     # Development Configuration

@@ -77,9 +77,7 @@ class SandboxREPLExecutor:
         request_bytes = request_json.encode("utf-8") + DELIMITER
 
         try:
-            response = await self._send_and_receive(
-                process, request_bytes, timeout + 5
-            )
+            response = await self._send_and_receive(process, request_bytes, timeout + 5)
 
             elapsed_ms = (time.perf_counter() - start_time) * 1000
             logger.debug(
@@ -211,9 +209,7 @@ class SandboxREPLExecutor:
         proc = process.process
 
         if proc.returncode is not None:
-            raise RuntimeError(
-                f"REPL process has exited with code {proc.returncode}"
-            )
+            raise RuntimeError(f"REPL process has exited with code {proc.returncode}")
 
         if proc.stdin is None or proc.stdout is None:
             raise RuntimeError("REPL process stdin/stdout not available")
@@ -363,7 +359,7 @@ class SandboxREPLExecutor:
                 ready_msg = json.loads(json_part.decode("utf-8", errors="replace"))
                 if ready_msg.get("status") == "ready":
                     elapsed = time.perf_counter() - start_time
-                    logger.info(
+                    logger.debug(
                         "REPL ready",
                         sandbox_id=process.sandbox_info.sandbox_id[:12],
                         elapsed_ms=f"{elapsed * 1000:.1f}",

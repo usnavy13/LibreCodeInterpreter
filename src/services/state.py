@@ -167,13 +167,11 @@ class StateService:
 
             await pipe.execute()
 
-            logger.info(
+            logger.debug(
                 "Saved state to Redis",
                 session_id=session_id[:12],
                 state_size=len(raw_bytes),
                 hash=state_hash[:12],
-                ttl_seconds=ttl_seconds,
-                from_upload=from_upload,
             )
             return True, state_hash
         except Exception as e:

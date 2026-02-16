@@ -118,7 +118,7 @@ class SandboxManager:
             labels=labels,
         )
 
-        logger.info(
+        logger.debug(
             "Created sandbox",
             sandbox_id=sandbox_id[:12],
             session_id=session_id[:12] if session_id else "none",
@@ -215,7 +215,7 @@ class SandboxManager:
 
             # Try the full path relative to data_dir
             if source_path.startswith("/mnt/data/"):
-                relative = source_path[len("/mnt/data/"):]
+                relative = source_path[len("/mnt/data/") :]
                 alt_path = sandbox_info.data_dir / relative
                 if alt_path.exists():
                     return alt_path.read_bytes()

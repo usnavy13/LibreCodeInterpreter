@@ -228,15 +228,23 @@ Inactive states are automatically archived to MinIO for long-term storage.
 
 ### Logging Configuration
 
-| Variable               | Default | Description                                 |
-| ---------------------- | ------- | ------------------------------------------- |
-| `LOG_LEVEL`            | `INFO`  | Logging level (DEBUG, INFO, WARNING, ERROR) |
-| `LOG_FORMAT`           | `json`  | Log format (json or text)                   |
-| `LOG_FILE`             | -       | Log file path (stdout if not set)           |
-| `LOG_MAX_SIZE_MB`      | `100`   | Maximum log file size (MB)                  |
-| `LOG_BACKUP_COUNT`     | `5`     | Number of log file backups                  |
-| `ENABLE_ACCESS_LOGS`   | `true`  | Enable HTTP access logs                     |
-| `ENABLE_SECURITY_LOGS` | `true`  | Enable security event logs                  |
+| Variable               | Default | Description                                     |
+| ---------------------- | ------- | ----------------------------------------------- |
+| `LOG_LEVEL`            | `INFO`  | Logging level (DEBUG, INFO, WARNING, ERROR)     |
+| `LOG_FORMAT`           | `json`  | Log format (`json` or `text`)                   |
+| `LOG_FILE`             | -       | Log file path (stdout if not set)               |
+| `LOG_MAX_SIZE_MB`      | `100`   | Maximum log file size (MB)                      |
+| `LOG_BACKUP_COUNT`     | `5`     | Number of log file backups                      |
+| `ENABLE_ACCESS_LOGS`   | `false` | Enable uvicorn HTTP access logs                 |
+| `ENABLE_SECURITY_LOGS` | `true`  | Enable security event logs                      |
+
+**Log level guide:**
+
+- **`INFO`** (default) — Clean, readable output. Logs startup/shutdown lifecycle, one entry per code execution (request + response), session cleanup summaries, warnings, and errors. Internal details like sandbox creation, REPL warmup, state persistence, file operations, and pool replenishment are suppressed.
+- **`DEBUG`** — Full detail. Adds per-request internals: sandbox acquisition, REPL readiness, state save/load, file mounting, session reuse lookups, pool warmup cycles, and all HTTP request/response logging.
+- **`WARNING`** / **`ERROR`** — Only problems.
+
+**Request logging:** The `RequestLoggingMiddleware` handles HTTP request logging with status-aware levels — 5xx responses log at ERROR, 4xx at WARNING, and 2xx/3xx at DEBUG. This replaces uvicorn's native access logs (disabled by default). Set `ENABLE_ACCESS_LOGS=true` to re-enable uvicorn's access logs if needed.
 
 ### Development Configuration
 
@@ -377,11 +385,12 @@ python config_manager.py validate
 
 ### Debug Mode
 
-Enable debug mode for detailed logging:
+Enable verbose logging for troubleshooting:
 
 ```bash
-API_DEBUG=true
-LOG_LEVEL=DEBUG
+LOG_LEVEL=DEBUG              # Shows all internal operations (sandbox, REPL, state, files)
+ENABLE_ACCESS_LOGS=true      # Re-enables uvicorn per-request access logs
+API_DEBUG=true               # Enables /config endpoint and verbose error responses
 ```
 
 **Warning:** Disable debug mode in production as it may expose sensitive information.
@@ -396,6 +405,7 @@ API_RELOAD=true
 ENABLE_CORS=true
 ENABLE_DOCS=true
 LOG_LEVEL=DEBUG
+ENABLE_ACCESS_LOGS=true
 ```
 
 ### Testing
@@ -418,4 +428,6 @@ ENABLE_DOCS=false
 LOG_LEVEL=INFO
 LOG_FORMAT=json
 ENABLE_SECURITY_LOGS=true
+# ENABLE_ACCESS_LOGS defaults to false — request logging middleware
+# handles this with status-aware levels (errors at WARNING/ERROR)
 ```

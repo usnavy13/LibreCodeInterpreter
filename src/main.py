@@ -307,6 +307,7 @@ def run_server():
             port=settings.https_port,
             reload=settings.api_reload,
             log_level=settings.log_level.lower(),
+            access_log=settings.enable_access_logs,
             timeout_keep_alive=120,
             **ssl_config,
         )
@@ -318,6 +319,7 @@ def run_server():
             port=settings.api_port,
             reload=settings.api_reload,
             log_level=settings.log_level.lower(),
+            access_log=settings.enable_access_logs,
             timeout_keep_alive=120,
         )
 
