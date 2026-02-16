@@ -111,7 +111,12 @@ class SandboxExecutor:
 
             # Create subprocess via unshare --mount for per-process mount namespace
             proc = await asyncio.create_subprocess_exec(
-                "unshare", "--mount", "--", "/bin/sh", "-c", wrapper_cmd,
+                "unshare",
+                "--mount",
+                "--",
+                "/bin/sh",
+                "-c",
+                wrapper_cmd,
                 stdin=asyncio.subprocess.PIPE if stdin_payload else None,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,

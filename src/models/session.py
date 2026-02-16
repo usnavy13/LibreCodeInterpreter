@@ -45,9 +45,7 @@ class Session(BaseModel):
 
     # Sandbox information
     container_id: Optional[str] = Field(default=None, description="Sandbox ID")
-    container_status: Optional[str] = Field(
-        default=None, description="Sandbox status"
-    )
+    container_status: Optional[str] = Field(default=None, description="Sandbox status")
 
     # File management
     files: Dict[str, FileInfo] = Field(

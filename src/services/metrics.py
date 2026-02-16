@@ -368,9 +368,7 @@ class MetricsService:
     def get_pool_stats(self) -> Dict[str, Any]:
         """Get container pool statistics (in-memory)."""
         total = self._pool_stats["total_acquisitions"]
-        hit_rate = (
-            (self._pool_stats["pool_hits"] / total * 100) if total > 0 else 0.0
-        )
+        hit_rate = (self._pool_stats["pool_hits"] / total * 100) if total > 0 else 0.0
         avg_acquire = (
             (self._pool_stats["total_acquire_time_ms"] / total) if total > 0 else 0.0
         )
@@ -433,9 +431,7 @@ class MetricsService:
         total = row["total_executions"]
         success_rate = (row["success_count"] / total * 100) if total > 0 else 0
         pool_hit_rate = (
-            (row["pool_hits"] / row["pool_total"] * 100)
-            if row["pool_total"] > 0
-            else 0
+            (row["pool_hits"] / row["pool_total"] * 100) if row["pool_total"] > 0 else 0
         )
 
         return {
@@ -664,8 +660,7 @@ class MetricsService:
         )
 
         return [
-            {"language": row["language"], "count": row["count"]}
-            async for row in cursor
+            {"language": row["language"], "count": row["count"]} async for row in cursor
         ]
 
     # ------------------------------------------------------------------

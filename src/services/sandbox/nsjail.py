@@ -148,10 +148,14 @@ class NsjailConfig:
             args.extend(["--time_limit", str(timeout)])
 
         # Per-process resource limits (rlimits)
-        args.extend(["--rlimit_as", "hard"])      # Virtual address space (Go needs unlimited)
-        args.extend(["--rlimit_fsize", "100"])    # Max file size: 100MB
-        args.extend(["--rlimit_nofile", "256"])   # Max open files
-        args.extend(["--rlimit_nproc", "256"])    # Max processes (needs headroom for REPL module imports)
+        args.extend(
+            ["--rlimit_as", "hard"]
+        )  # Virtual address space (Go needs unlimited)
+        args.extend(["--rlimit_fsize", "100"])  # Max file size: 100MB
+        args.extend(["--rlimit_nofile", "256"])  # Max open files
+        args.extend(
+            ["--rlimit_nproc", "256"]
+        )  # Max processes (needs headroom for REPL module imports)
 
         # Note: per-sandbox cgroup limits are not used because the
         # containerized environment prevents nsjail from writing to cgroup.procs.
@@ -191,7 +195,12 @@ class NsjailConfig:
         # - ptrace: prevents process inspection/debugging (BUG-006a)
         # - bind: prevents opening server sockets even with network access (BUG-006c)
         # Using ERRNO(1) so the process gets EPERM rather than SIGSYS
-        args.extend(["--seccomp_string", "POLICY policy { ERRNO(1) { ptrace, bind } } USE policy DEFAULT ALLOW"])
+        args.extend(
+            [
+                "--seccomp_string",
+                "POLICY policy { ERRNO(1) { ptrace, bind } } USE policy DEFAULT ALLOW",
+            ]
+        )
 
         # Working directory: /mnt/data (bind-mounted by the executor wrapper)
         args.extend(["--cwd", "/mnt/data"])
