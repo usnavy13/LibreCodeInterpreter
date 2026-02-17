@@ -13,8 +13,7 @@ services:
     security_opt:
       - apparmor:unconfined
     ports:
-      - "${API_PORT:-8000}:8000"
-      - "${HTTPS_PORT:-443}:443"
+      - "${PORT:-8000}:8000"
     env_file:
       - .env
     environment:
@@ -32,7 +31,7 @@ services:
       minio-init:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD", "curl", "-fsk", "https://localhost:443/health"]
+      test: ["CMD-SHELL", "curl -fs http://localhost:8000/health || curl -fsk https://localhost:8000/health"]
       interval: 30s
       timeout: 15s
       retries: 3

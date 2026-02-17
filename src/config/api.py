@@ -14,7 +14,6 @@ class APIConfig(BaseSettings):
 
     # SSL/HTTPS Configuration
     enable_https: bool | None = Field(default=None)
-    https_port: int = Field(default=443, ge=1, le=65535)
     ssl_cert_file: str = Field(default="/app/ssl/fullchain.pem")
     ssl_key_file: str = Field(default="/app/ssl/privkey.pem")
     ssl_ca_certs: str | None = Field(default=None)

@@ -73,7 +73,6 @@ class Settings(BaseSettings):
     # HTTPS is auto-enabled when ssl_cert_file and ssl_key_file exist on disk.
     # Override with ENABLE_HTTPS=false to force HTTP even if certs are present.
     enable_https: Optional[bool] = Field(default=None)
-    https_port: int = Field(default=443, ge=1, le=65535)
     ssl_cert_file: str = Field(default="/app/ssl/fullchain.pem")
     ssl_key_file: str = Field(default="/app/ssl/privkey.pem")
     ssl_ca_certs: Optional[str] = Field(default=None)
@@ -421,7 +420,6 @@ class Settings(BaseSettings):
             api_debug=self.api_debug,
             api_reload=self.api_reload,
             enable_https=self.enable_https,
-            https_port=self.https_port,
             ssl_cert_file=self.ssl_cert_file,
             ssl_key_file=self.ssl_key_file,
             ssl_ca_certs=self.ssl_ca_certs,

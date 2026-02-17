@@ -309,5 +309,5 @@ ENV PATH="/usr/local/cargo/bin:/usr/local/go/bin:/opt/composer/global/vendor/bin
 RUN find / -path /proc -prune -o -path /sys -prune -o \
     \( -perm -4000 -o -perm -2000 \) -type f -exec chmod u-s,g-s {} + 2>/dev/null || true
 
-EXPOSE 8000 443
+EXPOSE 8000
 CMD ["python3", "-m", "src.main"]

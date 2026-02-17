@@ -32,12 +32,12 @@ The Code Interpreter API uses environment-based configuration with sensible defa
 
 Controls the basic API server settings.
 
-| Variable     | Default   | Description                               |
-| ------------ | --------- | ----------------------------------------- |
-| `API_HOST`   | `0.0.0.0` | Host to bind the API server               |
-| `API_PORT`   | `8000`    | Port for the API server                   |
-| `API_DEBUG`  | `false`   | Enable debug mode (disable in production) |
-| `API_RELOAD` | `false`   | Enable auto-reload for development        |
+| Variable     | Default   | Description                                          |
+| ------------ | --------- | ---------------------------------------------------- |
+| `PORT`       | `8000`    | External port the API is reachable on (docker-compose) |
+| `API_HOST`   | `0.0.0.0` | Host to bind the API server                          |
+| `API_DEBUG`  | `false`   | Enable debug mode (disable in production)            |
+| `API_RELOAD` | `false`   | Enable auto-reload for development                   |
 
 ### SSL/HTTPS Configuration
 
@@ -46,7 +46,6 @@ Configures SSL/TLS support for secure HTTPS connections.
 | Variable         | Default  | Description                                              |
 | ---------------- | -------- | -------------------------------------------------------- |
 | `ENABLE_HTTPS`   | `false`  | Enable HTTPS/SSL support                                 |
-| `HTTPS_PORT`     | `443`    | HTTPS server port                                        |
 | `SSL_CERTS_PATH` | `./ssl`  | Host path to directory containing `cert.pem` and `key.pem` |
 
 > **Note:** The certificate files are automatically mapped to `/app/ssl/` inside the API container via `docker-compose.yml`. You only need to set `SSL_CERTS_PATH` to point to your certificates directory on the host.
@@ -67,7 +66,6 @@ Configures SSL/TLS support for secure HTTPS connections.
 
    ```bash
    ENABLE_HTTPS=true
-   HTTPS_PORT=443
 
    # If using the default ./ssl directory, no additional config needed.
    # If your certs are elsewhere, set the path:

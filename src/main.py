@@ -298,13 +298,11 @@ def run_server():
         if settings.ssl_ca_certs:
             ssl_config["ssl_ca_certs"] = settings.ssl_ca_certs
 
-        logger.info(
-            f"Starting HTTPS server on {settings.api_host}:{settings.https_port}"
-        )
+        logger.info(f"Starting HTTPS server on {settings.api_host}:{settings.api_port}")
         uvicorn.run(
             "src.main:app",
             host=settings.api_host,
-            port=settings.https_port,
+            port=settings.api_port,
             reload=settings.api_reload,
             log_level=settings.log_level.lower(),
             access_log=settings.enable_access_logs,
