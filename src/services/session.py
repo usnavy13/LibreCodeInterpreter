@@ -35,6 +35,14 @@ class SessionService(SessionServiceInterface):
         self._execution_service = execution_service
         self._file_service = file_service
         self._redis_available = False
+
+    def set_execution_service(self, execution_service) -> None:
+        """Set the execution service dependency."""
+        self._execution_service = execution_service
+
+    def set_file_service(self, file_service) -> None:
+        """Set the file service dependency."""
+        self._file_service = file_service
         logger.info("Redis client created", url=settings.get_redis_url().split("@")[-1])
 
     async def _check_redis_connectivity(self) -> bool:
@@ -195,7 +203,7 @@ class SessionService(SessionServiceInterface):
         finally:
             await pipe.reset()
 
-        logger.info(
+        logger.debug(
             "Session created", session_id=session_id, expires_at=expires_at.isoformat()
         )
         return session
@@ -290,7 +298,7 @@ class SessionService(SessionServiceInterface):
         if self._execution_service:
             try:
                 await self._execution_service.cleanup_session(session_id)
-                logger.info(
+                logger.debug(
                     "Cleaned up execution resources for session", session_id=session_id
                 )
             except Exception as e:
@@ -307,7 +315,7 @@ class SessionService(SessionServiceInterface):
                 deleted_files = await self._file_service.cleanup_session_files(
                     session_id
                 )
-                logger.info(
+                logger.debug(
                     "Cleaned up file resources for session",
                     session_id=session_id,
                     deleted_files=deleted_files,
@@ -339,7 +347,7 @@ class SessionService(SessionServiceInterface):
         deleted = result[0] > 0  # First command result (delete)
 
         if deleted:
-            logger.info("Session deleted", session_id=session_id, entity_id=entity_id)
+            logger.debug("Session deleted", session_id=session_id, entity_id=entity_id)
 
         return deleted
 
@@ -371,7 +379,7 @@ class SessionService(SessionServiceInterface):
             session = await self.get_session(session_id)
             # If session data is missing, treat as expired/orphaned and clean up indexes
             if not session:
-                logger.info(
+                logger.debug(
                     "Cleaning up orphaned session (missing data)", session_id=session_id
                 )
                 # Attempt to clean up any files associated with this session by prefix
@@ -380,13 +388,13 @@ class SessionService(SessionServiceInterface):
                         deleted_files = await self._file_service.cleanup_session_files(
                             session_id
                         )
-                        logger.info(
+                        logger.debug(
                             "Cleaned up files for orphaned session",
                             session_id=session_id,
                             deleted_files=deleted_files,
                         )
                     except Exception as e:
-                        logger.error(
+                        logger.warning(
                             "Failed to cleanup files for orphaned session",
                             session_id=session_id,
                             error=str(e),
@@ -404,11 +412,10 @@ class SessionService(SessionServiceInterface):
                 continue
 
             if session.expires_at < now:
-                logger.info(
+                logger.debug(
                     "Cleaning up expired session",
                     session_id=session_id,
                     expired_at=session.expires_at.isoformat(),
-                    current_time=now.isoformat(),
                 )
                 await self.delete_session(session_id)
                 cleaned_count += 1

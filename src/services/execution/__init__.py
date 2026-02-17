@@ -12,11 +12,11 @@ from .output import OutputProcessor
 # that implements the ExecutionServiceInterface
 from ..interfaces import ExecutionServiceInterface
 from .runner import CodeExecutionRunner as _Runner
-from ..container import ContainerManager
+from ..sandbox import SandboxManager
 
 
 class CodeExecutionService(_Runner, ExecutionServiceInterface):
-    """Service for executing code in Docker containers.
+    """Service for executing code in nsjail sandboxes.
 
     This class provides backward compatibility with the original
     CodeExecutionService API while using the refactored implementation.
@@ -35,8 +35,8 @@ class CodeExecutionService(_Runner, ExecutionServiceInterface):
             capture_state: Whether to capture state after execution (Python only)
 
         Returns:
-            Tuple of (CodeExecution, Container, new_state, state_errors)
-            Container returned directly for thread-safe file retrieval in concurrent requests.
+            Tuple of (CodeExecution, SandboxInfo, new_state, state_errors)
+            SandboxInfo returned directly for thread-safe file retrieval in concurrent requests.
             new_state is base64-encoded cloudpickle, or None if not captured.
         """
         return await self.execute(
@@ -72,7 +72,7 @@ class CodeExecutionService(_Runner, ExecutionServiceInterface):
     def __del__(self):
         """Cleanup when service is destroyed."""
         try:
-            self.container_manager.close()
+            self.sandbox_manager.close()
         except Exception:
             pass
 
@@ -81,5 +81,5 @@ __all__ = [
     "CodeExecutionService",
     "CodeExecutionRunner",
     "OutputProcessor",
-    "ContainerManager",
+    "SandboxManager",
 ]

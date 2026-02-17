@@ -20,7 +20,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest pytest-asyncio pytest-cov pytest-mock bandit
+          pip install flake8 black mypy pytest pytest-asyncio pytest-cov pytest-mock bandit
 
       - name: Lint with flake8
         run: |
@@ -45,3 +45,20 @@ jobs:
       - name: Run Unit Tests
         run: |
           pytest tests/unit/
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Validate Docker build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

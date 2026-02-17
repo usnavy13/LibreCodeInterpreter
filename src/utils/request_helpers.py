@@ -11,10 +11,7 @@ from fastapi import Request
 def extract_api_key(request: Request) -> Optional[str]:
     """Extract API key from request headers.
 
-    Checks in order:
-    1. x-api-key header (preferred)
-    2. Authorization header with Bearer token
-    3. Authorization header with ApiKey token
+    Only checks the x-api-key header.
 
     Args:
         request: FastAPI Request object
@@ -22,20 +19,7 @@ def extract_api_key(request: Request) -> Optional[str]:
     Returns:
         API key string or None if not found
     """
-    # Check x-api-key header first (preferred method)
-    api_key = request.headers.get("x-api-key")
-    if api_key:
-        return api_key
-
-    # Check Authorization header as fallback
-    auth_header = request.headers.get("authorization")
-    if auth_header:
-        if auth_header.startswith("Bearer "):
-            return auth_header[7:]
-        elif auth_header.startswith("ApiKey "):
-            return auth_header[7:]
-
-    return None
+    return request.headers.get("x-api-key")
 
 
 def get_client_ip(request: Request) -> str:

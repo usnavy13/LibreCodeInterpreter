@@ -1,13 +1,14 @@
 """Code execution runner - core execution logic."""
 
 import asyncio
+import os
 import shlex
+import signal
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import structlog
-from docker.models.containers import Container
 
 from ...config import settings
 from ...config.languages import get_language
@@ -19,10 +20,10 @@ from ...models import (
     ExecuteCodeRequest,
 )
 from ...utils.id_generator import generate_execution_id
-from ..container import ContainerManager
-from ..container.pool import ContainerPool
-from ..container.repl_executor import REPLExecutor
-from ..metrics import metrics_collector, ExecutionMetrics
+from ..sandbox.nsjail import SandboxInfo
+from ..sandbox.manager import SandboxManager
+from ..sandbox.pool import SandboxPool
+from ..sandbox.repl_executor import SandboxREPLExecutor, SandboxREPLProcess
 from .output import OutputProcessor
 
 logger = structlog.get_logger(__name__)
@@ -33,58 +34,63 @@ class CodeExecutionRunner:
 
     def __init__(
         self,
-        container_manager: ContainerManager = None,
-        container_pool: ContainerPool = None,
+        sandbox_manager: SandboxManager = None,
+        sandbox_pool: SandboxPool = None,
     ):
         """Initialize the execution runner.
 
         Args:
-            container_manager: Optional container manager instance
-            container_pool: Optional container pool for fast container acquisition
+            sandbox_manager: Optional sandbox manager instance
+            sandbox_pool: Optional sandbox pool for fast sandbox acquisition
         """
-        self.container_manager = container_manager or ContainerManager()
-        self.container_pool = container_pool
+        self.sandbox_manager = sandbox_manager or SandboxManager()
+        self.sandbox_pool = sandbox_pool
         self.active_executions: Dict[str, CodeExecution] = {}
-        self.session_containers: Dict[str, Container] = {}
+        self.session_sandboxes: Dict[str, SandboxInfo] = {}
+        self._repl_processes: Dict[str, SandboxREPLProcess] = {}
 
-    async def _get_container(
+    def set_sandbox_pool(self, pool: SandboxPool) -> None:
+        """Set the sandbox pool dependency."""
+        self.sandbox_pool = pool
+
+    async def _get_sandbox(
         self, session_id: str, language: str
-    ) -> Tuple[Container, str]:
-        """Get container for execution, using pool if available.
+    ) -> Tuple[SandboxInfo, str]:
+        """Get sandbox for execution, using pool if available.
 
         Priority:
-        1. Get fresh container from pool (fast, ~3ms)
-        2. Create new container (fallback, slow)
+        1. Get fresh sandbox from pool (fast, ~3ms)
+        2. Create new sandbox (fallback, slow)
 
         Returns:
-            Tuple of (Container, source) where source is 'pool_hit' or 'pool_miss'
+            Tuple of (SandboxInfo, source) where source is 'pool_hit' or 'pool_miss'
         """
         # Try pool first if enabled
-        if self.container_pool and settings.container_pool_enabled:
+        if self.sandbox_pool and settings.sandbox_pool_enabled:
             logger.debug(
-                "Acquiring container from pool",
+                "Acquiring sandbox from pool",
                 session_id=session_id[:12],
                 pool_enabled=True,
             )
             try:
-                container = await self.container_pool.acquire(language, session_id)
-                return container, "pool_hit"
+                sandbox_info = await self.sandbox_pool.acquire(language, session_id)
+                return sandbox_info, "pool_hit"
             except Exception as e:
                 logger.warning(
-                    "Pool acquire failed, falling back to fresh container",
+                    "Pool acquire failed, falling back to fresh sandbox",
                     session_id=session_id[:12],
                     error=str(e),
                 )
         else:
             logger.debug(
                 "Pool not available",
-                has_pool=self.container_pool is not None,
-                pool_enabled=settings.container_pool_enabled,
+                has_pool=self.sandbox_pool is not None,
+                pool_enabled=settings.sandbox_pool_enabled,
             )
 
-        # Fallback: create fresh container (original behavior)
-        container = await self._create_fresh_container(session_id, language)
-        return container, "pool_miss"
+        # Fallback: create fresh sandbox (original behavior)
+        sandbox_info = await self._create_fresh_sandbox(session_id, language)
+        return sandbox_info, "pool_miss"
 
     async def execute(
         self,
@@ -93,7 +99,7 @@ class CodeExecutionRunner:
         files: Optional[List[Dict[str, Any]]] = None,
         initial_state: Optional[str] = None,
         capture_state: bool = True,
-    ) -> Tuple[CodeExecution, Optional[Container], Optional[str], List[str], str]:
+    ) -> Tuple[CodeExecution, Optional[SandboxInfo], Optional[str], List[str], str]:
         """Execute code in a session with optional state persistence.
 
         Args:
@@ -104,12 +110,12 @@ class CodeExecutionRunner:
             capture_state: Whether to capture state after execution (Python only)
 
         Returns:
-            Tuple of (CodeExecution record, Container, new_state, state_errors, container_source)
+            Tuple of (CodeExecution record, SandboxInfo, new_state, state_errors, container_source)
             container_source is 'pool_hit' or 'pool_miss'.
         """
         execution_id = generate_execution_id()
 
-        logger.info(
+        logger.debug(
             "Starting code execution",
             execution_id=execution_id[:8],
             session_id=session_id,
@@ -128,45 +134,43 @@ class CodeExecutionRunner:
 
         self.active_executions[execution_id] = execution
 
-        # Check if Docker is available
-        if not self.container_manager.is_available():
+        # Check if sandbox/nsjail is available
+        if not self.sandbox_manager.is_available():
             logger.error(
-                "Docker not available",
+                "Sandbox/nsjail not available",
                 execution_id=execution_id[:8],
-                error=self.container_manager.get_initialization_error(),
+                error=self.sandbox_manager.get_initialization_error(),
             )
             execution.status = ExecutionStatus.FAILED
             execution.completed_at = datetime.utcnow()
-            execution.error_message = f"Docker service unavailable: {self.container_manager.get_initialization_error()}"
+            execution.error_message = f"Sandbox service unavailable: {self.sandbox_manager.get_initialization_error()}"
             return execution, None, None, [], "pool_miss"
 
-        container = None
+        sandbox_info = None
         container_source = "pool_miss"
         try:
             execution.status = ExecutionStatus.RUNNING
             execution.started_at = datetime.utcnow()
 
-            # Get container (from pool or create fresh)
-            container, container_source = await self._get_container(
+            # Get sandbox (from pool or create fresh)
+            sandbox_info, container_source = await self._get_sandbox(
                 session_id, request.language
             )
 
             # Mount files if provided
             if files:
-                await self._mount_files_to_container(container, files, request.language)
+                await self._mount_files_to_sandbox(
+                    sandbox_info, files, request.language
+                )
 
             # Execute the code
             start_time = datetime.utcnow()
 
-            # Check if this is a REPL container (for optimization)
-            is_repl = self._is_repl_container(container, request.language)
+            # Check if this is a REPL sandbox (for optimization)
+            is_repl = self._is_repl_sandbox(sandbox_info, request.language)
 
-            # Skip stats for REPL mode (saves ~1 second per call)
+            # nsjail doesn't expose detailed per-sandbox resource stats
             initial_stats = None
-            if not is_repl:
-                initial_stats = await self.container_manager.get_container_stats(
-                    container
-                )
 
             # Execute code with optional state persistence (Python REPL only)
             new_state = None
@@ -181,7 +185,7 @@ class CodeExecutionRunner:
                     new_state,
                     state_errors,
                 ) = await self._execute_via_repl_with_state(
-                    container,
+                    sandbox_info,
                     request.code,
                     request.timeout or settings.max_execution_time,
                     initial_state=initial_state,
@@ -190,8 +194,8 @@ class CodeExecutionRunner:
                 )
             else:
                 # Standard execution (no state persistence)
-                exit_code, stdout, stderr = await self._execute_code_in_container(
-                    container,
+                exit_code, stdout, stderr = await self._execute_code_in_sandbox(
+                    sandbox_info,
                     request.code,
                     request.language,
                     request.timeout,
@@ -201,15 +205,8 @@ class CodeExecutionRunner:
 
             execution_time_ms = int((end_time - start_time).total_seconds() * 1000)
 
-            # Skip final stats for REPL mode
+            # nsjail doesn't provide per-sandbox memory stats
             memory_peak_mb = None
-            if not is_repl:
-                final_stats = await self.container_manager.get_container_stats(
-                    container
-                )
-                memory_peak_mb = (
-                    final_stats.get("memory_usage_mb") if final_stats else None
-                )
 
             # Process outputs
             outputs = self._process_outputs(stdout, stderr, end_time)
@@ -227,7 +224,7 @@ class CodeExecutionRunner:
 
             generated_files = []
             if should_detect_files:
-                generated_files = await self._detect_generated_files(container)
+                generated_files = await self._detect_generated_files(sandbox_info)
 
             mounted_filenames = self._get_mounted_filenames(files)
             filtered_files = self._filter_generated_files(
@@ -261,9 +258,13 @@ class CodeExecutionRunner:
                     exit_code, stderr
                 )
 
-            logger.info(
-                f"Code execution {execution_id} completed: status={execution.status}, "
-                f"exit_code={exit_code}, time={execution_time_ms}ms, source={container_source}"
+            logger.debug(
+                "Code execution completed",
+                execution_id=execution_id[:8],
+                status=execution.status.value,
+                exit_code=exit_code,
+                time_ms=execution_time_ms,
+                source=container_source,
             )
 
             # Log state info if captured
@@ -303,10 +304,7 @@ class CodeExecutionRunner:
             state_errors = []
             logger.error(f"Code execution {execution_id} failed: {e}")
 
-        # Record metrics
-        self._record_metrics(execution, session_id, request.language, files)
-
-        return execution, container, new_state, state_errors, container_source
+        return execution, sandbox_info, new_state, state_errors, container_source
 
     def _process_outputs(
         self, stdout: str, stderr: str, timestamp: datetime
@@ -358,99 +356,162 @@ class CodeExecutionRunner:
             if Path(f.get("path", "")).name not in mounted_filenames
         ]
 
-    def _record_metrics(
-        self,
-        execution: CodeExecution,
-        session_id: str,
-        language: str,
-        files: Optional[List[Dict[str, Any]]],
-    ) -> None:
-        """Record execution metrics."""
-        try:
-            metrics = ExecutionMetrics(
-                execution_id=execution.execution_id,
-                session_id=session_id,
-                language=language,
-                status=execution.status.value,
-                execution_time_ms=execution.execution_time_ms or 0,
-                memory_peak_mb=execution.memory_peak_mb,
-                exit_code=execution.exit_code,
-                file_count=len(files) if files else 0,
-                output_size_bytes=(
-                    sum(len(o.content) for o in execution.outputs)
-                    if execution.outputs
-                    else 0
-                ),
-            )
-            metrics_collector.record_execution_metrics(metrics)
-        except Exception as e:
-            logger.error("Failed to record execution metrics", error=str(e))
-
-    async def _create_fresh_container(
+    async def _create_fresh_sandbox(
         self, session_id: str, language: str
-    ) -> Container:
-        """Create a fresh container for execution."""
-        if session_id in self.session_containers:
+    ) -> SandboxInfo:
+        """Create a fresh sandbox for execution."""
+        if session_id in self.session_sandboxes:
             try:
-                await self.container_manager.force_kill_container(
-                    self.session_containers[session_id]
-                )
+                old_sandbox = self.session_sandboxes[session_id]
+                # Kill any REPL process
+                repl_proc = self._repl_processes.pop(old_sandbox.sandbox_id, None)
+                if repl_proc and repl_proc.process.returncode is None:
+                    try:
+                        os.killpg(repl_proc.process.pid, signal.SIGKILL)
+                    except (ProcessLookupError, PermissionError):
+                        try:
+                            repl_proc.process.kill()
+                        except ProcessLookupError:
+                            pass
+                    try:
+                        await repl_proc.process.wait()
+                    except Exception:
+                        pass
+                self.sandbox_manager.destroy_sandbox(old_sandbox)
             except Exception:
                 pass
             finally:
-                if session_id in self.session_containers:
-                    del self.session_containers[session_id]
-
-        image = self.container_manager.get_image_for_language(language)
-        await self.container_manager.pull_image_if_needed(image)
+                if session_id in self.session_sandboxes:
+                    del self.session_sandboxes[session_id]
 
         # Enable REPL mode for Python if configured (matches pool behavior)
         use_repl_mode = language == "py" and settings.repl_enabled
 
-        container = self.container_manager.create_container(
-            image=image,
+        sandbox_info = self.sandbox_manager.create_sandbox(
             session_id=session_id,
-            working_dir="/mnt/data",
             language=language,
             repl_mode=use_repl_mode,
         )
-        await self.container_manager.start_container(container)
 
-        # For REPL containers, wait for REPL to be ready before returning
+        # For REPL sandboxes, start the REPL process and wait for ready
         if use_repl_mode:
-            repl_executor = REPLExecutor(self.container_manager.client)
-            ready = await repl_executor.wait_for_ready(container, timeout=10.0)
-            if not ready:
+            repl_process = await self._start_repl_process(sandbox_info)
+            if repl_process:
+                self._repl_processes[sandbox_info.sandbox_id] = repl_process
+            else:
                 logger.warning(
-                    "REPL not ready in fresh container, may affect performance",
+                    "REPL not ready in fresh sandbox, may affect performance",
                     session_id=session_id[:12],
-                    container_id=container.id[:12],
+                    sandbox_id=sandbox_info.sandbox_id[:12],
                 )
 
-        self.session_containers[session_id] = container
-        logger.info(
-            "Fresh container created",
+        self.session_sandboxes[session_id] = sandbox_info
+        logger.debug(
+            "Fresh sandbox created",
             session_id=session_id,
-            container_id=container.id[:12],
+            sandbox_id=sandbox_info.sandbox_id[:12],
         )
-        return container
+        return sandbox_info
 
-    async def _execute_code_in_container(
+    async def _start_repl_process(
+        self, sandbox_info: SandboxInfo
+    ) -> Optional[SandboxREPLProcess]:
+        """Start a REPL process inside an nsjail sandbox.
+
+        Args:
+            sandbox_info: Sandbox to start REPL in
+
+        Returns:
+            SandboxREPLProcess if successful, None if failed
+        """
+        try:
+            from ..sandbox.nsjail import NsjailConfig
+
+            nsjail_config = NsjailConfig()
+
+            # Build nsjail args for REPL mode
+            env = self.sandbox_manager.executor._build_sanitized_env("py")
+            nsjail_args = nsjail_config.build_args(
+                sandbox_dir=str(sandbox_info.data_dir),
+                command=["/usr/bin/python3", "/opt/repl_server.py"],
+                language="py",
+                repl_mode=True,
+                env=env,
+            )
+
+            # Wrap nsjail in unshare+mount for security isolation
+            nsjail_cmd = " ".join(
+                shlex.quote(str(a)) for a in [settings.nsjail_binary] + nsjail_args
+            )
+            wrapper_cmd = (
+                f"mount --bind {shlex.quote(str(sandbox_info.data_dir))} /mnt/data && "
+                f"mount -t tmpfs -o size=1k tmpfs /var/lib/code-interpreter/sandboxes && "
+                f"mount -t tmpfs -o size=1k tmpfs /app/data && "
+                f"mount -t tmpfs -o size=1k tmpfs /var/log && "
+                f"mount -t tmpfs -o size=1k tmpfs /app/ssl && "
+                f"mount -t tmpfs -o size=1k tmpfs /app/dashboard && "
+                f"mount -t tmpfs -o size=1k tmpfs /app/src && "
+                # BUG-003: Bind /dev/null over mountinfo to hide mount details
+                f"mount --bind /dev/null /proc/self/mountinfo && "
+                f"{nsjail_cmd}"
+            )
+
+            # Start the nsjail subprocess with REPL via unshare wrapper
+            proc = await asyncio.create_subprocess_exec(
+                "unshare",
+                "--mount",
+                "--",
+                "/bin/sh",
+                "-c",
+                wrapper_cmd,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
+            repl_process = SandboxREPLProcess(
+                process=proc,
+                sandbox_info=sandbox_info,
+            )
+
+            # Wait for REPL to be ready
+            repl_executor = SandboxREPLExecutor()
+            ready = await repl_executor.wait_for_ready(
+                repl_process,
+                timeout=settings.repl_warmup_timeout_seconds,
+            )
+
+            if not ready:
+                proc.kill()
+                await proc.wait()
+                return None
+
+            return repl_process
+
+        except Exception as e:
+            logger.error(
+                "Failed to start REPL process",
+                sandbox_id=sandbox_info.sandbox_id[:12],
+                error=str(e),
+            )
+            return None
+
+    async def _execute_code_in_sandbox(
         self,
-        container: Container,
+        sandbox_info: SandboxInfo,
         code: str,
         language: str,
         timeout: Optional[int] = None,
         args: Optional[List[str]] = None,
     ) -> Tuple[int, str, str]:
-        """Execute code in the container.
+        """Execute code in the sandbox.
 
-        For REPL-enabled containers (Python with REPL mode), uses the fast
+        For REPL-enabled sandboxes (Python with REPL mode), uses the fast
         REPL executor which communicates with the pre-warmed Python interpreter.
-        For other containers, uses the standard execution path.
+        For other sandboxes, uses the standard execution path.
 
         Args:
-            container: Docker container to execute in
+            sandbox_info: Sandbox to execute in
             code: Code to execute
             language: Programming language
             timeout: Execution timeout in seconds
@@ -463,22 +524,24 @@ class CodeExecutionRunner:
 
         execution_timeout = timeout or settings.max_execution_time
 
-        # Check if container is REPL-enabled for faster execution
-        if self._is_repl_container(container, language):
+        # Check if sandbox is REPL-enabled for faster execution
+        if self._is_repl_sandbox(sandbox_info, language):
             logger.debug(
-                "Using REPL executor", container_id=container.id[:12], language=language
+                "Using REPL executor",
+                sandbox_id=sandbox_info.sandbox_id[:12],
+                language=language,
             )
             return await self._execute_via_repl(
-                container, code, execution_timeout, args=args
+                sandbox_info, code, execution_timeout, args=args
             )
 
-        # Standard execution path for non-REPL containers
+        # Standard execution path for non-REPL sandboxes
         exec_command = lang_config.execution_command
 
         # For stdin-based languages (except ts which compiles first)
         if lang_config.uses_stdin and language != "ts":
-            return await self.container_manager.execute_command(
-                container,
+            return await self.sandbox_manager.execute_command(
+                sandbox_info,
                 exec_command,
                 timeout=execution_timeout,
                 language=language,
@@ -493,12 +556,12 @@ class CodeExecutionRunner:
         elif language == "ts":
             code_filename = "code.ts"
 
-        # Direct memory-to-container transfer (no tempfiles)
+        # Direct memory-to-sandbox transfer (no tempfiles)
         dest_path = f"/mnt/data/{code_filename}"
-        if not await self.container_manager.copy_content_to_container(
-            container, code.encode("utf-8"), dest_path, language=language
+        if not self.sandbox_manager.copy_content_to_sandbox(
+            sandbox_info, code.encode("utf-8"), dest_path, language=language
         ):
-            return 1, "", "Failed to write code file to container"
+            return 1, "", "Failed to write code file to sandbox"
 
         # Build execution command with args if provided
         final_command = exec_command
@@ -507,23 +570,22 @@ class CodeExecutionRunner:
             quoted_args = " ".join(shlex.quote(arg) for arg in args)
             final_command = f"{exec_command} {quoted_args}"
 
-        return await self.container_manager.execute_command(
-            container,
+        return await self.sandbox_manager.execute_command(
+            sandbox_info,
             final_command,
             timeout=execution_timeout,
             language=language,
-            working_dir="/mnt/data",
         )
 
-    def _is_repl_container(self, container: Container, language: str) -> bool:
-        """Check if container is running in REPL mode.
+    def _is_repl_sandbox(self, sandbox_info: SandboxInfo, language: str) -> bool:
+        """Check if sandbox is running in REPL mode.
 
         Args:
-            container: Docker container to check
+            sandbox_info: Sandbox to check
             language: Programming language
 
         Returns:
-            True if container has REPL mode enabled, False otherwise
+            True if sandbox has REPL mode enabled, False otherwise
         """
         # Only Python supports REPL mode currently
         if language != "py":
@@ -533,27 +595,19 @@ class CodeExecutionRunner:
         if not settings.repl_enabled:
             return False
 
-        try:
-            # Check container labels for REPL mode (no reload needed - labels set at creation)
-            labels = container.labels or {}
-            return labels.get("com.code-interpreter.repl-mode") == "true"
-        except Exception as e:
-            logger.debug(
-                "Error checking REPL mode", container_id=container.id[:12], error=str(e)
-            )
-            return False
+        return sandbox_info.repl_mode
 
     async def _execute_via_repl(
         self,
-        container: Container,
+        sandbox_info: SandboxInfo,
         code: str,
         timeout: int,
         args: Optional[List[str]] = None,
     ) -> Tuple[int, str, str]:
-        """Execute code via REPL server in container.
+        """Execute code via REPL server in sandbox.
 
         Args:
-            container: Docker container with REPL server running
+            sandbox_info: Sandbox with REPL server running
             code: Python code to execute
             timeout: Maximum execution time in seconds
             args: Optional list of command line arguments
@@ -561,14 +615,28 @@ class CodeExecutionRunner:
         Returns:
             Tuple of (exit_code, stdout, stderr)
         """
-        repl_executor = REPLExecutor(self.container_manager.client)
+        # Get REPL process: try pool first, then local tracking
+        repl_process = None
+        if self.sandbox_pool:
+            repl_process = self.sandbox_pool.get_repl_process(sandbox_info)
+        if not repl_process:
+            repl_process = self._repl_processes.get(sandbox_info.sandbox_id)
+
+        if not repl_process:
+            logger.warning(
+                "No REPL process found for sandbox",
+                sandbox_id=sandbox_info.sandbox_id[:12],
+            )
+            return 1, "", "REPL process not available"
+
+        repl_executor = SandboxREPLExecutor()
         return await repl_executor.execute(
-            container, code, timeout=timeout, working_dir="/mnt/data", args=args
+            repl_process, code, timeout=timeout, working_dir="/mnt/data", args=args
         )
 
     async def _execute_via_repl_with_state(
         self,
-        container: Container,
+        sandbox_info: SandboxInfo,
         code: str,
         timeout: int,
         initial_state: Optional[str] = None,
@@ -578,7 +646,7 @@ class CodeExecutionRunner:
         """Execute code via REPL server with state persistence.
 
         Args:
-            container: Docker container with REPL server running
+            sandbox_info: Sandbox with REPL server running
             code: Python code to execute
             timeout: Maximum execution time in seconds
             initial_state: Base64-encoded state to restore before execution
@@ -588,9 +656,23 @@ class CodeExecutionRunner:
         Returns:
             Tuple of (exit_code, stdout, stderr, new_state, state_errors)
         """
-        repl_executor = REPLExecutor(self.container_manager.client)
+        # Get REPL process: try pool first, then local tracking
+        repl_process = None
+        if self.sandbox_pool:
+            repl_process = self.sandbox_pool.get_repl_process(sandbox_info)
+        if not repl_process:
+            repl_process = self._repl_processes.get(sandbox_info.sandbox_id)
+
+        if not repl_process:
+            logger.warning(
+                "No REPL process found for sandbox",
+                sandbox_id=sandbox_info.sandbox_id[:12],
+            )
+            return 1, "", "REPL process not available", None, []
+
+        repl_executor = SandboxREPLExecutor()
         return await repl_executor.execute_with_state(
-            container,
+            repl_process,
             code,
             timeout=timeout,
             working_dir="/mnt/data",
@@ -599,10 +681,13 @@ class CodeExecutionRunner:
             args=args,
         )
 
-    async def _mount_files_to_container(
-        self, container: Container, files: List[Dict[str, Any]], language: str = "py"
+    async def _mount_files_to_sandbox(
+        self,
+        sandbox_info: SandboxInfo,
+        files: List[Dict[str, Any]],
+        language: str = "py",
     ) -> None:
-        """Mount files to container workspace."""
+        """Mount files to sandbox workspace."""
         try:
             from ..file import FileService
 
@@ -623,82 +708,77 @@ class CodeExecutionRunner:
                     )
 
                     if file_content is not None:
-                        # Direct memory-to-container transfer (no tempfiles)
+                        # Direct memory-to-sandbox transfer (no tempfiles)
                         normalized_filename = OutputProcessor.sanitize_filename(
                             filename
                         )
                         dest_path = f"/mnt/data/{normalized_filename}"
 
-                        if await self.container_manager.copy_content_to_container(
-                            container, file_content, dest_path, language=language
+                        if self.sandbox_manager.copy_content_to_sandbox(
+                            sandbox_info, file_content, dest_path, language=language
                         ):
-                            logger.info(
+                            logger.debug(
                                 "Mounted file",
                                 filename=filename,
                                 size=len(file_content),
                             )
                         else:
                             logger.warning("Failed to mount file", filename=filename)
-                            await self._create_placeholder_file(container, filename)
+                            await self._create_placeholder_file(sandbox_info, filename)
                     else:
                         logger.warning(
                             f"Could not retrieve content for file {filename}"
                         )
-                        await self._create_placeholder_file(container, filename)
+                        await self._create_placeholder_file(sandbox_info, filename)
 
                 except Exception as file_error:
                     logger.error(f"Error retrieving file {filename}: {file_error}")
-                    await self._create_placeholder_file(container, filename)
+                    await self._create_placeholder_file(sandbox_info, filename)
 
         except Exception as e:
-            logger.error(f"Failed to mount files to container: {e}")
+            logger.error(f"Failed to mount files to sandbox: {e}")
 
     async def _create_placeholder_file(
-        self, container: Container, filename: str
+        self, sandbox_info: SandboxInfo, filename: str
     ) -> None:
         """Create a placeholder file when content cannot be retrieved."""
         try:
             normalized_filename = OutputProcessor.sanitize_filename(filename)
-            create_command = f"""cat > /mnt/data/{normalized_filename} << 'EOF'
-# File: {filename}
-# This is a placeholder - original file could not be retrieved
-EOF"""
-            await self.container_manager.execute_command(
-                container, create_command, timeout=10
+            placeholder = f"# File: {filename}\n# This is a placeholder - original file could not be retrieved\n"
+            self.sandbox_manager.copy_content_to_sandbox(
+                sandbox_info,
+                placeholder.encode(),
+                f"/mnt/data/{normalized_filename}",
+                "py",
             )
         except Exception as e:
             logger.error(f"Failed to create placeholder file: {e}")
 
     async def _detect_generated_files(
-        self, container: Container
+        self, sandbox_info: SandboxInfo
     ) -> List[Dict[str, Any]]:
         """Detect files generated during execution."""
         try:
-            exit_code, stdout, stderr = await self.container_manager.execute_command(
-                container,
-                "find /mnt/data -maxdepth 1 -type f -name '*' ! -name 'code' ! -name 'code.*' ! -name 'Code.*' -exec ls -la {} \\;",
-                timeout=5,
-            )
+            generated_files = []
+            data_dir = sandbox_info.data_dir
 
-            if exit_code != 0 or not stdout.strip():
+            if not data_dir.exists():
                 return []
 
-            generated_files = []
-            for line in stdout.strip().split("\n"):
-                if line.strip():
-                    parts = line.split()
-                    if len(parts) >= 9:
-                        size = int(parts[4]) if parts[4].isdigit() else 0
-                        filename = " ".join(parts[8:])
+            for name in os.listdir(data_dir):
+                # Skip code files
+                if name.startswith("code") or name.startswith("Code."):
+                    continue
 
-                        if size > settings.max_file_size_mb * 1024 * 1024:
-                            continue
-
+                filepath = data_dir / name
+                if filepath.is_file():
+                    size = filepath.stat().st_size
+                    if size <= settings.max_file_size_mb * 1024 * 1024:
                         generated_files.append(
                             {
-                                "path": filename,
+                                "path": f"/mnt/data/{name}",
                                 "size": size,
-                                "mime_type": OutputProcessor.guess_mime_type(filename),
+                                "mime_type": OutputProcessor.guess_mime_type(name),
                             }
                         )
 
@@ -725,11 +805,24 @@ EOF"""
             return False
 
         try:
-            container = self.session_containers.get(execution.session_id)
-            if container:
-                await self.container_manager.stop_container(container)
-                await self.container_manager.remove_container(container)
-                del self.session_containers[execution.session_id]
+            sandbox_info = self.session_sandboxes.get(execution.session_id)
+            if sandbox_info:
+                # Kill any REPL process
+                repl_proc = self._repl_processes.pop(sandbox_info.sandbox_id, None)
+                if repl_proc and repl_proc.process.returncode is None:
+                    try:
+                        os.killpg(repl_proc.process.pid, signal.SIGKILL)
+                    except (ProcessLookupError, PermissionError):
+                        try:
+                            repl_proc.process.kill()
+                        except ProcessLookupError:
+                            pass
+                    try:
+                        await repl_proc.process.wait()
+                    except Exception:
+                        pass
+                self.sandbox_manager.destroy_sandbox(sandbox_info)
+                del self.session_sandboxes[execution.session_id]
 
             execution.status = ExecutionStatus.CANCELLED
             execution.completed_at = datetime.utcnow()
@@ -755,10 +848,24 @@ EOF"""
     async def cleanup_session(self, session_id: str) -> bool:
         """Clean up resources for a session."""
         try:
-            if session_id in self.session_containers:
-                container = self.session_containers[session_id]
-                await self.container_manager.force_kill_container(container)
-                del self.session_containers[session_id]
+            if session_id in self.session_sandboxes:
+                sandbox_info = self.session_sandboxes[session_id]
+                # Kill any REPL process
+                repl_proc = self._repl_processes.pop(sandbox_info.sandbox_id, None)
+                if repl_proc and repl_proc.process.returncode is None:
+                    try:
+                        os.killpg(repl_proc.process.pid, signal.SIGKILL)
+                    except (ProcessLookupError, PermissionError):
+                        try:
+                            repl_proc.process.kill()
+                        except ProcessLookupError:
+                            pass
+                    try:
+                        await repl_proc.process.wait()
+                    except Exception:
+                        pass
+                self.sandbox_manager.destroy_sandbox(sandbox_info)
+                del self.session_sandboxes[session_id]
 
             execution_ids = [
                 eid
@@ -768,7 +875,7 @@ EOF"""
             for eid in execution_ids:
                 del self.active_executions[eid]
 
-            logger.info("Cleaned up session resources", session_id=session_id)
+            logger.debug("Cleaned up session resources", session_id=session_id)
             return True
 
         except Exception as e:
@@ -794,19 +901,36 @@ EOF"""
         for eid in expired:
             del self.active_executions[eid]
 
-        logger.info(f"Cleaned up {len(expired)} expired executions")
+        if expired:
+            logger.info(f"Cleaned up {len(expired)} expired executions")
+        else:
+            logger.debug("No expired executions to clean up")
         return len(expired)
 
-    async def cleanup_all_containers(self) -> None:
-        """Clean up all active containers during shutdown."""
-        logger.info("Cleaning up all containers", count=len(self.session_containers))
+    async def cleanup_all_sandboxes(self) -> None:
+        """Clean up all active sandboxes during shutdown."""
+        logger.info("Cleaning up all sandboxes", count=len(self.session_sandboxes))
 
-        containers = list(self.session_containers.values())
-        if containers:
-            cleaned = await self.container_manager.force_kill_containers_batch(
-                containers
-            )
-            logger.info(f"Cleaned up {cleaned}/{len(containers)} containers")
+        # Kill all REPL processes
+        for sandbox_id, repl_proc in list(self._repl_processes.items()):
+            try:
+                if repl_proc.process.returncode is None:
+                    repl_proc.process.kill()
+                    await repl_proc.process.wait()
+            except Exception:
+                pass
+        self._repl_processes.clear()
 
-        self.session_containers.clear()
+        # Destroy all sandboxes
+        cleaned = 0
+        for session_id, sandbox_info in list(self.session_sandboxes.items()):
+            try:
+                self.sandbox_manager.destroy_sandbox(sandbox_info)
+                cleaned += 1
+            except Exception:
+                pass
+
+        logger.info(f"Cleaned up {cleaned}/{len(self.session_sandboxes)} sandboxes")
+
+        self.session_sandboxes.clear()
         self.active_executions.clear()

@@ -12,11 +12,7 @@ class LoggingConfig(BaseSettings):
     file: str | None = Field(default=None, alias="log_file")
     max_size_mb: int = Field(default=100, ge=1, alias="log_max_size_mb")
     backup_count: int = Field(default=5, ge=1, alias="log_backup_count")
-    enable_access_logs: bool = Field(default=True)
-
-    # Health Check
-    health_check_interval: int = Field(default=30, ge=10)
-    health_check_timeout: int = Field(default=5, ge=1)
+    enable_access_logs: bool = Field(default=False)
 
     class Config:
         env_prefix = ""

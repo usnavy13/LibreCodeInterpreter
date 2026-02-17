@@ -201,7 +201,7 @@ class LoadTestClient:
             return {"error": str(e)}
 
     async def get_pool_metrics(self) -> Dict[str, Any]:
-        """Get container pool metrics."""
+        """Get sandbox pool metrics."""
         if self._session is None:
             await self.start()
 

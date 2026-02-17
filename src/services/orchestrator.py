@@ -16,7 +16,6 @@ Usage:
 """
 
 import asyncio
-import base64
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -33,10 +32,7 @@ from ..models import (
     SessionCreate,
     ExecuteCodeRequest,
     ValidationError,
-    ExecutionError,
-    ResourceNotFoundError,
     ServiceUnavailableError,
-    TimeoutError,
 )
 from ..models.errors import ErrorDetail
 from .interfaces import (
@@ -171,9 +167,6 @@ class ExecutionOrchestrator:
 
         except (
             ValidationError,
-            ExecutionError,
-            TimeoutError,
-            ResourceNotFoundError,
             ServiceUnavailableError,
         ):
             raise
@@ -235,7 +228,7 @@ class ExecutionOrchestrator:
             try:
                 existing = await self.session_service.get_session(request.session_id)
                 if existing and existing.status.value == "active":
-                    logger.info(
+                    logger.debug(
                         "Reusing session from request",
                         session_id=request.session_id[:12],
                     )
@@ -256,7 +249,7 @@ class ExecutionOrchestrator:
                             file_ref.session_id
                         )
                         if existing and existing.status.value == "active":
-                            logger.info(
+                            logger.debug(
                                 "Reusing session from file reference",
                                 session_id=file_ref.session_id,
                             )
@@ -277,7 +270,7 @@ class ExecutionOrchestrator:
                 if entity_sessions:
                     existing = entity_sessions[0]
                     if existing.status.value == "active":
-                        logger.info(
+                        logger.debug(
                             "Reusing session by entity_id",
                             session_id=existing.session_id[:12],
                             entity_id=request.entity_id,
@@ -311,9 +304,7 @@ class ExecutionOrchestrator:
         2. If no request.files[] but session_id exists, auto-mount ALL session files
         3. If neither, return empty list
 
-        Also handles restore_state flag for state-file linking:
-        - If a file has restore_state=True, loads the state associated with that file
-        - Tracks mounted file references for updating state_hash after execution
+        Tracks mounted file references for updating state_hash after execution.
         """
         # If explicit files provided, mount those (existing behavior)
         if ctx.request.files:
@@ -328,16 +319,10 @@ class ExecutionOrchestrator:
     async def _mount_explicit_files(
         self, ctx: ExecutionContext
     ) -> List[Dict[str, Any]]:
-        """Mount explicitly requested files from request.files[].
-
-        This preserves the original file mounting behavior with restore_state support.
-        """
+        """Mount explicitly requested files from request.files[]."""
         mounted = []
         mounted_ids = set()
         file_refs = []  # Track for state-file linking
-        restore_state_hash = (
-            None  # Hash of state to restore (from first restore_state file)
-        )
 
         for file_ref in ctx.request.files:
             # Get file info
@@ -383,26 +368,8 @@ class ExecutionOrchestrator:
                 }
             )
 
-            # Check for restore_state flag (only for Python, use first file's state)
-            if (
-                file_ref.restore_state
-                and ctx.request.lang == "py"
-                and restore_state_hash is None
-                and file_info.state_hash
-            ):
-                restore_state_hash = file_info.state_hash
-                logger.debug(
-                    "Will restore state from file",
-                    file_id=file_info.file_id,
-                    state_hash=file_info.state_hash[:12],
-                )
-
         # Store file refs for later state_hash update
         ctx.mounted_file_refs = file_refs
-
-        # If a file requested state restoration, load that state
-        if restore_state_hash and settings.state_persistence_enabled:
-            await self._load_state_by_hash(ctx, restore_state_hash)
 
         return mounted
 
@@ -418,7 +385,7 @@ class ExecutionOrchestrator:
         SECURITY: All files are from the current session, so cross-session
         isolation is maintained.
         """
-        logger.info(
+        logger.debug(
             "Auto-mounting all session files",
             session_id=ctx.session_id[:12] if ctx.session_id else None,
         )
@@ -458,7 +425,7 @@ class ExecutionOrchestrator:
         ctx.mounted_file_refs = file_refs
 
         if mounted:
-            logger.info(
+            logger.debug(
                 "Auto-mounted session files",
                 session_id=ctx.session_id[:12] if ctx.session_id else None,
                 file_count=len(mounted),
@@ -467,50 +434,10 @@ class ExecutionOrchestrator:
 
         return mounted
 
-    async def _load_state_by_hash(self, ctx: ExecutionContext, state_hash: str) -> None:
-        """Load state by its hash for state-file restoration.
-
-        Tries Redis first, then MinIO cold storage.
-        """
-        try:
-            # Try Redis first
-            state = await self.state_service.get_state_by_hash(state_hash)
-
-            if (
-                not state
-                and self.state_archival_service
-                and settings.state_archive_enabled
-            ):
-                # Try MinIO cold storage
-                state = await self.state_archival_service.restore_state_by_hash(
-                    state_hash
-                )
-
-            if state:
-                ctx.initial_state = state
-                logger.info(
-                    "Restored state from file reference",
-                    session_id=ctx.session_id[:12] if ctx.session_id else "none",
-                    state_hash=state_hash[:12],
-                    state_size=len(state),
-                )
-            else:
-                logger.warning(
-                    "State not found for hash",
-                    state_hash=state_hash[:12],
-                )
-        except Exception as e:
-            logger.error(
-                "Failed to load state by hash",
-                state_hash=state_hash[:12],
-                error=str(e),
-            )
-
     async def _load_state(self, ctx: ExecutionContext) -> None:
         """Load previous state from Redis (or MinIO fallback) for Python sessions.
 
         Priority order:
-        0. State already loaded via restore_state file reference (highest priority)
         1. Recently uploaded state via POST /state (client-side cache restore)
         2. Redis hot storage (within 2-hour TTL)
         3. MinIO cold storage (archived state)
@@ -521,10 +448,10 @@ class ExecutionOrchestrator:
         if ctx.request.lang != "py":
             return
 
-        # Skip if state was already loaded via restore_state file reference
+        # Skip if state was already loaded by another mechanism
         if ctx.initial_state:
             logger.debug(
-                "State already loaded (from file restore_state)",
+                "State already loaded",
                 session_id=ctx.session_id[:12],
             )
             return
@@ -536,7 +463,7 @@ class ExecutionOrchestrator:
                 if ctx.initial_state:
                     # Clear marker so subsequent executions use normal flow
                     await self.state_service.clear_upload_marker(ctx.session_id)
-                    logger.info(
+                    logger.debug(
                         "Using client-uploaded state",
                         session_id=ctx.session_id[:12],
                         state_size=len(ctx.initial_state),
@@ -660,7 +587,7 @@ class ExecutionOrchestrator:
         if not ctx.mounted_files or not ctx.container:
             return
 
-        container_manager = self.execution_service.container_manager
+        sandbox_manager = self.execution_service.sandbox_manager
 
         for file_info in ctx.mounted_files:
             try:
@@ -684,7 +611,7 @@ class ExecutionOrchestrator:
 
                 # SECURITY: Skip agent-assigned files (uploaded with entity_id)
                 # Agent files are read-only and cannot be modified by user code
-                file_metadata = await self.file_service._get_file_metadata(
+                file_metadata = await self.file_service.get_file_metadata(
                     file_session_id, file_id
                 )
                 if file_metadata and file_metadata.get("is_agent_file") == "1":
@@ -697,7 +624,7 @@ class ExecutionOrchestrator:
 
                 # Read current content from container
                 file_path = f"/mnt/data/{filename}"
-                content = await container_manager.get_file_content_from_container(
+                content = sandbox_manager.get_file_content_from_sandbox(
                     ctx.container, file_path
                 )
 
@@ -783,8 +710,8 @@ class ExecutionOrchestrator:
             capture_state=use_state,
         )
 
-        logger.info(
-            "Code execution completed",
+        logger.debug(
+            "Code execution completed in sandbox",
             session_id=ctx.session_id,
             status=execution.status.value,
             container_id=(
@@ -837,7 +764,7 @@ class ExecutionOrchestrator:
                         session_id=ctx.session_id,  # Include for cross-message persistence
                     )
                 )
-                logger.info(
+                logger.debug(
                     "Generated file stored",
                     session_id=ctx.session_id,
                     filename=filename,
@@ -853,35 +780,20 @@ class ExecutionOrchestrator:
         return generated
 
     async def _get_file_from_container(self, container: Any, file_path: str) -> bytes:
-        """Get file content from the execution container.
+        """Get file content from the execution sandbox.
 
         Args:
-            container: Docker container object (passed directly, no session lookup needed)
-            file_path: Path to file inside container
+            container: Sandbox object (passed directly, no session lookup needed)
+            file_path: Path to file inside sandbox
         """
-        import tempfile
-        import os
-
         if not container:
-            return f"# Container not found for file: {file_path}\n".encode("utf-8")
+            return f"# Sandbox not found for file: {file_path}\n".encode("utf-8")
 
-        container_manager = self.execution_service.container_manager
-
-        with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
-            temp_path = tmp_file.name
-
-        try:
-            success = await container_manager.copy_from_container(
-                container, file_path, temp_path
-            )
-            if success:
-                with open(temp_path, "rb") as f:
-                    return f.read()
-            else:
-                return f"# Failed to retrieve file: {file_path}\n".encode("utf-8")
-        finally:
-            if os.path.exists(temp_path):
-                os.unlink(temp_path)
+        sandbox_manager = self.execution_service.sandbox_manager
+        content = sandbox_manager.get_file_content_from_sandbox(container, file_path)
+        if content is not None:
+            return content
+        return f"# Failed to retrieve file: {file_path}\n".encode("utf-8")
 
     def _extract_outputs(self, ctx: ExecutionContext) -> None:
         """Extract stdout and stderr from execution outputs."""
@@ -910,31 +822,12 @@ class ExecutionOrchestrator:
             ctx.stdout += "\n"
 
     def _build_response(self, ctx: ExecutionContext) -> ExecResponse:
-        """Build the LibreChat-compatible response with state info."""
-        # Compute state info for Python executions
-        has_state = False
-        state_size = None
-        state_hash = None
-
-        if ctx.new_state and ctx.request.lang == "py":
-            has_state = True
-            # new_state is base64-encoded, decode to get raw bytes for size and hash
-            try:
-                raw_bytes = base64.b64decode(ctx.new_state)
-                state_size = len(raw_bytes)
-                state_hash = self.state_service.compute_hash(raw_bytes)
-            except Exception:
-                # Fallback to base64 string length if decode fails
-                state_size = len(ctx.new_state)
-
+        """Build the LibreChat-compatible response."""
         return ExecResponse(
             session_id=ctx.session_id,
             files=ctx.generated_files or [],
             stdout=ctx.stdout,
             stderr=ctx.stderr,
-            has_state=has_state,
-            state_size=state_size,
-            state_hash=state_hash,
         )
 
     async def _cleanup(self, ctx: ExecutionContext) -> None:
@@ -943,34 +836,39 @@ class ExecutionOrchestrator:
         - Destroys the container in background (non-blocking for faster response)
         - Publishes ExecutionCompleted event for metrics
         """
-        # Destroy container in background for faster response
+        # Destroy sandbox in background for faster response.
+        # Use sandbox_pool.destroy_sandbox() which kills the REPL process
+        # AND removes the directory. Without this, REPL processes leak.
         if ctx.container:
             try:
-                container_manager = self.execution_service.container_manager
-                container_id = (
+                sandbox_id = (
                     ctx.container.id[:12] if hasattr(ctx.container, "id") else "unknown"
                 )
-                logger.debug(
-                    "Scheduling container destruction", container_id=container_id
-                )
+                logger.debug("Scheduling sandbox destruction", sandbox_id=sandbox_id)
 
-                # Fire-and-forget: destroy container in background
+                # Use pool destroy (kills process + removes dir) or manager (dir only)
+                sandbox_pool = getattr(self.execution_service, "sandbox_pool", None)
+                sandbox_manager = self.execution_service.sandbox_manager
+
                 async def destroy_background():
                     try:
-                        await container_manager.force_kill_container(ctx.container)
-                        logger.debug("Container destroyed", container_id=container_id)
+                        if sandbox_pool:
+                            await sandbox_pool.destroy_sandbox(ctx.container)
+                        else:
+                            sandbox_manager.destroy_sandbox(ctx.container)
+                        logger.debug("Sandbox destroyed", sandbox_id=sandbox_id)
                     except Exception as e:
                         logger.warning(
-                            "Background container destruction failed",
-                            container_id=container_id,
+                            "Background sandbox destruction failed",
+                            sandbox_id=sandbox_id,
                             error=str(e),
                         )
 
                 asyncio.create_task(destroy_background())
             except Exception as e:
-                logger.error("Failed to schedule container destruction", error=str(e))
+                logger.error("Failed to schedule sandbox destruction", error=str(e))
         else:
-            logger.debug("No container in context to destroy")
+            logger.debug("No sandbox in context to destroy")
 
         # Publish event for metrics
         try:
@@ -1017,9 +915,7 @@ class ExecutionOrchestrator:
             status: Execution status (completed, failed, timeout)
         """
         try:
-            from .detailed_metrics import get_detailed_metrics_service
-
-            service = get_detailed_metrics_service()
+            from .metrics import metrics_service
 
             # Get memory usage if available
             memory_peak_mb = None
@@ -1040,7 +936,7 @@ class ExecutionOrchestrator:
             repl_mode = (
                 ctx.request.lang == "py"
                 and settings.repl_enabled
-                and settings.container_pool_enabled
+                and settings.sandbox_pool_enabled
             )
 
             metrics = DetailedExecutionMetrics(
@@ -1063,7 +959,7 @@ class ExecutionOrchestrator:
                 state_size_bytes=state_size,
             )
 
-            await service.record_execution(metrics)
+            await metrics_service.record_execution(metrics)
 
         except Exception as e:
             logger.warning("Failed to record detailed metrics", error=str(e))

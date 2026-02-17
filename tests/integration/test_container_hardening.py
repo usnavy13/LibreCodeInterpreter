@@ -43,11 +43,12 @@ class TestContainerHardening:
     """Test container hardening against information leakage."""
 
     def test_hardening_config_defaults_enabled(self):
-        """Test that hardening configuration defaults are enabled."""
+        """Test that sandbox hardening is enabled by default via nsjail."""
         from src.config import settings
 
-        assert settings.container_mask_host_info is True
-        assert settings.container_generic_hostname == "sandbox"
+        # nsjail handles host info masking and hostname isolation natively
+        assert settings.enable_network_isolation is True
+        assert settings.enable_filesystem_isolation is True
 
     def test_hostname_is_generic(self, client, auth_headers):
         """Verify hostname is 'sandbox' instead of revealing host info."""
@@ -250,42 +251,29 @@ class TestContainerHardening:
 class TestContainerHardeningConfig:
     """Test container hardening configuration integration."""
 
-    def test_hardening_config_applied_to_container(self):
-        """Test that hardening config is used in container creation."""
-        from src.services.container.manager import ContainerManager
+    def test_hardening_config_applied_to_sandbox(self):
+        """Test that hardening config is used in sandbox creation."""
+        from src.services.sandbox.manager import SandboxManager
         from src.config import settings
 
-        # Verify settings are correctly configured
-        assert hasattr(settings, "container_mask_host_info")
-        assert hasattr(settings, "container_generic_hostname")
+        # Verify sandbox settings are correctly configured
+        assert hasattr(settings, "nsjail_binary")
+        assert hasattr(settings, "sandbox_base_dir")
 
     def test_masked_paths_list_complete(self):
-        """Test that all expected paths are in the masked paths list."""
+        """Test that nsjail masks sensitive paths by default."""
         from src.config import settings
 
-        # These are the paths that should be masked when hardening is enabled
-        expected_masked = [
-            "/proc/version",
-            "/etc/machine-id",
-        ]
+        # nsjail handles path masking natively through its mount configuration
+        # Verify sandbox isolation settings are enabled
+        assert settings.enable_filesystem_isolation is True
 
-        # The actual paths are defined in manager.py when container_mask_host_info is True
-        # This test verifies the setting exists
-        assert settings.container_mask_host_info is True
-
-    def test_dns_search_sanitized_for_wan(self):
-        """Test that dns_search is empty for WAN containers."""
+    def test_network_isolation_enabled(self):
+        """Test that network isolation is enabled by default."""
         from src.config import settings
 
-        # Verify WAN DNS configuration exists
-        assert hasattr(settings, "wan_dns_servers")
-        assert len(settings.wan_dns_servers) > 0
-        # DNS servers should be public (e.g., 8.8.8.8, 1.1.1.1)
-        for dns in settings.wan_dns_servers:
-            # Should not be internal/private DNS
-            assert not dns.startswith("10.")
-            assert not dns.startswith("192.168.")
-            assert not dns.startswith("172.")
+        # nsjail sandboxes run without network access by default
+        assert settings.enable_network_isolation is True
 
 
 class TestContainerHardeningWAN:
@@ -441,32 +429,9 @@ print(f"ptrace result: {result}")
         finally:
             app.dependency_overrides.clear()
 
-    def test_seccomp_profile_config_exists(self):
-        """Verify seccomp profile configuration is set."""
+    def test_sandbox_config_exists(self):
+        """Verify sandbox configuration is set."""
         from src.config import settings
 
-        assert settings.docker_seccomp_profile == "docker/seccomp-sandbox.json"
-
-    def test_seccomp_profile_file_exists(self):
-        """Verify seccomp profile file exists and is valid JSON."""
-        import json
-        from pathlib import Path
-
-        profile_path = Path("docker/seccomp-sandbox.json")
-        assert profile_path.exists(), "Seccomp profile file should exist"
-
-        with open(profile_path) as f:
-            profile = json.load(f)
-
-        # Verify structure
-        assert "defaultAction" in profile
-        assert "syscalls" in profile
-        assert isinstance(profile["syscalls"], list)
-
-        # Verify ptrace is blocked
-        blocked_syscalls = []
-        for rule in profile["syscalls"]:
-            if rule.get("action") == "SCMP_ACT_ERRNO":
-                blocked_syscalls.extend(rule.get("names", []))
-
-        assert "ptrace" in blocked_syscalls, "ptrace should be blocked by seccomp"
+        assert hasattr(settings, "nsjail_binary")
+        assert settings.nsjail_binary == "nsjail"

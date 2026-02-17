@@ -23,10 +23,6 @@ class RequestFile(BaseModel):
     id: str
     session_id: str
     name: str
-    restore_state: bool = Field(
-        default=False,
-        description="If true, restore Python state from when this file was last used",
-    )
 
 
 class ExecRequest(BaseModel):
@@ -62,17 +58,6 @@ class ExecResponse(BaseModel):
     files: List[FileRef] = Field(default_factory=list)
     stdout: str = ""
     stderr: str = ""
-    # State persistence fields (Python only)
-    has_state: bool = Field(
-        default=False,
-        description="Whether Python state was captured (Python executions only)",
-    )
-    state_size: Optional[int] = Field(
-        default=None, description="Compressed state size in bytes"
-    )
-    state_hash: Optional[str] = Field(
-        default=None, description="SHA256 hash for ETag/change detection"
-    )
 
     class Config:
         json_encoders = {datetime: lambda v: v.isoformat()}

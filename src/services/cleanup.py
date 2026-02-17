@@ -54,14 +54,14 @@ class CleanupScheduler:
         self._file_service = file_service
         self._state_archival_service = state_archival_service
 
-    def set_container_pool(self, pool):
-        """Set container pool reference (kept for backward compatibility).
+    def set_sandbox_pool(self, pool):
+        """Set sandbox pool reference.
 
-        Note: With simplified pool, containers are destroyed immediately
+        Note: With simplified pool, sandboxes are destroyed immediately
         after execution. Pool reference is no longer used for cleanup.
         """
-        logger.info(
-            "Cleanup scheduler initialized (containers destroyed after each execution)"
+        logger.debug(
+            "Cleanup scheduler initialized (sandboxes destroyed after each execution)"
         )
 
     def start(self):

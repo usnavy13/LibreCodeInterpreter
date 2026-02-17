@@ -1,8 +1,8 @@
 """Configuration validation utilities."""
 
 import logging
+import shutil
 from typing import List, Dict, Any
-import docker
 import redis
 from minio import Minio
 from minio.error import S3Error
@@ -39,7 +39,7 @@ class ConfigValidator:
         # Validate external services
         self._validate_redis_connection()
         self._validate_minio_connection()
-        self._validate_docker_connection()
+        self._validate_nsjail()
 
         # Log results
         if self.warnings:
@@ -74,25 +74,16 @@ class ConfigValidator:
         if not settings.allowed_file_extensions:
             self.warnings.append("No allowed file extensions configured")
 
-        # Validate Docker security settings
+        # Validate sandbox security settings
         if not settings.enable_network_isolation:
             self.warnings.append("Network isolation is disabled - security risk")
 
         if not settings.enable_filesystem_isolation:
             self.warnings.append("Filesystem isolation is disabled - security risk")
 
-        if settings.docker_network_mode != "none":
-            self.warnings.append(
-                f"Docker network mode '{settings.docker_network_mode}' may allow network access"
-            )
-
     def _validate_resource_limits(self):
         """Validate resource limit configuration."""
-        # Check critical limit conflicts
-        if settings.max_total_file_size_mb < settings.max_file_size_mb:
-            self.errors.append(
-                "Total file size limit is less than individual file size limit"
-            )
+        pass
 
     def _validate_file_config(self):
         """Validate file handling configuration."""
@@ -138,7 +129,6 @@ class ConfigValidator:
                 access_key=settings.minio_access_key,
                 secret_key=settings.minio_secret_key,
                 secure=settings.minio_secure,
-                region=settings.minio_region,
             )
 
             # Test connection by listing buckets
@@ -166,52 +156,15 @@ class ConfigValidator:
             else:
                 self.errors.append(f"MinIO validation error: {e}")
 
-    def _validate_docker_connection(self):
-        """Validate Docker connection (non-blocking)."""
-        try:
-            # Try to create Docker client with very short timeout to avoid blocking
-            try:
-                client = docker.from_env(timeout=1)
-            except Exception as e:
-                logger.warning(f"Failed to create Docker client from environment: {e}")
-                # Fallback to explicit socket path with short timeout
-                try:
-                    client = docker.DockerClient(
-                        base_url="unix://var/run/docker.sock", timeout=1
-                    )
-                except Exception as fallback_e:
-                    self.warnings.append(f"Docker connection error: {fallback_e}")
-                    return
-
-            # Skip ping test during startup to avoid blocking
-            # The actual connection will be tested when Docker is first used
-
-            # Skip image validation during startup to avoid blocking
-            # Images will be pulled when first needed
-
-        except docker.errors.DockerException as e:
-            self.warnings.append(f"Docker connection error: {e}")
-        except Exception as e:
-            self.warnings.append(f"Docker validation error: {e}")
-
-    def _validate_language_images(self, docker_client):
-        """Validate that required language images are available or can be pulled."""
-        required_images = set()
-        for lang_config in settings.supported_languages.values():
-            if "image" in lang_config:
-                required_images.add(lang_config["image"])
-
-        missing_images = []
-        for image in required_images:
-            try:
-                docker_client.images.get(image)
-            except docker.errors.ImageNotFound:
-                missing_images.append(image)
-
-        if missing_images:
+    def _validate_nsjail(self):
+        """Validate nsjail sandbox availability."""
+        nsjail_path = shutil.which("nsjail")
+        if not nsjail_path:
             self.warnings.append(
-                f"Docker images not found locally (will be pulled on first use): {', '.join(missing_images)}"
+                "nsjail binary not found in PATH - sandboxed execution will not work"
             )
+        else:
+            logger.info(f"nsjail found at: {nsjail_path}")
 
 
 def validate_configuration() -> bool:

@@ -9,11 +9,10 @@ from urllib.parse import quote
 # Third-party imports
 import structlog
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Query
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import StreamingResponse
 from unidecode import unidecode
 
 # Local application imports
-from ..config import settings
 from ..dependencies import FileServiceDep, SessionServiceDep
 from ..models import SessionCreate
 from ..services.execution.output import OutputProcessor
@@ -88,28 +87,15 @@ async def upload_file(
                 },
             )
 
-        # Check file size limits
-        for file in upload_files:
-            if file.size and file.size > settings.max_file_size_mb * 1024 * 1024:
-                raise HTTPException(
-                    status_code=413,
-                    detail=f"File {file.filename} exceeds maximum size of {settings.max_file_size_mb}MB",
-                )
-
-        # Check number of files limit
-        if len(upload_files) > settings.max_files_per_session:
+        # Validate uploads via service layer
+        validation_error = file_service.validate_uploads(
+            filenames=[f.filename or "" for f in upload_files],
+            file_sizes=[f.size for f in upload_files],
+        )
+        if validation_error:
             raise HTTPException(
-                status_code=413,
-                detail=f"Too many files. Maximum {settings.max_files_per_session} files allowed",
+                status_code=validation_error[0], detail=validation_error[1]
             )
-
-        # Check file type restrictions
-        for file in upload_files:
-            if not settings.is_file_allowed(file.filename or ""):
-                raise HTTPException(
-                    status_code=415,
-                    detail=f"File type not allowed: {file.filename}",
-                )
 
         uploaded_files = []
 
@@ -314,13 +300,7 @@ async def download_file(
             media_type=content_type,
             headers={
                 "Content-Disposition": content_disposition,
-                # DO NOT include Content-Length - this forces chunked transfer encoding
                 "Cache-Control": "private, max-age=3600",
-                # Add CORS headers for browser compatibility
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Methods": "GET, OPTIONS",
-                "Access-Control-Allow-Headers": "x-api-key, Content-Type",
-                "Access-Control-Expose-Headers": "Content-Disposition",
             },
         )
 
@@ -334,48 +314,3 @@ async def download_file(
             error=str(e),
         )
         raise HTTPException(status_code=404, detail="File not found")
-
-
-@router.options("/download/{session_id}/{file_id}")
-async def download_file_options(session_id: str, file_id: str):
-    """Handle OPTIONS preflight request for download endpoint."""
-    return Response(
-        status_code=204,  # No Content
-        headers={
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, OPTIONS",
-            "Access-Control-Allow-Headers": "x-api-key, Content-Type",
-            "Access-Control-Max-Age": "3600",
-        },
-    )
-
-
-@router.delete("/files/{session_id}/{file_id}")
-async def delete_file(
-    session_id: str, file_id: str, file_service: FileServiceDep = None
-):
-    """Delete a file from the session - LibreChat compatible."""
-    try:
-        # Get file info before deletion
-        file_info = await file_service.get_file_info(session_id, file_id)
-        if not file_info:
-            raise HTTPException(status_code=404, detail="File not found")
-
-        success = await file_service.delete_file(session_id, file_id)
-
-        if success:
-            # Return 200 with empty response for LibreChat compatibility
-            return Response(status_code=200)
-        else:
-            raise HTTPException(status_code=500, detail="Failed to delete file")
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(
-            "Failed to delete file",
-            session_id=session_id,
-            file_id=file_id,
-            error=str(e),
-        )
-        raise HTTPException(status_code=500, detail="Failed to delete file")

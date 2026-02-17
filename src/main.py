@@ -15,13 +15,13 @@ from fastapi.responses import FileResponse
 from pydantic import ValidationError
 
 # Local application imports
-from .api import files, exec, health, state, admin, dashboard_metrics
+from .api import files, exec, health, admin, dashboard_metrics
 from .config import settings
 from .middleware.security import SecurityMiddleware, RequestLoggingMiddleware
 from .middleware.metrics import MetricsMiddleware
 from .models.errors import CodeInterpreterException
 from .services.health import health_service
-from .services.metrics import metrics_collector
+from .services.metrics import metrics_service
 from .utils.config_validator import validate_configuration, get_configuration_summary
 from .utils.error_handlers import (
     code_interpreter_exception_handler,
@@ -37,77 +37,28 @@ setup_logging()
 logger = structlog.get_logger()
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Application lifespan manager."""
-    # Startup
-    logger.info("Starting Code Interpreter API", version="1.0.0")
-
-    # Setup graceful shutdown callbacks (uvicorn handles signals)
-    setup_graceful_shutdown()
-
-    # Validate configuration on startup
-    if not validate_configuration():
-        logger.error("Configuration validation failed - shutting down")
-        sys.exit(1)
-
-    # Log security warnings if applicable
-    if settings.api_key == "test-api-key":
-        logger.warning("Using default API key - CHANGE THIS IN PRODUCTION!")
-
-    if settings.api_debug:
-        logger.warning("Debug mode is enabled - disable in production")
-
-    # Log API key management status
-    if settings.master_api_key:
-        logger.info("API key management enabled (MASTER_API_KEY configured)")
-    else:
-        logger.info("API key management: CLI disabled (no MASTER_API_KEY set)")
-
-    logger.info(
-        "Rate limiting configuration", rate_limit_enabled=settings.rate_limit_enabled
-    )
-
-    # Start monitoring services
+async def _startup_monitoring(app: FastAPI) -> None:
+    """Start metrics and monitoring services."""
     try:
-        logger.info("Starting metrics collector...")
-        await metrics_collector.start()
-        logger.info("Metrics collector started successfully")
+        await metrics_service.start()
+        metrics_service.register_event_handlers()
+        logger.info("Metrics service started")
     except Exception as e:
-        logger.error("Failed to start metrics collector", error=str(e))
-        # Don't fail startup if metrics collector fails
+        logger.error("Failed to start metrics service", error=str(e))
 
-    # Start SQLite metrics service for long-term analytics
-    if settings.sqlite_metrics_enabled:
-        try:
-            logger.info("Starting SQLite metrics service...")
-            from .services.sqlite_metrics import sqlite_metrics_service
 
-            await sqlite_metrics_service.start()
-            app.state.sqlite_metrics_service = sqlite_metrics_service
-            logger.info(
-                "SQLite metrics service started successfully",
-                db_path=settings.sqlite_metrics_db_path,
-            )
-        except Exception as e:
-            logger.error("Failed to start SQLite metrics service", error=str(e))
-            # Don't fail startup if SQLite metrics fails
-
-    # Start session cleanup task
+async def _startup_cleanup_tasks() -> None:
+    """Start session cleanup and event-driven cleanup scheduler."""
     try:
-        logger.info("Starting session cleanup task...")
         from .dependencies.services import get_session_service
 
         session_service = get_session_service()
         await session_service.start_cleanup_task()
-        logger.info("Session cleanup task started successfully")
+        logger.info("Session cleanup task started")
     except Exception as e:
         logger.error("Failed to start session cleanup task", error=str(e))
-        # Don't fail startup if cleanup task fails
 
-    # Start event-driven cleanup scheduler
     try:
-        logger.info("Starting cleanup scheduler...")
         from .services.cleanup import cleanup_scheduler
         from .dependencies.services import (
             get_execution_service,
@@ -123,93 +74,56 @@ async def lifespan(app: FastAPI):
             ),
         )
         cleanup_scheduler.start()
-        logger.info(
-            "Cleanup scheduler started successfully",
-            state_archival_enabled=settings.state_archive_enabled,
-        )
+        logger.info("Cleanup scheduler started")
     except Exception as e:
         logger.error("Failed to start cleanup scheduler", error=str(e))
-        # Don't fail startup if cleanup scheduler fails
 
-    # Initialize WAN network for container internet access if enabled
-    # IMPORTANT: This must happen BEFORE the container pool starts
-    if settings.enable_wan_access:
+
+async def _startup_sandbox_pool(app: FastAPI) -> None:
+    """Start the sandbox pool if enabled."""
+    if settings.sandbox_pool_enabled:
         try:
-            logger.info("Initializing WAN network for container internet access...")
-            from .services.container.network import WANNetworkManager
-            from .services.container.manager import ContainerManager
-
-            temp_manager = ContainerManager()
-            if temp_manager.is_available():
-                wan_network_manager = WANNetworkManager(temp_manager.client)
-                if await wan_network_manager.initialize():
-                    app.state.wan_network_manager = wan_network_manager
-                    logger.info(
-                        "WAN network initialized successfully",
-                        network_name=settings.wan_network_name,
-                        dns_servers=settings.wan_dns_servers,
-                    )
-                else:
-                    logger.error("Failed to initialize WAN network")
-            else:
-                logger.warning("Docker not available, skipping WAN network setup")
-        except Exception as e:
-            logger.error("Error initializing WAN network", error=str(e))
-            # Don't fail startup if WAN network fails
-    else:
-        logger.info("WAN network access disabled (containers have no network access)")
-
-    # Start container pool if enabled
-    container_pool = None
-    if settings.container_pool_enabled:
-        try:
-            logger.info("Starting container pool...")
-            from .services.container.pool import ContainerPool
-            from .services.container.manager import ContainerManager
+            from .services.sandbox.pool import SandboxPool
+            from .services.sandbox.manager import SandboxManager
             from .services.cleanup import cleanup_scheduler
             from .dependencies.services import (
-                set_container_pool,
-                inject_container_pool_to_execution_service,
+                set_sandbox_pool,
+                inject_sandbox_pool_to_execution_service,
             )
 
-            container_manager = ContainerManager()
-            container_pool = ContainerPool(container_manager)
-            await container_pool.start()
+            sandbox_manager = SandboxManager()
+            sandbox_pool = SandboxPool(sandbox_manager)
+            await sandbox_pool.start()
 
             # Connect pool to cleanup scheduler
-            cleanup_scheduler.set_container_pool(container_pool)
+            cleanup_scheduler.set_sandbox_pool(sandbox_pool)
 
             # Register pool with dependency injection system
-            set_container_pool(container_pool)
-            inject_container_pool_to_execution_service()
+            set_sandbox_pool(sandbox_pool)
+            inject_sandbox_pool_to_execution_service()
 
             # Register pool with health service for monitoring
-            health_service.set_container_pool(container_pool)
+            health_service.set_sandbox_pool(sandbox_pool)
 
             # Store pool reference in app state
-            app.state.container_pool = container_pool
+            app.state.sandbox_pool = sandbox_pool
 
-            logger.info(
-                "Container pool started successfully",
-                warmup_languages=["py", "js", "ts", "go", "java"],
-            )
+            logger.info("Sandbox pool started")
         except Exception as e:
-            logger.error("Failed to start container pool", error=str(e))
-            # Don't fail startup if container pool fails
-            container_pool = None
+            logger.error("Failed to start sandbox pool", error=str(e))
     else:
-        logger.info("Container pool disabled by configuration")
+        logger.info("Sandbox pool disabled")
 
-    # Perform initial health checks
+
+async def _perform_health_checks() -> None:
+    """Perform initial health checks on all services."""
     try:
-        logger.info("Performing initial health checks...")
         health_results = await health_service.check_all_services(use_cache=False)
 
-        # Log health check results
         for service_name, result in health_results.items():
             if result.status.value == "healthy":
-                logger.info(
-                    f"{service_name} health check passed",
+                logger.debug(
+                    f"{service_name} healthy",
                     response_time_ms=result.response_time_ms,
                 )
             else:
@@ -220,49 +134,26 @@ async def lifespan(app: FastAPI):
                 )
 
         overall_status = health_service.get_overall_status(health_results)
-        logger.info(
-            "Initial health checks completed", overall_status=overall_status.value
-        )
-
+        logger.info("Health checks completed", overall_status=overall_status.value)
     except Exception as e:
         logger.error("Initial health checks failed", error=str(e))
-        # Don't fail startup if health checks fail
 
-    logger.info("Code Interpreter API startup completed")
 
-    yield
+async def _shutdown_services(app: FastAPI) -> None:
+    """Stop monitoring services, sandbox pool, and cleanup scheduler."""
+    try:
+        await metrics_service.stop()
+        logger.info("Metrics service stopped")
+    except Exception as e:
+        logger.error("Error stopping metrics service", error=str(e))
 
-    # Shutdown
-    logger.info("Shutting down Code Interpreter API")
-
-    # Cleanup WAN network iptables rules
-    if hasattr(app.state, "wan_network_manager") and app.state.wan_network_manager:
+    if hasattr(app.state, "sandbox_pool") and app.state.sandbox_pool:
         try:
-            await app.state.wan_network_manager.cleanup()
-            logger.info("WAN network iptables rules cleaned up")
+            await app.state.sandbox_pool.stop()
+            logger.info("Sandbox pool stopped")
         except Exception as e:
-            logger.error("Error cleaning up WAN network", error=str(e))
+            logger.error("Error stopping sandbox pool", error=str(e))
 
-    # Stop SQLite metrics service (flush pending writes)
-    if (
-        hasattr(app.state, "sqlite_metrics_service")
-        and app.state.sqlite_metrics_service
-    ):
-        try:
-            await app.state.sqlite_metrics_service.stop()
-            logger.info("SQLite metrics service stopped")
-        except Exception as e:
-            logger.error("Error stopping SQLite metrics service", error=str(e))
-
-    # Stop container pool first (it manages active containers)
-    if hasattr(app.state, "container_pool") and app.state.container_pool:
-        try:
-            await app.state.container_pool.stop()
-            logger.info("Container pool stopped")
-        except Exception as e:
-            logger.error("Error stopping container pool", error=str(e))
-
-    # Stop cleanup scheduler
     try:
         from .services.cleanup import cleanup_scheduler
 
@@ -271,7 +162,39 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error("Error stopping cleanup scheduler", error=str(e))
 
-    # Perform graceful shutdown
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan manager."""
+    logger.info("Starting Code Interpreter API", version="1.0.0")
+
+    setup_graceful_shutdown()
+
+    if not validate_configuration():
+        logger.error("Configuration validation failed - shutting down")
+        sys.exit(1)
+
+    if settings.api_key == "test-api-key":
+        logger.warning("Using default API key - CHANGE THIS IN PRODUCTION!")
+    if settings.api_debug:
+        logger.warning("Debug mode is enabled - disable in production")
+    if settings.master_api_key:
+        logger.info("API key management enabled")
+    logger.debug("Rate limiting", enabled=settings.rate_limit_enabled)
+
+    await _startup_monitoring(app)
+    await _startup_cleanup_tasks()
+    await _startup_sandbox_pool(app)
+    await _perform_health_checks()
+
+    logger.info("Code Interpreter API startup completed")
+
+    yield
+
+    logger.info("Shutting down Code Interpreter API")
+
+    await _shutdown_services(app)
+
     try:
         await shutdown_handler.shutdown()
     except Exception as e:
@@ -319,20 +242,6 @@ app.add_exception_handler(ValidationError, validation_exception_handler)
 app.add_exception_handler(Exception, general_exception_handler)
 
 
-@app.get("/health")
-async def health_check():
-    """Health check endpoint."""
-    return {
-        "status": "healthy",
-        "version": "1.0.0",
-        "config": {
-            "debug": settings.api_debug,
-            "docs_enabled": settings.enable_docs,
-            "cors_enabled": settings.enable_cors,
-        },
-    }
-
-
 @app.get("/config")
 async def config_info():
     """Configuration information endpoint (non-sensitive data only)."""
@@ -349,8 +258,6 @@ app.include_router(files.router, tags=["files"])
 app.include_router(exec.router, tags=["exec"])
 
 app.include_router(health.router, tags=["health", "monitoring"])
-
-app.include_router(state.router, tags=["state"])
 
 app.include_router(admin.router, prefix="/api/v1", tags=["admin"])
 
@@ -377,7 +284,7 @@ async def get_admin_dashboard_deep_link(rest_of_path: str):
 
 
 def run_server():
-    if settings.enable_https:
+    if settings.https_enabled:
         # Validate SSL files exist
         if not settings.validate_ssl_files():
             logger.error("SSL configuration invalid - missing certificate files")
@@ -400,6 +307,8 @@ def run_server():
             port=settings.https_port,
             reload=settings.api_reload,
             log_level=settings.log_level.lower(),
+            access_log=settings.enable_access_logs,
+            timeout_keep_alive=120,
             **ssl_config,
         )
     else:
@@ -410,6 +319,8 @@ def run_server():
             port=settings.api_port,
             reload=settings.api_reload,
             log_level=settings.log_level.lower(),
+            access_log=settings.enable_access_logs,
+            timeout_keep_alive=120,
         )
 
 

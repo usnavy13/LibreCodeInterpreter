@@ -13,11 +13,10 @@ class APIConfig(BaseSettings):
     reload: bool = Field(default=False, alias="api_reload")
 
     # SSL/HTTPS Configuration
-    enable_https: bool = Field(default=False)
+    enable_https: bool | None = Field(default=None)
     https_port: int = Field(default=443, ge=1, le=65535)
-    ssl_cert_file: str | None = Field(default=None)
-    ssl_key_file: str | None = Field(default=None)
-    ssl_redirect: bool = Field(default=False)
+    ssl_cert_file: str = Field(default="/app/ssl/fullchain.pem")
+    ssl_key_file: str = Field(default="/app/ssl/privkey.pem")
     ssl_ca_certs: str | None = Field(default=None)
 
     # CORS Configuration

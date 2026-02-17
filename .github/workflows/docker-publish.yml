@@ -6,6 +6,7 @@ on:
     tags: ["v*.*.*"]
     paths:
       - 'Dockerfile'
+      - 'docker/**'
       - 'src/**'
       - 'requirements.txt'
       - 'pyproject.toml'

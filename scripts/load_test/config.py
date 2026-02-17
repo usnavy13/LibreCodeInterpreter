@@ -162,7 +162,7 @@ class LoadTestDefaults:
     warmup_requests: int = 10
     timeout_seconds: int = 60
     monitor_interval_seconds: float = 1.0
-    enable_docker_stats: bool = True
+    enable_sandbox_stats: bool = True
     output_dir: str = "./load_test_results"
 
     # Thresholds
