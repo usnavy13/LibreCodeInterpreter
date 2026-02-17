@@ -93,12 +93,6 @@ class OutputProcessor:
                 logger.warning(f"Generated file {file_path} has suspicious path")
                 return False
 
-            # Check file using centralized settings validation
-            filename = Path(file_path).name
-            if not settings.is_file_allowed(filename):
-                logger.warning(f"Generated file {file_path} has blocked extension")
-                return False
-
             return True
 
         except Exception as e:
