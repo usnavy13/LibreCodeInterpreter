@@ -147,7 +147,7 @@ class SandboxExecutor:
             stdout = self._sanitize_output(stdout_bytes) if stdout_bytes else ""
             stderr = self._sanitize_output(stderr_bytes) if stderr_bytes else ""
 
-            return proc.returncode, stdout, stderr
+            return proc.returncode or 0, stdout, stderr
 
         except Exception as e:
             logger.error(

@@ -323,11 +323,17 @@ class MetricsService:
             for k, v in self._execution_stats.items()
         }
 
-        total = stats["total_executions"]
-        if total > 0:
-            stats["success_rate"] = (stats["successful_executions"] / total) * 100
-            stats["failure_rate"] = (stats["failed_executions"] / total) * 100
-            stats["timeout_rate"] = (stats["timeout_executions"] / total) * 100
+        total = self._execution_stats["total_executions"]
+        if isinstance(total, (int, float)) and total > 0:
+            success = self._execution_stats["successful_executions"]
+            failed = self._execution_stats["failed_executions"]
+            timed_out = self._execution_stats["timeout_executions"]
+            assert isinstance(success, (int, float))
+            assert isinstance(failed, (int, float))
+            assert isinstance(timed_out, (int, float))
+            stats["success_rate"] = (success / total) * 100
+            stats["failure_rate"] = (failed / total) * 100
+            stats["timeout_rate"] = (timed_out / total) * 100
 
         if self._execution_times:
             stats["execution_time_percentiles"] = {
