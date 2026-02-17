@@ -89,7 +89,7 @@ class SandboxManager:
 
             # Make data dir writable by the sandbox user.
             # Each sandbox has its own isolated directory so world-writable is safe.
-            os.chmod(str(data_dir), 0o777)
+            os.chmod(str(data_dir), 0o777)  # nosec B103
         except OSError as e:
             logger.error(
                 "Failed to create sandbox directory",
