@@ -52,4 +52,4 @@ Unidecode==1.4.0
 psutil==7.2.2
 
 # Stress testing
-locust==2.43.1
+locust==2.43.3
