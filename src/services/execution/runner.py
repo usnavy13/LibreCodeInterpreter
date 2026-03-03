@@ -221,7 +221,7 @@ class CodeExecutionRunner:
                 or files
                 or any(
                     kw in request.code
-                    for kw in ["open(", "savefig", "to_csv", "write(", ".save("]
+                    for kw in ["open(", "savefig", "to_csv", "to_excel", "to_json", "to_parquet", "to_html", "to_xml", "to_feather", "to_pickle", "write(", ".save(", "dump("]
                 )
             )
 
