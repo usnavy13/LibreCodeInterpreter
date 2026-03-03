@@ -175,7 +175,7 @@ class TestLanguageExecution:
     """Test language-specific execution patterns."""
 
     # Languages that support stdin execution (interpreted)
-    STDIN_LANGUAGES = ["py", "js", "php", "r"]
+    STDIN_LANGUAGES = ["py", "js", "php", "r", "bash"]
 
     # Languages that require file-based execution (compiled)
     FILE_LANGUAGES = ["go", "java", "c", "cpp", "rs", "f90", "d", "ts"]
@@ -241,6 +241,7 @@ class TestLanguageExecution:
             "js": "console.log('Hello js')",
             "php": "<?php echo 'Hello php'; ?>",
             "r": "print('Hello r')",
+            "bash": 'echo "Hello from Bash"',
         }
 
         response = client.post(

@@ -26,7 +26,7 @@ class LanguageConfig:
     environment: Dict[str, str] = field(default_factory=dict)
 
 
-# All 12 supported languages with complete configuration
+# All 13 supported languages with complete configuration
 LANGUAGES: Dict[str, LanguageConfig] = {
     "py": LanguageConfig(
         code="py",
@@ -148,6 +148,16 @@ LANGUAGES: Dict[str, LanguageConfig] = {
         uses_stdin=False,
         timeout_multiplier=2.0,
         memory_multiplier=1.2,
+    ),
+    "bash": LanguageConfig(
+        code="bash",
+        name="Bash",
+        user_id=1001,
+        file_extension="sh",
+        execution_command="bash",
+        uses_stdin=True,
+        timeout_multiplier=1.0,
+        memory_multiplier=1.0,
     ),
 }
 

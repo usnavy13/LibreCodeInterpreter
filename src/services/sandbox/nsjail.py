@@ -91,6 +91,7 @@ class NsjailConfig:
             "/usr/bin/ldc2",
             "/usr/bin/ldmd2",
         ],
+        "bash": [],
     }
 
     def __init__(self):

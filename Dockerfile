@@ -267,8 +267,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # REPL Server + entrypoint
 # ============================================
 COPY docker/repl_server.py /opt/repl_server.py
+COPY docker/ptc_server.py /opt/ptc_server.py
 COPY docker/entrypoint.sh /opt/entrypoint.sh
-RUN chmod +x /opt/repl_server.py /opt/entrypoint.sh
+RUN chmod +x /opt/repl_server.py /opt/ptc_server.py /opt/entrypoint.sh
 
 # ============================================
 # Sandbox directory structure

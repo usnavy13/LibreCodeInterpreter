@@ -17,7 +17,7 @@ from src.models import CodeExecution, ExecutionStatus, ExecutionOutput, OutputTy
 from src.models.session import Session, SessionStatus
 from src.models.files import FileInfo
 
-# All 12 supported languages
+# All 13 supported languages
 SUPPORTED_LANGUAGES = [
     "py",
     "js",
@@ -31,6 +31,7 @@ SUPPORTED_LANGUAGES = [
     "r",
     "f90",
     "d",
+    "bash",
 ]
 
 
@@ -133,6 +134,7 @@ def mock_file_service():
         path="/test.txt",
     )
     service.download_file.return_value = "https://minio.example.com/download-url"
+    service.validate_uploads = MagicMock(return_value=None)
     return service
 
 

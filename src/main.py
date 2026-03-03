@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse
 from pydantic import ValidationError
 
 # Local application imports
-from .api import files, exec, health, admin, dashboard_metrics
+from .api import files, exec, health, admin, dashboard_metrics, programmatic
 from .config import settings
 from .middleware.security import SecurityMiddleware, RequestLoggingMiddleware
 from .middleware.metrics import MetricsMiddleware
@@ -140,12 +140,22 @@ async def _perform_health_checks() -> None:
 
 
 async def _shutdown_services(app: FastAPI) -> None:
-    """Stop monitoring services, sandbox pool, and cleanup scheduler."""
+    """Stop monitoring services, sandbox pool, PTC contexts, and cleanup scheduler."""
     try:
         await metrics_service.stop()
         logger.info("Metrics service stopped")
     except Exception as e:
         logger.error("Error stopping metrics service", error=str(e))
+
+    # Clean up PTC paused contexts
+    try:
+        from .api.programmatic import _ptc_service
+
+        if _ptc_service is not None:
+            await _ptc_service.cleanup_all()
+            logger.info("PTC service cleaned up")
+    except Exception as e:
+        logger.error("Error cleaning up PTC service", error=str(e))
 
     if hasattr(app.state, "sandbox_pool") and app.state.sandbox_pool:
         try:
@@ -256,6 +266,8 @@ async def config_info():
 app.include_router(files.router, tags=["files"])
 
 app.include_router(exec.router, tags=["exec"])
+
+app.include_router(programmatic.router, tags=["exec", "programmatic"])
 
 app.include_router(health.router, tags=["health", "monitoring"])
 

@@ -243,6 +243,7 @@ class SandboxExecutor:
                     "F95": "gfortran",
                 }
             )
+        # bash and d use default PATH/HOME/TMPDIR only
 
         return env_whitelist
 

@@ -496,11 +496,13 @@ class TestLibreChatFileRetrieval:
         assert "name" in item, "Summary must have 'name' field"
         assert "lastModified" in item, "Summary must have 'lastModified' field"
         # LibreChat parses name with: file.name.startsWith(path) where path = "session_id/fileId"
-        assert item["name"] == "test-session-123/file-123", \
-            f"name must be 'session_id/fileId' format, got: {item['name']}"
+        assert (
+            item["name"] == "test-session-123/file-123"
+        ), f"name must be 'session_id/fileId' format, got: {item['name']}"
         # lastModified must be ISO 8601 with Z suffix for LibreChat's Date parsing
-        assert item["lastModified"].endswith("Z"), \
-            f"lastModified must end with 'Z', got: {item['lastModified']}"
+        assert item["lastModified"].endswith(
+            "Z"
+        ), f"lastModified must end with 'Z', got: {item['lastModified']}"
 
     def test_files_endpoint_with_detail_full(self, client, auth_headers):
         """
@@ -700,7 +702,9 @@ class TestLibreChatFileLifecycle:
         from src.dependencies.services import get_file_service, get_session_service
 
         app.dependency_overrides[get_file_service] = lambda: self.mock_file_service
-        app.dependency_overrides[get_session_service] = lambda: self.mock_session_service
+        app.dependency_overrides[get_session_service] = (
+            lambda: self.mock_session_service
+        )
 
         yield
 
@@ -713,7 +717,9 @@ class TestLibreChatFileLifecycle:
         This is the primeFiles check: upload -> GET /files/{session_id}?detail=summary
         """
         # Step 1: Upload file (LibreChat uses 'file' singular)
-        upload_files = {"file": ("data.csv", io.BytesIO(b"col1,col2\n1,2\n"), "text/csv")}
+        upload_files = {
+            "file": ("data.csv", io.BytesIO(b"col1,col2\n1,2\n"), "text/csv")
+        }
         upload_data = {"entity_id": "asst_test_agent"}
 
         upload_response = client.post(
@@ -762,7 +768,10 @@ class TestLibreChatFileLifecycle:
         # Step 1: Upload
         upload_files = {"file": ("input.txt", io.BytesIO(b"hello world"), "text/plain")}
         upload_response = client.post(
-            "/upload", files=upload_files, data={"entity_id": "asst_test"}, headers=auth_headers
+            "/upload",
+            files=upload_files,
+            data={"entity_id": "asst_test"},
+            headers=auth_headers,
         )
         assert upload_response.status_code == 200
         upload_result = upload_response.json()
@@ -782,7 +791,9 @@ class TestLibreChatFileLifecycle:
             json={
                 "code": "with open('/mnt/data/input.txt') as f: print(f.read())",
                 "lang": "py",
-                "files": [{"id": file_id, "session_id": session_id, "name": "input.txt"}],
+                "files": [
+                    {"id": file_id, "session_id": session_id, "name": "input.txt"}
+                ],
             },
             headers=auth_headers,
         )
@@ -812,9 +823,7 @@ class TestLibreChatFileLifecycle:
         )
         self.mock_file_service.get_file_content.return_value = file_content
 
-        response = client.get(
-            f"/download/{session_id}/{file_id}", headers=auth_headers
-        )
+        response = client.get(f"/download/{session_id}/{file_id}", headers=auth_headers)
 
         assert response.status_code == 200
         assert response.content == file_content
@@ -875,7 +884,9 @@ class TestLibreChatPrimeFiles:
         from src.dependencies.services import get_file_service, get_session_service
 
         app.dependency_overrides[get_file_service] = lambda: self.mock_file_service
-        app.dependency_overrides[get_session_service] = lambda: self.mock_session_service
+        app.dependency_overrides[get_session_service] = (
+            lambda: self.mock_session_service
+        )
 
         yield
 
@@ -915,8 +926,9 @@ class TestLibreChatPrimeFiles:
         # file.name.startsWith("session_id/fileId")
         file_identifier = f"{session_id}/{file_id}"
         matching = [f for f in data if f["name"].startswith(file_identifier)]
-        assert len(matching) == 1, \
-            f"LibreChat expects to find file by name.startsWith('{file_identifier}')"
+        assert (
+            len(matching) == 1
+        ), f"LibreChat expects to find file by name.startsWith('{file_identifier}')"
 
     def test_prime_files_reupload_flow(self, client, auth_headers):
         """
@@ -1002,12 +1014,16 @@ class TestLibreChatPrimeFiles:
         name = data[0]["name"]
         # Simulate LibreChat's parsing
         parts = name.split("/")
-        assert len(parts) == 2, f"name must have exactly 2 parts split by '/', got: {name}"
+        assert (
+            len(parts) == 2
+        ), f"name must have exactly 2 parts split by '/', got: {name}"
         parsed_session_id, parsed_file_id = parts
-        assert parsed_session_id == session_id, \
-            f"First part must be session_id '{session_id}', got: '{parsed_session_id}'"
-        assert parsed_file_id == file_id, \
-            f"Second part must be file_id '{file_id}', got: '{parsed_file_id}'"
+        assert (
+            parsed_session_id == session_id
+        ), f"First part must be session_id '{session_id}', got: '{parsed_session_id}'"
+        assert (
+            parsed_file_id == file_id
+        ), f"Second part must be file_id '{file_id}', got: '{parsed_file_id}'"
 
     def test_prime_files_last_modified_is_parseable_date(self, client, auth_headers):
         """
@@ -1039,8 +1055,9 @@ class TestLibreChatPrimeFiles:
         parsed = datetime.fromisoformat(last_modified.replace("Z", "+00:00"))
         assert parsed is not None, "lastModified must be parseable ISO 8601"
         # Must end with Z (UTC) for JavaScript Date compatibility
-        assert last_modified.endswith("Z"), \
-            f"lastModified must end with 'Z' for JS Date parsing, got: {last_modified}"
+        assert last_modified.endswith(
+            "Z"
+        ), f"lastModified must end with 'Z' for JS Date parsing, got: {last_modified}"
 
 
 # =============================================================================
@@ -1224,10 +1241,545 @@ class TestLibreChatFullHeaders:
                 "User-Agent": "LibreChat/1.0",
             }
 
-            response = client.get(
-                "/download/dl-session/dl-file", headers=headers
-            )
+            response = client.get("/download/dl-session/dl-file", headers=headers)
             assert response.status_code == 200
             assert response.content == b"hello"
         finally:
             app.dependency_overrides.clear()
+
+
+# =============================================================================
+# FIELD NAME GUARD - exec vs upload field name consistency
+# =============================================================================
+
+
+class TestFieldNameGuard:
+    """Verify that exec response files use 'id'/'name' and upload uses 'fileId'/'filename'.
+
+    LibreChat expects:
+    - /exec response files[]: {id, name, path?, session_id?}
+    - /upload response files[]: {fileId, filename}
+
+    These are DIFFERENT field names by design (matching LibreChat's expectations).
+    """
+
+    @patch("src.services.orchestrator.ExecutionOrchestrator.execute")
+    def test_exec_response_uses_id_and_name(self, mock_execute, client, auth_headers):
+        """Exec response files must use 'id' and 'name' fields."""
+        mock_execute.return_value = ExecResponse(
+            session_id="guard-session",
+            stdout="",
+            stderr="",
+            files=[FileRef(id="gen-file-1", name="output.png", path="/output.png")],
+        )
+
+        response = client.post(
+            "/exec",
+            json={"code": "generate image", "lang": "py"},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        file_ref = data["files"][0]
+        assert "id" in file_ref, "exec response files must use 'id'"
+        assert "name" in file_ref, "exec response files must use 'name'"
+        assert "fileId" not in file_ref, "exec response must NOT use 'fileId'"
+        assert "filename" not in file_ref, "exec response must NOT use 'filename'"
+
+    def test_upload_response_uses_fileid_and_filename(self, client, auth_headers):
+        """Upload response files must use 'fileId' and 'filename' fields."""
+        mock_file_service = AsyncMock()
+        mock_file_service.store_uploaded_file.return_value = "upload-file-001"
+        mock_file_service.validate_uploads = MagicMock(return_value=None)
+
+        mock_session_service = AsyncMock()
+        mock_session_service.create_session.return_value = Session(
+            session_id="guard-upload-session",
+            status=SessionStatus.ACTIVE,
+            created_at=datetime.now(timezone.utc),
+            last_activity=datetime.now(timezone.utc),
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
+            metadata={},
+        )
+
+        from src.dependencies.services import get_file_service, get_session_service
+
+        app.dependency_overrides[get_file_service] = lambda: mock_file_service
+        app.dependency_overrides[get_session_service] = lambda: mock_session_service
+
+        try:
+            files = {"file": ("test.txt", io.BytesIO(b"content"), "text/plain")}
+            response = client.post("/upload", files=files, headers=auth_headers)
+
+            assert response.status_code == 200
+            data = response.json()
+            file_info = data["files"][0]
+            assert "fileId" in file_info, "upload response must use 'fileId'"
+            assert "filename" in file_info, "upload response must use 'filename'"
+            assert "id" not in file_info, "upload response must NOT use 'id'"
+            assert "name" not in file_info, "upload response must NOT use 'name'"
+        finally:
+            app.dependency_overrides.clear()
+
+
+# =============================================================================
+# LIBRECHAT EDGE CASES
+# =============================================================================
+
+
+class TestLibreChatEdgeCases:
+    """Test edge-case behaviors that LibreChat relies on."""
+
+    @patch("src.services.orchestrator.ExecutionOrchestrator.execute")
+    def test_session_id_always_present_in_response(
+        self, mock_execute, client, auth_headers
+    ):
+        """Every exec response must include a non-empty session_id string."""
+        mock_execute.return_value = ExecResponse(
+            session_id="edge-session-123", stdout="ok\n", stderr="", files=[]
+        )
+
+        response = client.post(
+            "/exec",
+            json={"code": "print('ok')", "lang": "py"},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "session_id" in data
+        assert isinstance(data["session_id"], str)
+        assert len(data["session_id"]) > 0
+
+    @patch("src.services.orchestrator.ExecutionOrchestrator.execute")
+    def test_extra_fields_in_request_ignored(self, mock_execute, client, auth_headers):
+        """Extra/unknown fields in the request body must be silently ignored."""
+        mock_execute.return_value = ExecResponse(
+            session_id="extra-session", stdout="ok\n", stderr="", files=[]
+        )
+
+        request = {
+            "code": "print('ok')",
+            "lang": "py",
+            "unknown_field": "should be ignored",
+            "another_extra": 42,
+        }
+
+        response = client.post("/exec", json=request, headers=auth_headers)
+        assert response.status_code == 200
+
+    @patch("src.services.orchestrator.ExecutionOrchestrator.execute")
+    def test_empty_files_array_accepted(self, mock_execute, client, auth_headers):
+        """Request with files:[] (empty array) must be accepted."""
+        mock_execute.return_value = ExecResponse(
+            session_id="empty-files-session", stdout="ok\n", stderr="", files=[]
+        )
+
+        request = {
+            "code": "print('ok')",
+            "lang": "py",
+            "files": [],
+        }
+
+        response = client.post("/exec", json=request, headers=auth_headers)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["files"] == []
+
+    def test_detail_full_name_format(self, client, auth_headers):
+        """GET /files/{session_id}?detail=full must return name as 'session_id/fileId'."""
+        mock_file_service = AsyncMock()
+        mock_file_service.list_files.return_value = [
+            FileInfo(
+                file_id="full-file-789",
+                filename="report.pdf",
+                size=4096,
+                content_type="application/pdf",
+                created_at=datetime.now(timezone.utc),
+                path="/report.pdf",
+            )
+        ]
+
+        from src.dependencies.services import get_file_service
+
+        app.dependency_overrides[get_file_service] = lambda: mock_file_service
+
+        try:
+            session_id = "edge-full-session"
+            response = client.get(
+                f"/files/{session_id}?detail=full", headers=auth_headers
+            )
+
+            assert response.status_code == 200
+            data = response.json()
+            assert isinstance(data, list)
+            assert len(data) == 1
+            item = data[0]
+            assert item["name"] == f"{session_id}/full-file-789"
+            assert item["id"] == "full-file-789"
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_detail_full_has_original_filename_metadata(self, client, auth_headers):
+        """
+        GET /files/{sid}?detail=full must include metadata['original-filename'].
+
+        LibreChat reads this field at CodeExecutor.ts:170 to map sanitized
+        filenames back to original upload names.
+        """
+        mock_file_service = AsyncMock()
+        mock_file_service.list_files.return_value = [
+            FileInfo(
+                file_id="meta-file-001",
+                filename="my_report.pdf",
+                size=2048,
+                content_type="application/pdf",
+                created_at=datetime.now(timezone.utc),
+                path="/my_report.pdf",
+            ),
+            FileInfo(
+                file_id="meta-file-002",
+                filename="data.csv",
+                size=512,
+                content_type="text/csv",
+                created_at=datetime.now(timezone.utc),
+                path="/data.csv",
+            ),
+        ]
+
+        from src.dependencies.services import get_file_service
+
+        app.dependency_overrides[get_file_service] = lambda: mock_file_service
+
+        try:
+            response = client.get(
+                "/files/meta-test-session?detail=full", headers=auth_headers
+            )
+
+            assert response.status_code == 200
+            data = response.json()
+            assert isinstance(data, list)
+            assert len(data) == 2
+
+            for item in data:
+                assert "metadata" in item, "Full detail must include 'metadata'"
+                assert (
+                    "original-filename" in item["metadata"]
+                ), "metadata must include 'original-filename'"
+                assert isinstance(
+                    item["metadata"]["original-filename"], str
+                ), "original-filename must be a string"
+                assert (
+                    len(item["metadata"]["original-filename"]) > 0
+                ), "original-filename must not be empty"
+        finally:
+            app.dependency_overrides.clear()
+
+
+# =============================================================================
+# LIBRECHAT BASH EXECUTION
+# =============================================================================
+
+
+class TestLibreChatBashExecution:
+    """Test bash execution compatibility with LibreChat.
+
+    Bash was added as a supported language. These tests verify that bash
+    requests follow the same API contract as other languages.
+    """
+
+    @patch("src.services.orchestrator.ExecutionOrchestrator.execute")
+    def test_bash_minimal_request(self, mock_execute, client, auth_headers):
+        """Minimal bash request should return 200 with standard response shape."""
+        mock_execute.return_value = ExecResponse(
+            session_id="bash-session-123",
+            stdout="hello\n",
+            stderr="",
+            files=[],
+        )
+
+        response = client.post(
+            "/exec",
+            json={"code": "echo hello", "lang": "bash"},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["session_id"] == "bash-session-123"
+        assert data["stdout"] == "hello\n"
+        assert data["stderr"] == ""
+
+    @patch("src.services.orchestrator.ExecutionOrchestrator.execute")
+    def test_bash_error_returns_200(self, mock_execute, client, auth_headers):
+        """Bash syntax error should return 200 with error in stderr."""
+        mock_execute.return_value = ExecResponse(
+            session_id="bash-err-session",
+            stdout="",
+            stderr="bash: syntax error near unexpected token\n",
+            files=[],
+        )
+
+        response = client.post(
+            "/exec",
+            json={"code": "if then fi done", "lang": "bash"},
+            headers=auth_headers,
+        )
+
+        # CRITICAL: Same as other languages - execution errors return 200
+        assert response.status_code == 200
+        data = response.json()
+        assert "session_id" in data
+        assert data["stderr"] != ""
+
+    @patch("src.services.orchestrator.ExecutionOrchestrator.execute")
+    def test_bash_response_matches_python_shape(
+        self, mock_execute, client, auth_headers
+    ):
+        """Bash response must have the same 4 fields as Python response."""
+        mock_execute.return_value = ExecResponse(
+            session_id="bash-shape-session",
+            stdout="result\n",
+            stderr="",
+            files=[],
+        )
+
+        response = client.post(
+            "/exec",
+            json={"code": "echo result", "lang": "bash"},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        # Must have the same 4 required fields as any other language
+        assert "session_id" in data
+        assert "stdout" in data
+        assert "stderr" in data
+        assert "files" in data
+
+        # Type validation
+        assert isinstance(data["session_id"], str)
+        assert isinstance(data["stdout"], str)
+        assert isinstance(data["stderr"], str)
+        assert isinstance(data["files"], list)
+
+
+# =============================================================================
+# LIBRECHAT PROGRAMMATIC TOOL CALLING (PTC)
+# =============================================================================
+
+
+class TestLibreChatProgrammaticToolCalling:
+    """Test PTC endpoint compatibility from a LibreChat client perspective.
+
+    These tests verify the /exec/programmatic endpoint contract using the
+    same mocking pattern as test_programmatic_api.py.
+    """
+
+    @patch("src.api.programmatic._get_ptc_service")
+    def test_ptc_initial_request_completed(
+        self, mock_get_service, client, auth_headers
+    ):
+        """Initial PTC request with code+tools should return completed response."""
+        from src.models.programmatic import ProgrammaticExecResponse
+
+        mock_service = AsyncMock()
+        mock_service.start_execution.return_value = ProgrammaticExecResponse(
+            status="completed",
+            session_id="ptc-compat-session",
+            stdout="Hello from PTC\n",
+            stderr="",
+        )
+        mock_get_service.return_value = mock_service
+
+        from src.dependencies.services import get_session_service
+
+        mock_session_svc = AsyncMock()
+        mock_session_svc.create_session.return_value = Session(
+            session_id="ptc-compat-session",
+            status=SessionStatus.ACTIVE,
+            created_at=datetime.now(timezone.utc),
+            last_activity=datetime.now(timezone.utc),
+            expires_at=datetime.now(timezone.utc),
+            metadata={},
+        )
+        app.dependency_overrides[get_session_service] = lambda: mock_session_svc
+
+        try:
+            response = client.post(
+                "/exec/programmatic",
+                json={
+                    "code": "print('Hello from PTC')",
+                    "tools": [{"name": "get_data", "description": "Get data"}],
+                },
+                headers=auth_headers,
+            )
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "completed"
+        assert "session_id" in data
+        assert isinstance(data["stdout"], str)
+        assert isinstance(data["stderr"], str)
+
+    @patch("src.api.programmatic._get_ptc_service")
+    def test_ptc_tool_call_required_response(
+        self, mock_get_service, client, auth_headers
+    ):
+        """PTC request that calls a tool should return tool_call_required."""
+        from src.models.programmatic import ProgrammaticExecResponse, PTCToolCall
+
+        mock_service = AsyncMock()
+        mock_service.start_execution.return_value = ProgrammaticExecResponse(
+            status="tool_call_required",
+            session_id="ptc-tool-session",
+            continuation_token="cont-token-xyz",
+            tool_calls=[
+                PTCToolCall(
+                    id="call-abc", name="get_weather", input={"city": "NYC"}
+                ),
+            ],
+            stdout="",
+            stderr="",
+        )
+        mock_get_service.return_value = mock_service
+
+        from src.dependencies.services import get_session_service
+
+        mock_session_svc = AsyncMock()
+        mock_session_svc.create_session.return_value = Session(
+            session_id="ptc-tool-session",
+            status=SessionStatus.ACTIVE,
+            created_at=datetime.now(timezone.utc),
+            last_activity=datetime.now(timezone.utc),
+            expires_at=datetime.now(timezone.utc),
+            metadata={},
+        )
+        app.dependency_overrides[get_session_service] = lambda: mock_session_svc
+
+        try:
+            response = client.post(
+                "/exec/programmatic",
+                json={
+                    "code": "result = await get_weather(city='NYC')",
+                    "tools": [
+                        {
+                            "name": "get_weather",
+                            "description": "Get weather",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {"city": {"type": "string"}},
+                            },
+                        }
+                    ],
+                },
+                headers=auth_headers,
+            )
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "tool_call_required"
+        assert "continuation_token" in data
+        assert isinstance(data["continuation_token"], str)
+        assert len(data["tool_calls"]) == 1
+
+        tool_call = data["tool_calls"][0]
+        assert "id" in tool_call
+        assert "name" in tool_call
+        assert "input" in tool_call
+        assert tool_call["name"] == "get_weather"
+
+    @patch("src.api.programmatic._get_ptc_service")
+    def test_ptc_continuation_flow(self, mock_get_service, client, auth_headers):
+        """Continuation with tool_results should return completed response."""
+        from src.models.programmatic import ProgrammaticExecResponse
+
+        mock_service = AsyncMock()
+        mock_service.continue_execution.return_value = ProgrammaticExecResponse(
+            status="completed",
+            session_id="ptc-cont-session",
+            stdout="Weather in NYC: 72F\n",
+            stderr="",
+        )
+        mock_get_service.return_value = mock_service
+
+        from src.dependencies.services import get_session_service
+
+        mock_session_svc = AsyncMock()
+        app.dependency_overrides[get_session_service] = lambda: mock_session_svc
+
+        try:
+            response = client.post(
+                "/exec/programmatic",
+                json={
+                    "continuation_token": "cont-token-xyz",
+                    "tool_results": [
+                        {
+                            "call_id": "call-abc",
+                            "result": {"temp": 72, "conditions": "sunny"},
+                            "is_error": False,
+                        }
+                    ],
+                },
+                headers=auth_headers,
+            )
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "completed"
+        assert data["stdout"] == "Weather in NYC: 72F\n"
+
+        mock_service.continue_execution.assert_called_once()
+
+    @patch("src.api.programmatic._get_ptc_service")
+    def test_ptc_error_tool_result(self, mock_get_service, client, auth_headers):
+        """Tool result with is_error=true should be handled correctly."""
+        from src.models.programmatic import ProgrammaticExecResponse
+
+        mock_service = AsyncMock()
+        mock_service.continue_execution.return_value = ProgrammaticExecResponse(
+            status="completed",
+            session_id="ptc-err-session",
+            stdout="Tool failed: API unavailable\n",
+            stderr="",
+        )
+        mock_get_service.return_value = mock_service
+
+        from src.dependencies.services import get_session_service
+
+        mock_session_svc = AsyncMock()
+        app.dependency_overrides[get_session_service] = lambda: mock_session_svc
+
+        try:
+            response = client.post(
+                "/exec/programmatic",
+                json={
+                    "continuation_token": "cont-token-err",
+                    "tool_results": [
+                        {
+                            "call_id": "call-fail",
+                            "result": None,
+                            "is_error": True,
+                            "error_message": "API unavailable",
+                        }
+                    ],
+                },
+                headers=auth_headers,
+            )
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        data = response.json()
+        # Response should be valid regardless of tool error
+        assert data["status"] in ("completed", "error")
+        mock_service.continue_execution.assert_called_once()

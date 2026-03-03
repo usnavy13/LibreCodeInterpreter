@@ -30,7 +30,7 @@ Get up and running in minutes by building the execution environment.
    docker build -t code-interpreter:nsjail .
    ```
 
-   This builds a single image containing all 12 language runtimes and nsjail for sandboxed execution.
+   This builds a single image containing all 13 language runtimes and nsjail for sandboxed execution.
 
 4. **Start the API**
 
@@ -55,7 +55,7 @@ The dashboard requires the master API key for authentication.
 
 ## Features
 
-- **Multi-language Support**: Execute code in 12 languages - Python, JavaScript, TypeScript, Go, Java, C, C++, PHP, Rust, R, Fortran, and D
+- **Multi-language Support**: Execute code in 13 languages - Python, JavaScript, TypeScript, Go, Java, C, C++, PHP, Rust, R, Fortran, D, and Bash
 - **Sub-50ms Python Execution**: Pre-warmed REPL sandboxes achieve ~20-40ms latency for simple Python code
 - **Sandbox Pool**: Pre-warmed nsjail sandboxes provide ~3ms acquisition time (vs 500-2000ms cold start)
 - **High Concurrency**: Thread-safe execution supporting 10+ concurrent requests
@@ -88,7 +88,7 @@ For a deep dive into the system design, components, and request flows, see [ARCH
 
 The API provides endpoints for code execution, file management, and session state control.
 
-- `POST /exec`: Execute code in one of the 12 supported languages.
+- `POST /exec`: Execute code in one of the 13 supported languages.
 - `POST /upload`: Upload files for processing.
 - `GET /download`: Retrieve generated files.
 
@@ -98,7 +98,7 @@ For detailed information on all endpoints and specific language notes, see [ARCH
 
 ## Supported Languages
 
-We support 12 programming languages including Python, JavaScript, TypeScript, Go, Rust, and more. Each language has optimized execution paths and resource limits.
+We support 13 programming languages including Python, JavaScript, TypeScript, Go, Rust, Bash, and more. Each language has optimized execution paths and resource limits.
 
 See the [Supported Languages table](docs/ARCHITECTURE.md#supported-languages) for details on versions and included libraries.
 

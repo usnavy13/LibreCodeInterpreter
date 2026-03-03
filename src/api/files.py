@@ -226,11 +226,9 @@ async def list_files(
             # Return full file details - LibreChat format
             detailed_files = []
             for file_info in files:
-                # Return sanitized filename to match container
-                sanitized_name = OutputProcessor.sanitize_filename(file_info.filename)
                 detailed_files.append(
                     {
-                        "name": sanitized_name,
+                        "name": f"{session_id}/{file_info.file_id}",
                         "id": file_info.file_id,
                         "session_id": session_id,
                         "content": None,  # Not returned in list

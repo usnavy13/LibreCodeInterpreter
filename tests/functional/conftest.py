@@ -72,6 +72,10 @@ LANGUAGE_SNIPPETS: Dict[str, Tuple[str, str]] = {
         'import std.stdio;\nvoid main(){ int s=0; foreach(i; 1..11) s+=i; writeln("d: sum(1..10)=", s); }',
         "55",
     ),
+    "bash": (
+        's=0; for i in $(seq 1 10); do s=$((s + i)); done; echo "bash: sum(1..10)=$s"',
+        "55",
+    ),
 }
 
 
@@ -128,7 +132,7 @@ def unique_entity_id() -> str:
 
 @pytest.fixture(params=list(LANGUAGE_SNIPPETS.keys()))
 def language_test_case(request):
-    """Parametrized fixture for all 12 languages."""
+    """Parametrized fixture for all 13 languages."""
     lang = request.param
     code, expected = LANGUAGE_SNIPPETS[lang]
     return {"lang": lang, "code": code, "expected_output": expected}

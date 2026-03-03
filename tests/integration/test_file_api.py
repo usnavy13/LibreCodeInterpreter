@@ -139,9 +139,8 @@ class TestFileDownload:
             follow_redirects=False,
         )
 
-        # Should redirect to MinIO presigned URL
-        assert download_response.status_code == 302
-        assert "location" in download_response.headers
+        # Should return file content directly
+        assert download_response.status_code == 200
 
     def test_download_nonexistent_file(self, client, auth_headers, unique_session_id):
         """Test downloading a file that doesn't exist."""

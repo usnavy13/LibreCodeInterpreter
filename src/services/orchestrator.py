@@ -217,9 +217,16 @@ class ExecutionOrchestrator:
 
         Session lookup priority:
         1. Use session_id from request (for explicit session continuity/state persistence)
-        2. Reuse session from file references (for file-based workflows)
+        2. Reuse session from file references, but ONLY if the session belongs to
+           the same user (prevents cross-user session sharing via shared agent files)
         3. Reuse session by entity_id (for session continuity within same entity)
         4. Create new session
+
+        SECURITY: File references carry a session_id that indicates where the file
+        is stored, NOT which session to execute in. When multiple users share an
+        agent with attached files, they all reference the same upload session.
+        Blindly reusing that session would leak state between users. We only reuse
+        a file-referenced session if its user_id matches the current request.
         """
         request = ctx.request
 
@@ -240,8 +247,12 @@ class ExecutionOrchestrator:
                     error=str(e),
                 )
 
-        # Priority 2: Try to reuse session from files array
-        if request.files:
+        # Priority 2: Try to reuse session from files array, but only if the
+        # session was created by the same user. This enables same-user session
+        # continuity (ToolNode injects files from previous execution) while
+        # preventing cross-user sharing (agent files reference a shared upload
+        # session that has no user_id).
+        if request.files and request.user_id:
             for file_ref in request.files:
                 if file_ref.session_id:
                     try:
@@ -249,11 +260,17 @@ class ExecutionOrchestrator:
                             file_ref.session_id
                         )
                         if existing and existing.status.value == "active":
-                            logger.debug(
-                                "Reusing session from file reference",
-                                session_id=file_ref.session_id,
+                            session_user = (
+                                existing.metadata.get("user_id")
+                                if existing.metadata
+                                else None
                             )
-                            return file_ref.session_id
+                            if session_user and session_user == request.user_id:
+                                logger.debug(
+                                    "Reusing session from file reference (same user)",
+                                    session_id=file_ref.session_id[:12],
+                                )
+                                return file_ref.session_id
                     except Exception as e:
                         logger.warning(
                             "Error looking up session",
@@ -261,7 +278,11 @@ class ExecutionOrchestrator:
                             error=str(e),
                         )
 
-        # Try to reuse session by entity_id (enables session continuity)
+        # Priority 3: Try to reuse session by entity_id.
+        # Only use explicit entity_id — do NOT fall back to user_id.
+        # LibreChat manages session continuity via file references (priority 2),
+        # not entity_id. Using user_id here would incorrectly share sessions
+        # across different conversations of the same user.
         if request.entity_id:
             try:
                 entity_sessions = await self.session_service.list_sessions_by_entity(

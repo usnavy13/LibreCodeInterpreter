@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - nsjail-based sandboxing for code execution (replaces Docker socket-based approach)
-- Single unified Docker image with all 12 language runtimes
+- Single unified Docker image with all 13 language runtimes
 - Hour and day periods for execution heatmap visualizations
 - MyPy type checking integration with comprehensive type hints
 - Dynamic Content Security Policy headers based on request path
@@ -33,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 #### Core Features
-- Multi-language code execution supporting 12 languages: Python, JavaScript, TypeScript, Go, Java, C, C++, PHP, Rust, R, Fortran, and D
+- Multi-language code execution supporting 13 languages: Python, JavaScript, TypeScript, Go, Java, C, C++, PHP, Rust, R, Fortran, D, and Bash
 - FastAPI-based REST API with interactive documentation
 - Sandboxed execution environments with comprehensive security controls
 - Redis-based session management with automatic cleanup

@@ -276,6 +276,187 @@ class TestFileRefResponse:
         assert ref.session_id is None
 
 
+class TestAgentFileSessionIsolation:
+    """Tests for session isolation when files reference shared agent sessions.
+
+    When multiple users share an agent with attached files, the file references
+    carry the upload session_id. The orchestrator must NOT blindly reuse that
+    session, as it would leak state between users. It should only reuse a
+    file-referenced session if user_id matches.
+    """
+
+    @pytest.mark.asyncio
+    async def test_agent_file_does_not_reuse_upload_session(
+        self, orchestrator, mock_session_service
+    ):
+        """Files reference an upload session (no user_id). New session should be created."""
+        from src.models.exec import RequestFile
+
+        # Upload session S1 has no user_id in metadata (agent upload sessions don't)
+        upload_session = Session(
+            session_id="upload-session-S1",
+            status=SessionStatus.ACTIVE,
+            created_at=datetime.now(),
+            last_activity=datetime.now(),
+            expires_at=datetime.now(),
+            files={},
+            metadata={},  # No user_id
+            working_directory="/workspace",
+        )
+        mock_session_service.get_session = AsyncMock(return_value=upload_session)
+
+        request = ExecRequest(
+            code="print('hello')",
+            lang="py",
+            user_id="userA",
+            files=[
+                RequestFile(
+                    id="file-1", session_id="upload-session-S1", name="data.csv"
+                ),
+            ],
+        )
+        ctx = ExecutionContext(request=request, request_id="test-isolation-1")
+
+        session_id = await orchestrator._get_or_create_session(ctx)
+
+        # Should NOT reuse S1 (no user_id in session metadata)
+        assert session_id == "new-session-456"
+        mock_session_service.create_session.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_same_user_reuses_own_session(
+        self, orchestrator, mock_session_service
+    ):
+        """Files reference a session created by the same user. Should reuse it."""
+        from src.models.exec import RequestFile
+
+        # Session S2 has user_id: "userA" in metadata
+        user_session = Session(
+            session_id="user-session-S2",
+            status=SessionStatus.ACTIVE,
+            created_at=datetime.now(),
+            last_activity=datetime.now(),
+            expires_at=datetime.now(),
+            files={},
+            metadata={"user_id": "userA"},
+            working_directory="/workspace",
+        )
+        mock_session_service.get_session = AsyncMock(return_value=user_session)
+
+        request = ExecRequest(
+            code="print('hello')",
+            lang="py",
+            user_id="userA",
+            files=[
+                RequestFile(
+                    id="file-1", session_id="user-session-S2", name="data.csv"
+                ),
+            ],
+        )
+        ctx = ExecutionContext(request=request, request_id="test-isolation-2")
+
+        session_id = await orchestrator._get_or_create_session(ctx)
+
+        # Should reuse S2 (same user_id)
+        assert session_id == "user-session-S2"
+        mock_session_service.create_session.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_different_user_does_not_reuse_session(
+        self, orchestrator, mock_session_service
+    ):
+        """Files reference a session owned by a different user. New session should be created."""
+        from src.models.exec import RequestFile
+
+        # Session S2 has user_id: "userA"
+        user_a_session = Session(
+            session_id="user-session-S2",
+            status=SessionStatus.ACTIVE,
+            created_at=datetime.now(),
+            last_activity=datetime.now(),
+            expires_at=datetime.now(),
+            files={},
+            metadata={"user_id": "userA"},
+            working_directory="/workspace",
+        )
+        mock_session_service.get_session = AsyncMock(return_value=user_a_session)
+
+        request = ExecRequest(
+            code="print('hello')",
+            lang="py",
+            user_id="userB",  # Different user
+            files=[
+                RequestFile(
+                    id="file-1", session_id="user-session-S2", name="data.csv"
+                ),
+            ],
+        )
+        ctx = ExecutionContext(request=request, request_id="test-isolation-3")
+
+        session_id = await orchestrator._get_or_create_session(ctx)
+
+        # Should NOT reuse S2 (different user_id)
+        assert session_id == "new-session-456"
+        mock_session_service.create_session.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_no_user_id_creates_new_session(
+        self, orchestrator, mock_session_service
+    ):
+        """Request without user_id should create a new session (no ownership check possible)."""
+        from src.models.exec import RequestFile
+
+        upload_session = Session(
+            session_id="upload-session-S1",
+            status=SessionStatus.ACTIVE,
+            created_at=datetime.now(),
+            last_activity=datetime.now(),
+            expires_at=datetime.now(),
+            files={},
+            metadata={},
+            working_directory="/workspace",
+        )
+        mock_session_service.get_session = AsyncMock(return_value=upload_session)
+
+        request = ExecRequest(
+            code="print('hello')",
+            lang="py",
+            # No user_id
+            files=[
+                RequestFile(
+                    id="file-1", session_id="upload-session-S1", name="data.csv"
+                ),
+            ],
+        )
+        ctx = ExecutionContext(request=request, request_id="test-isolation-4")
+
+        session_id = await orchestrator._get_or_create_session(ctx)
+
+        # Should create new session (priority 2 requires request.user_id)
+        assert session_id == "new-session-456"
+        mock_session_service.create_session.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_entity_id_not_fallback_to_user_id(
+        self, orchestrator, mock_session_service
+    ):
+        """user_id should NOT be used as fallback for entity_id in session lookup."""
+        request = ExecRequest(
+            code="print('hello')",
+            lang="py",
+            user_id="userA",
+            # No entity_id
+        )
+        ctx = ExecutionContext(request=request, request_id="test-isolation-5")
+
+        session_id = await orchestrator._get_or_create_session(ctx)
+
+        # list_sessions_by_entity should NOT be called (no entity_id)
+        mock_session_service.list_sessions_by_entity.assert_not_called()
+        # Should create a new session
+        assert session_id == "new-session-456"
+
+
 class TestExplicitFileMounting:
     """Tests for explicit file mounting behavior."""
 

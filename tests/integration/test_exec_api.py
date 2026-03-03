@@ -282,8 +282,8 @@ class TestExecEndpoint:
 
         response = client.post("/exec", json=request_data, headers=auth_headers)
 
-        # Should either return error or handle gracefully
-        assert response.status_code in [200, 400, 422]
+        # Should return 400 for unsupported language
+        assert response.status_code == 400
 
     def test_exec_empty_code(self, client, auth_headers):
         """Test executing empty code."""

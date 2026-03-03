@@ -23,6 +23,13 @@ from .files import (
     FileDeleteResponse,
 )
 from .exec import ExecRequest, ExecResponse, FileRef, RequestFile
+from .programmatic import (
+    PTCToolDefinition,
+    PTCToolCall,
+    PTCToolResult,
+    ProgrammaticExecRequest,
+    ProgrammaticExecResponse,
+)
 from .errors import (
     ErrorType,
     ErrorDetail,
@@ -58,6 +65,12 @@ __all__ = [
     "ExecResponse",
     "FileRef",
     "RequestFile",
+    # PTC models
+    "PTCToolDefinition",
+    "PTCToolCall",
+    "PTCToolResult",
+    "ProgrammaticExecRequest",
+    "ProgrammaticExecResponse",
     # Error models
     "ErrorType",
     "ErrorDetail",
