@@ -1,8 +1,7 @@
-"""Multi-language test scenarios for all 12 supported languages."""
+"""Multi-language test scenarios for all 13 supported languages."""
 
 from typing import List
 from .base import BaseScenario
-
 
 # Language-specific hello world and compute code
 LANGUAGE_CODE = {
@@ -149,6 +148,15 @@ void main() {
     long result = iota(0, 10000).map!(i => cast(long)i * i).sum;
     writeln("D compute result: ", result);
 }""",
+    },
+    "bash": {
+        "baseline": 'echo "Hello from Bash"',
+        "compute": """sum=0
+for i in $(seq 0 9999); do
+    sum=$((sum + i * i))
+done
+echo "Bash compute result: $sum"
+""",
     },
 }
 

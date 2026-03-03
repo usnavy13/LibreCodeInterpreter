@@ -7,7 +7,7 @@ This document provides detailed instructions for setting up the development envi
 ### Prerequisites
 
 - Python 3.11+
-- Docker Engine
+- Docker and docker compose (for running the API container, Redis, and MinIO)
 - Redis
 - MinIO (or S3-compatible storage)
 
@@ -43,7 +43,7 @@ This document provides detailed instructions for setting up the development envi
 5. **Start infrastructure services**
 
    ```bash
-   docker-compose up -d
+   docker compose up -d
    ```
 
 6. **Run the API server**
@@ -61,23 +61,20 @@ For detailed testing instructions, please refer to [TESTING.md](TESTING.md).
 # Run unit tests
 pytest tests/unit/
 
-# Run integration tests (requires Docker/Redis/MinIO)
+# Run integration tests (requires running API container, Redis, MinIO)
 pytest tests/integration/
 
 # Run all tests with coverage
 pytest --cov=src tests/
 ```
 
-## Building Docker Images
+## Building the Docker Image
 
-The API requires language-specific execution images.
+The API uses a single unified Docker image containing all 12 language runtimes and nsjail.
 
 ```bash
-# Build all language execution images
-cd docker && ./build-images.sh -p && cd ..
-
-# Build a single language image (e.g., Python)
-cd docker && ./build-images.sh -l python && cd ..
+# Build the unified image
+docker build -t code-interpreter:nsjail .
 ```
 
-For more details on container management, see [ARCHITECTURE.md](ARCHITECTURE.md).
+For more details on the sandbox architecture, see [ARCHITECTURE.md](ARCHITECTURE.md).

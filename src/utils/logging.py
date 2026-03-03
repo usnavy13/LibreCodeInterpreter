@@ -94,14 +94,16 @@ def setup_file_logging() -> None:
 def configure_third_party_loggers() -> None:
     """Configure logging levels for third-party libraries."""
     # Reduce noise from third-party libraries
-    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
-    logging.getLogger("docker").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("minio").setLevel(logging.WARNING)
 
-    # Enable access logs if configured
+    # Suppress uvicorn access logs - RequestLoggingMiddleware handles this
+    # with status-aware levels (DEBUG for 2xx, WARNING for 4xx, ERROR for 5xx).
+    # Set ENABLE_ACCESS_LOGS=true to re-enable uvicorn's native access logs.
     if settings.enable_access_logs:
         logging.getLogger("uvicorn.access").setLevel(logging.INFO)
+    else:
+        logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
     # Enable security logs if configured
     if settings.enable_security_logs:
@@ -111,7 +113,7 @@ def configure_third_party_loggers() -> None:
 def add_service_context(logger, method_name, event_dict):
     """Add service context information to log entries."""
     event_dict["service"] = "code-interpreter-api"
-    event_dict["version"] = "1.0.0"
+    event_dict["version"] = "1.2.0"
     return event_dict
 
 

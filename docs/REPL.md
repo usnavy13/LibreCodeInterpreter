@@ -4,7 +4,7 @@ This document describes the Python REPL (Read-Eval-Print Loop) server that enabl
 
 ## Overview
 
-The REPL server is a Python process that runs inside Docker containers, keeping the Python interpreter warm with common libraries pre-imported. This eliminates the ~3 second Python startup overhead on each execution.
+The REPL server is a Python process that runs inside nsjail sandboxes, keeping the Python interpreter warm with common libraries pre-imported. This eliminates the ~3 second Python startup overhead on each execution.
 
 ### Performance Impact
 
@@ -23,24 +23,24 @@ The REPL server is a Python process that runs inside Docker containers, keeping 
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                              Host (API Server)                               │
+│                         API Container (Host Process)                          │
 │                                                                             │
-│   src/services/container/repl_executor.py                                   │
+│   src/services/sandbox/repl_executor.py                                     │
 │   ┌───────────────────────────────────────────────────────────────────┐    │
 │   │  REPLExecutor                                                     │    │
-│   │  - Communicates via Docker attach socket                          │    │
+│   │  - Communicates via stdin/stdout pipe                             │    │
 │   │  - Sends JSON requests                                            │    │
 │   │  - Parses JSON responses                                          │    │
 │   │  - Handles timeouts and errors                                    │    │
 │   └───────────────────────────────────────────────────────────────────┘    │
 │                              │                                              │
 └──────────────────────────────┼──────────────────────────────────────────────┘
-                               │ Docker attach socket
+                               │ stdin/stdout pipe
                                ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                           Docker Container                                   │
+│                          nsjail Sandbox                                      │
 │                                                                             │
-│   docker/repl_server.py (PID 1)                                             │
+│   docker/repl_server.py (main process)                                      │
 │   ┌───────────────────────────────────────────────────────────────────┐    │
 │   │  REPL Server                                                      │    │
 │   │  - Pre-imports: numpy, pandas, matplotlib, scipy, sklearn, etc.  │    │
@@ -56,12 +56,12 @@ The REPL server is a Python process that runs inside Docker containers, keeping 
 
 ### Key Files
 
-| File               | Location                                  | Purpose                              |
-| ------------------ | ----------------------------------------- | ------------------------------------ |
-| `repl_server.py`   | `docker/repl_server.py`                   | In-container REPL server             |
-| `repl_executor.py` | `src/services/container/repl_executor.py` | Host-side communication              |
-| `entrypoint.sh`    | `docker/entrypoint.sh`                    | Mode-aware container startup         |
-| `runner.py`        | `src/services/execution/runner.py`        | Routes to REPL or standard execution |
+| File               | Location                                 | Purpose                              |
+| ------------------ | ---------------------------------------- | ------------------------------------ |
+| `repl_server.py`   | `docker/repl_server.py`                  | In-sandbox REPL server               |
+| `repl_executor.py` | `src/services/sandbox/repl_executor.py`  | Host-side communication              |
+| `entrypoint.sh`    | `docker/entrypoint.sh`                   | Mode-aware sandbox startup           |
+| `runner.py`        | `src/services/execution/runner.py`       | Routes to REPL or standard execution |
 
 ---
 
@@ -69,9 +69,9 @@ The REPL server is a Python process that runs inside Docker containers, keeping 
 
 ### Communication Channel
 
-The REPL uses Docker attach socket (not exec) for communication:
+The REPL uses stdin/stdout pipes for communication:
 
-- **Attach socket**: Connects to container's stdin/stdout
+- **Subprocess pipe**: Connects to sandbox process's stdin/stdout
 - **JSON framing**: Messages delimited by special markers
 - **Bidirectional**: Request in, response out
 
@@ -173,8 +173,8 @@ import sys
 
 ### Notes
 
-- Imports are done at container startup (during pool warmup)
-- Import time is amortized across all requests to that container
+- Imports are done at sandbox startup (during pool warmup)
+- Import time is amortized across all requests to that sandbox
 - User can still import additional libraries in their code
 
 ---
@@ -248,37 +248,37 @@ REPL_ENABLED=false
 
 When disabled:
 
-- Python uses standard execution (docker exec)
+- Python uses standard one-shot nsjail execution
 - Startup overhead ~3 seconds per request
 - State persistence still works (via file-based serialization)
 
 ---
 
-## Container Lifecycle
+## Sandbox Lifecycle
 
 ### Startup Sequence
 
-1. Container created with `repl_server.py` as entrypoint
+1. nsjail sandbox created with `repl_server.py` as the main process
 2. REPL server initializes and pre-imports libraries (~10-15 seconds)
 3. REPL server writes "ready" marker to stdout
-4. Container pool marks container as available
-5. Container waits for requests on stdin
+4. Sandbox pool marks sandbox as available
+5. Sandbox waits for requests on stdin
 
 ### Request Processing
 
-1. REPLExecutor sends JSON request via attach socket
+1. REPLExecutor sends JSON request via stdin pipe
 2. REPL server reads until delimiter
 3. REPL server executes code in namespace
 4. REPL server captures output and state
 5. REPL server sends JSON response
 6. REPLExecutor parses response
 
-### Container Destruction
+### Sandbox Destruction
 
 After each request:
 
-- Container is destroyed immediately
-- No container reuse (fresh state each request)
+- Sandbox is destroyed immediately
+- No sandbox reuse (fresh state each request)
 - Pool replenishes in background
 
 ---
@@ -295,7 +295,7 @@ try:
         timeout=execution_timeout
     )
 except asyncio.TimeoutError:
-    # Container is killed, new container acquired for retry
+    # Sandbox is killed, new sandbox acquired for retry
     raise ExecutionTimeoutError("Execution timed out")
 ```
 
@@ -345,10 +345,10 @@ If state cannot be serialized:
 
 ### REPL Not Starting
 
-1. **Check container logs**:
+1. **Check API container logs**:
 
    ```bash
-   docker logs <container_id>
+   docker logs code-interpreter-api
    ```
 
 2. **Check warmup timeout**:
@@ -359,18 +359,18 @@ If state cannot be serialized:
    ```
 
 3. **Check memory**:
-   REPL requires ~150MB for pre-imports. Ensure container has enough memory.
+   REPL requires ~150MB for pre-imports. Ensure the API container has enough memory.
 
 ### High Latency
 
-1. **Check attach socket health**:
+1. **Check sandbox health**:
 
    ```bash
-   curl https://localhost/health/detailed | jq '.containers'
+   curl https://localhost/health/detailed | jq '.sandbox'
    ```
 
 2. **Check for blocking operations**:
-   User code with network or disk I/O can block the REPL.
+   User code with disk I/O can block the REPL.
 
 3. **Check state size**:
    Large state causes serialization overhead. Keep state < 1MB for best performance.
@@ -396,14 +396,14 @@ If state cannot be serialized:
 ### Testing REPL Locally
 
 ```bash
-# Build Python image
-cd docker && ./build-images.sh -l python
+# Build the unified image
+docker build -t code-interpreter:nsjail .
 
-# Run container with REPL
-docker run -it --rm code-interp-python:latest
+# Start the API with docker compose
+docker compose up -d
 
-# In container, REPL server starts automatically
-# Send test request via stdin
+# Check REPL health
+curl -sk https://localhost/health/detailed | jq '.sandbox'
 ```
 
 ### Debugging REPL Server
@@ -429,7 +429,7 @@ PRELOAD_MODULES = [
 ]
 ```
 
-Remember to rebuild the Docker image after changes.
+Remember to rebuild the unified Docker image after changes (`docker build -t code-interpreter:nsjail .`).
 
 ---
 

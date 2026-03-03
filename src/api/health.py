@@ -1,11 +1,13 @@
 """Health check and monitoring endpoints."""
 
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, HTTPException, Depends, Query
 from fastapi.responses import JSONResponse
 import structlog
 
 from ..services.health import health_service, HealthStatus
-from ..services.metrics import metrics_collector
+from ..services.metrics import metrics_service
 from ..dependencies.auth import verify_api_key
 from ..config import settings
 
@@ -18,8 +20,7 @@ async def basic_health_check():
     """Basic health check endpoint that doesn't require authentication."""
     return {
         "status": "healthy",
-        "version": "1.0.0",
-        "timestamp": "2025-01-18T00:00:00Z",
+        "version": "1.2.0",
         "service": "code-interpreter-api",
     }
 
@@ -138,11 +139,11 @@ async def minio_health_check(_: str = Depends(verify_api_key)):
         )
 
 
-@router.get("/health/docker", summary="Docker health check")
-async def docker_health_check(_: str = Depends(verify_api_key)):
-    """Check Docker daemon connectivity and performance."""
+@router.get("/health/nsjail", summary="nsjail health check")
+async def nsjail_health_check(_: str = Depends(verify_api_key)):
+    """Check nsjail sandbox availability and configuration."""
     try:
-        result = await health_service.check_docker()
+        result = await health_service.check_nsjail()
 
         if result.status == HealthStatus.UNHEALTHY:
             return JSONResponse(status_code=503, content=result.to_dict())
@@ -150,13 +151,13 @@ async def docker_health_check(_: str = Depends(verify_api_key)):
             return JSONResponse(status_code=200, content=result.to_dict())
 
     except Exception as e:
-        logger.error("Docker health check failed", error=str(e))
+        logger.error("nsjail health check failed", error=str(e))
         return JSONResponse(
             status_code=503,
             content={
-                "service": "docker",
+                "service": "nsjail",
                 "status": "unhealthy",
-                "error": str(e) if settings.api_debug else "Docker check failed",
+                "error": str(e) if settings.api_debug else "nsjail check failed",
             },
         )
 
@@ -166,9 +167,9 @@ async def get_metrics(_: str = Depends(verify_api_key)):
     """Get system metrics and statistics."""
     try:
         return {
-            "execution_statistics": metrics_collector.get_execution_statistics(),
-            "api_statistics": metrics_collector.get_api_statistics(),
-            "system_metrics": metrics_collector.get_system_metrics(),
+            "execution_statistics": metrics_service.get_execution_statistics(),
+            "api_statistics": metrics_service.get_api_statistics(),
+            "system_metrics": metrics_service.get_system_metrics(),
         }
 
     except Exception as e:
@@ -180,7 +181,7 @@ async def get_metrics(_: str = Depends(verify_api_key)):
 async def get_execution_metrics(_: str = Depends(verify_api_key)):
     """Get code execution metrics and statistics."""
     try:
-        return metrics_collector.get_execution_statistics()
+        return metrics_service.get_execution_statistics()
 
     except Exception as e:
         logger.error("Failed to get execution metrics", error=str(e))
@@ -193,7 +194,7 @@ async def get_execution_metrics(_: str = Depends(verify_api_key)):
 async def get_api_metrics(_: str = Depends(verify_api_key)):
     """Get API request metrics and statistics."""
     try:
-        return metrics_collector.get_api_statistics()
+        return metrics_service.get_api_statistics()
 
     except Exception as e:
         logger.error("Failed to get API metrics", error=str(e))
@@ -209,7 +210,7 @@ async def get_service_status(_: str = Depends(verify_api_key)):
         overall_status = health_service.get_overall_status(service_results)
 
         # Get basic metrics
-        system_metrics = metrics_collector.get_system_metrics()
+        system_metrics = metrics_service.get_system_metrics()
 
         return {
             "overall_status": overall_status.value,
@@ -256,25 +257,19 @@ async def get_detailed_metrics(
         Summary metrics, language breakdown, and pool statistics
     """
     try:
-        from ..services.detailed_metrics import get_detailed_metrics_service
+        now = datetime.now(timezone.utc)
+        start = now - timedelta(hours=hours)
 
-        service = get_detailed_metrics_service()
-
-        # Get summary
-        summary = await service.get_summary()
-
-        # Get language stats
-        language_stats = await service.get_language_stats(hours=hours)
-
-        # Get pool stats
-        pool_stats = await service.get_pool_stats()
+        summary = await metrics_service.get_summary_stats(start=start, end=now)
+        top_langs = await metrics_service.get_top_languages(
+            start=start, end=now, limit=10
+        )
+        pool_stats = metrics_service.get_pool_stats()
 
         return {
-            "summary": summary.to_dict(),
-            "by_language": {
-                lang: stats.to_dict() for lang, stats in language_stats.items()
-            },
-            "pool_stats": pool_stats.to_dict(),
+            "summary": summary,
+            "by_language": {lang["language"]: lang for lang in top_langs},
+            "pool_stats": pool_stats,
             "period_hours": hours,
         }
 
@@ -296,20 +291,23 @@ async def get_language_metrics(
         Execution counts, average times, and error rates per language
     """
     try:
-        from ..services.detailed_metrics import get_detailed_metrics_service
+        now = datetime.now(timezone.utc)
+        start = now - timedelta(hours=hours)
 
-        service = get_detailed_metrics_service()
-        language_stats = await service.get_language_stats(hours=hours)
+        lang_data = await metrics_service.get_language_usage(start=start, end=now)
+        by_language = lang_data.get("by_language", {})
 
-        # Sort by execution count
-        sorted_stats = sorted(
-            language_stats.values(), key=lambda x: x.execution_count, reverse=True
-        )
+        languages = [
+            {"language": lang, "execution_count": count}
+            for lang, count in sorted(
+                by_language.items(), key=lambda x: x[1], reverse=True
+            )
+        ]
 
         return {
-            "languages": [stats.to_dict() for stats in sorted_stats],
+            "languages": languages,
             "period_hours": hours,
-            "total_languages": len(sorted_stats),
+            "total_languages": len(languages),
         }
 
     except Exception as e:
@@ -334,14 +332,16 @@ async def get_api_key_metrics(
         Execution counts, success rates, and resource usage for the key
     """
     try:
-        from ..services.detailed_metrics import get_detailed_metrics_service
+        now = datetime.now(timezone.utc)
+        start = now - timedelta(hours=hours)
 
-        service = get_detailed_metrics_service()
-        stats = await service.get_api_key_stats(key_hash, hours=hours)
+        stats = await metrics_service.get_summary_stats(
+            start=start, end=now, api_key_hash=key_hash
+        )
 
         return {
             "api_key_hash": key_hash,
-            "stats": stats.to_dict(),
+            "stats": stats,
             "period_hours": hours,
         }
 
@@ -352,20 +352,15 @@ async def get_api_key_metrics(
         )
 
 
-@router.get("/metrics/pool", summary="Container pool metrics")
+@router.get("/metrics/pool", summary="Sandbox pool metrics")
 async def get_pool_metrics(_: str = Depends(verify_api_key)):
-    """Get container pool statistics.
+    """Get sandbox pool statistics.
 
     Returns:
         Pool hit rates, acquisition times, and exhaustion events
     """
     try:
-        from ..services.detailed_metrics import get_detailed_metrics_service
-
-        service = get_detailed_metrics_service()
-        pool_stats = await service.get_pool_stats()
-
-        return pool_stats.to_dict()
+        return metrics_service.get_pool_stats()
 
     except Exception as e:
         logger.error("Failed to get pool metrics", error=str(e))

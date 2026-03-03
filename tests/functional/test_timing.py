@@ -115,20 +115,3 @@ class TestFileTiming:
         assert latency < 5.0, f"Download took {latency:.1f}s, expected < 5s"
 
 
-class TestStateTiming:
-    """Test state operation timing."""
-
-    @pytest.mark.asyncio
-    async def test_state_info_under_2s(
-        self, async_client, auth_headers, unique_session_id
-    ):
-        """State info check responds within 2 seconds."""
-        start = time.perf_counter()
-        response = await async_client.get(
-            f"/state/{unique_session_id}/info",
-            headers=auth_headers,
-        )
-        latency = time.perf_counter() - start
-
-        assert response.status_code == 200
-        assert latency < 2.0, f"State info took {latency:.1f}s, expected < 2s"

@@ -6,14 +6,14 @@ This document provides performance benchmarks, tuning recommendations, and monit
 
 ### Baseline Metrics (With Optimizations)
 
-The following metrics represent typical performance with all optimizations enabled (container pooling, REPL mode):
+The following metrics represent typical performance with all optimizations enabled (sandbox pooling, REPL mode):
 
 | Metric                         | Value      | Notes                           |
 | ------------------------------ | ---------- | ------------------------------- |
 | **Python execution (simple)**  | 20-40ms    | With REPL mode                  |
 | **Python execution (complex)** | 50-200ms   | Depends on code complexity      |
-| **JavaScript execution**       | 50-100ms   | With container pool             |
-| **Container acquisition**      | ~3ms       | From pre-warmed pool            |
+| **JavaScript execution**       | 50-100ms   | One-shot nsjail execution       |
+| **Sandbox acquisition**        | ~3ms       | From pre-warmed pool            |
 | **Cold start (no pool)**       | 500-2000ms | First request or pool exhausted |
 | **State serialization**        | 1-25ms     | Depends on state size           |
 | **File upload (1MB)**          | 50-100ms   | To MinIO                        |
@@ -30,14 +30,14 @@ The following metrics represent typical performance with all optimizations enabl
 
 ## Optimization Features
 
-### 1. Container Pool
+### 1. Sandbox Pool
 
-Pre-warmed containers eliminate cold start latency:
+Pre-warmed Python REPL sandboxes eliminate cold start latency:
 
 ```
 Without Pool:
-Request → Create Container → Start → Execute → Destroy
-         [~500-2000ms]      [~100ms] [~50ms]   [~50ms]
+Request → Create Sandbox → Start nsjail → Execute → Destroy
+         [~500-2000ms]     [~100ms]       [~50ms]   [~50ms]
          Total: ~700-2200ms
 
 With Pool:
@@ -50,11 +50,10 @@ Request → Acquire from Pool → Execute → Destroy → (Background: Replenish
 
 ```bash
 CONTAINER_POOL_ENABLED=true
-CONTAINER_POOL_MIN_SIZE=2           # Default per language
-CONTAINER_POOL_MAX_SIZE=15          # Default per language
-CONTAINER_POOL_PY_MIN=5             # Python-specific minimum
-CONTAINER_POOL_PY_MAX=20            # Python-specific maximum
+CONTAINER_POOL_PY=5                 # Number of pre-warmed Python REPLs
 ```
+
+**Note:** Only Python supports REPL pooling. All other languages use one-shot nsjail execution.
 
 ### 2. REPL Mode (Python)
 
@@ -102,20 +101,20 @@ REDIS_SOCKET_CONNECT_TIMEOUT=5
 
 ### Pool Size Recommendations
 
-| Usage Pattern          | Python Min/Max | JS Min/Max | Other Min/Max |
-| ---------------------- | -------------- | ---------- | ------------- |
-| Light (< 10 req/min)   | 2/5            | 1/3        | 1/2           |
-| Medium (10-50 req/min) | 5/15           | 2/8        | 2/5           |
-| Heavy (> 50 req/min)   | 10/30          | 5/15       | 3/10          |
+| Usage Pattern          | Python Pool Size |
+| ---------------------- | ---------------- |
+| Light (< 10 req/min)   | 2-5              |
+| Medium (10-50 req/min) | 5-15             |
+| Heavy (> 50 req/min)   | 10-30            |
 
 **Trade-offs:**
 
-- Higher min = more memory usage, faster warm responses
-- Higher max = handles bursts better, more resource usage
+- Higher pool size = more memory usage, faster warm responses
+- Non-Python languages use one-shot nsjail execution (no pooling)
 
 ### Memory Allocation
 
-Each container uses memory:
+Each sandbox uses memory:
 
 | Language          | Base Memory | With Code | Recommendation |
 | ----------------- | ----------- | --------- | -------------- |
@@ -128,7 +127,7 @@ Each container uses memory:
 **Configuration:**
 
 ```bash
-MAX_MEMORY_MB=512  # Default per container
+MAX_MEMORY_MB=512  # Default per sandbox
 ```
 
 ### State Persistence Tuning
@@ -159,7 +158,7 @@ Request parsing             ~1ms
 Authentication              ~1ms
 Session lookup              ~2ms
 State load (if exists)      ~3ms
-Container acquire           ~3ms
+Sandbox acquire             ~3ms
 REPL communication          ~5ms
 Code execution              ~20ms
 State save                  ~3ms
@@ -176,11 +175,11 @@ Component                   Time
 Request parsing             ~1ms
 Authentication              ~1ms
 Session lookup              ~2ms
-File upload to container    ~10ms (1MB file)
-Container acquire           ~3ms
+File upload to sandbox      ~10ms (1MB file)
+Sandbox acquire             ~3ms
 Code execution              ~50ms
 Output file detection       ~5ms
-File download from container ~10ms
+File download from sandbox  ~10ms
 MinIO upload                ~20ms
 Response building           ~2ms
 ──────────────────────────────────
@@ -205,9 +204,9 @@ The API handles concurrent requests efficiently:
 
 **Bottlenecks at high concurrency:**
 
-1. Container pool exhaustion (wait for replenishment)
+1. Sandbox pool exhaustion (wait for replenishment)
 2. Redis connection pool saturation
-3. Docker daemon throughput
+3. nsjail process throughput
 
 ### Horizontal Scaling
 
@@ -216,7 +215,7 @@ For high-throughput deployments:
 1. **Multiple API instances**: Load balance across instances
 2. **Shared Redis**: All instances use same Redis for sessions/state
 3. **Shared MinIO**: All instances use same MinIO for files
-4. **Separate Docker hosts**: Distribute container load
+4. **Separate hosts**: Distribute sandbox load across API instances
 
 ```
                     ┌─────────────────┐
@@ -226,7 +225,7 @@ For high-throughput deployments:
              ▼               ▼               ▼
       ┌──────────┐    ┌──────────┐    ┌──────────┐
       │  API 1   │    │  API 2   │    │  API 3   │
-      │+ Docker  │    │+ Docker  │    │+ Docker  │
+      │+ nsjail  │    │+ nsjail  │    │+ nsjail  │
       └────┬─────┘    └────┬─────┘    └────┬─────┘
            │               │               │
            └───────────────┼───────────────┘
@@ -311,7 +310,7 @@ Recommended alert conditions:
    curl https://localhost/metrics | jq '.pool'
    ```
 
-   If pool is frequently exhausted, increase `CONTAINER_POOL_MAX_SIZE`.
+   If pool is frequently exhausted, increase `CONTAINER_POOL_PY`.
 
 2. **Check Redis latency**:
 
@@ -325,36 +324,35 @@ Recommended alert conditions:
    ```bash
    curl https://localhost/health/detailed | jq '.repl'
    ```
-   If unhealthy, check REPL server logs in containers.
+   If unhealthy, check REPL server logs.
 
 ### Pool Exhaustion
 
 1. **Increase pool size**:
 
    ```bash
-   CONTAINER_POOL_MAX_SIZE=30
-   CONTAINER_POOL_PY_MAX=40
+   CONTAINER_POOL_PY=15
    ```
 
 2. **Check for slow executions**:
-   Long-running code blocks containers. Consider timeout reduction:
+   Long-running code blocks sandboxes. Consider timeout reduction:
 
    ```bash
    MAX_EXECUTION_TIME=15
    ```
 
-3. **Check container cleanup**:
-   Containers should be destroyed immediately. Check for zombie containers:
+3. **Check sandbox cleanup**:
+   Sandboxes should be destroyed immediately. Check for stale sandbox directories:
    ```bash
-   docker ps -a --filter "label=com.code-interpreter.managed=true"
+   ls -la /var/lib/code-interpreter/sandboxes/
    ```
 
 ### Memory Issues
 
-1. **Check container memory**:
+1. **Check API container memory**:
 
    ```bash
-   docker stats --no-stream
+   docker stats --no-stream code-interpreter-api
    ```
 
 2. **Reduce state size limit**:

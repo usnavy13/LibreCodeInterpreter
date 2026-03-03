@@ -5,7 +5,6 @@ from .session import (
     SessionStatus,
     SessionCreate,
     SessionResponse,
-    FileInfo as SessionFileInfo,
 )
 from .execution import (
     CodeExecution,
@@ -24,25 +23,22 @@ from .files import (
     FileDeleteResponse,
 )
 from .exec import ExecRequest, ExecResponse, FileRef, RequestFile
+from .programmatic import (
+    PTCToolDefinition,
+    PTCToolCall,
+    PTCToolResult,
+    ProgrammaticExecRequest,
+    ProgrammaticExecResponse,
+)
 from .errors import (
     ErrorType,
     ErrorDetail,
     ErrorResponse,
     CodeInterpreterException,
-    AuthenticationError,
-    AuthorizationError,
     ValidationError,
-    ResourceNotFoundError,
-    ResourceConflictError,
-    ResourceExhaustedError,
-    ExecutionError,
-    TimeoutError,
-    RateLimitError,
     ServiceUnavailableError,
-    ExternalServiceError,
 )
 from .pool import PooledContainer, PoolStats, PoolConfig
-from .state import StateInfo, StateUploadResponse
 
 __all__ = [
     # Session models
@@ -50,7 +46,6 @@ __all__ = [
     "SessionStatus",
     "SessionCreate",
     "SessionResponse",
-    "SessionFileInfo",
     # Execution models
     "CodeExecution",
     "ExecutionStatus",
@@ -70,27 +65,21 @@ __all__ = [
     "ExecResponse",
     "FileRef",
     "RequestFile",
+    # PTC models
+    "PTCToolDefinition",
+    "PTCToolCall",
+    "PTCToolResult",
+    "ProgrammaticExecRequest",
+    "ProgrammaticExecResponse",
     # Error models
     "ErrorType",
     "ErrorDetail",
     "ErrorResponse",
     "CodeInterpreterException",
-    "AuthenticationError",
-    "AuthorizationError",
     "ValidationError",
-    "ResourceNotFoundError",
-    "ResourceConflictError",
-    "ResourceExhaustedError",
-    "ExecutionError",
-    "TimeoutError",
-    "RateLimitError",
     "ServiceUnavailableError",
-    "ExternalServiceError",
     # Pool models
     "PooledContainer",
     "PoolStats",
     "PoolConfig",
-    # State models
-    "StateInfo",
-    "StateUploadResponse",
 ]

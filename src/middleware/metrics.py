@@ -2,58 +2,76 @@
 
 # Standard library imports
 import time
-from typing import Callable
 
 # Third-party imports
 import structlog
-from fastapi import Request, Response
-from starlette.middleware.base import BaseHTTPMiddleware
 
 # Local application imports
-from ..services.metrics import metrics_collector, APIMetrics
+from ..services.metrics import metrics_service, APIRequestMetrics
 from ..config import settings
 
 logger = structlog.get_logger(__name__)
 
 
-class MetricsMiddleware(BaseHTTPMiddleware):
-    """Optimized middleware to collect essential API request metrics."""
+class MetricsMiddleware:
+    """Optimized ASGI middleware to collect essential API request metrics."""
 
-    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
         """Process request and collect essential metrics."""
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
         start_time = time.time()
+        status_code = 500  # Default in case of error
 
-        # Process request
-        response = await call_next(request)
+        async def send_wrapper(message):
+            nonlocal status_code
+            if message["type"] == "http.response.start":
+                status_code = message.get("status", 500)
 
-        # Calculate response time
-        response_time_ms = (time.time() - start_time) * 1000
+                # Only add debug headers in debug mode
+                if settings.api_debug:
+                    response_time_ms = (time.time() - start_time) * 1000
+                    headers = list(message.get("headers", []))
+                    headers.append(
+                        (
+                            b"x-response-time-ms",
+                            str(round(response_time_ms, 2)).encode(),
+                        )
+                    )
+                    message = {**message, "headers": headers}
 
-        # Normalize endpoint path for metrics
-        normalized_endpoint = self._normalize_endpoint(request.url.path)
+            await send(message)
 
-        # Create simplified metrics record
-        api_metrics = APIMetrics(
-            endpoint=normalized_endpoint,
-            method=request.method,
-            status_code=response.status_code,
-            response_time_ms=response_time_ms,
-            request_size_bytes=0,  # Simplified - not essential for monitoring
-            response_size_bytes=0,  # Simplified - not essential for monitoring
-            user_agent=None,  # Simplified - not essential for core metrics
-        )
-
-        # Record metrics (fail silently to avoid impacting performance)
         try:
-            metrics_collector.record_api_metrics(api_metrics)
-        except Exception as e:
-            logger.error("Failed to record API metrics", error=str(e))
+            await self.app(scope, receive, send_wrapper)
+        finally:
+            # Calculate response time
+            response_time_ms = (time.time() - start_time) * 1000
 
-        # Only add debug headers in debug mode
-        if settings.api_debug:
-            response.headers["X-Response-Time-Ms"] = str(round(response_time_ms, 2))
+            # Normalize endpoint path for metrics
+            path = scope.get("path", "")
+            normalized_endpoint = self._normalize_endpoint(path)
 
-        return response
+            method = scope.get("method", "GET")
+
+            # Create simplified metrics record
+            api_metrics = APIRequestMetrics(
+                endpoint=normalized_endpoint,
+                method=method,
+                status_code=status_code,
+                response_time_ms=response_time_ms,
+            )
+
+            # Record metrics (fail silently to avoid impacting performance)
+            try:
+                metrics_service.record_api_request(api_metrics)
+            except Exception as e:
+                logger.error("Failed to record API metrics", error=str(e))
 
     def _normalize_endpoint(self, path: str) -> str:
         """Simplified endpoint path normalization."""

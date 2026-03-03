@@ -20,7 +20,7 @@ States are archived to MinIO when:
 import asyncio
 import io
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 
 import structlog
 from minio import Minio
@@ -187,10 +187,26 @@ class StateArchivalService:
 
             state_data = state_bytes.decode("utf-8")
 
-            # Restore to Redis for fast access
-            await self.state_service.save_state(
-                session_id, state_data, ttl_seconds=settings.state_ttl_seconds
-            )
+            # Only restore to Redis if under the size threshold
+            import base64 as _b64
+
+            raw_size = len(_b64.b64decode(state_data))
+            max_redis_bytes = settings.state_max_redis_size_mb * 1024 * 1024
+
+            if raw_size <= max_redis_bytes:
+                await self.state_service.save_state(
+                    session_id, state_data, ttl_seconds=settings.state_ttl_seconds
+                )
+            else:
+                # Too large for Redis — save only pointer
+                await self.state_service.save_state_pointer(
+                    session_id, state_data, ttl_seconds=settings.state_ttl_seconds
+                )
+                logger.info(
+                    "State too large for Redis, kept in MinIO only",
+                    session_id=session_id[:12],
+                    state_size_mb=round(raw_size / 1024 / 1024, 1),
+                )
 
             logger.info(
                 "Restored state from MinIO",
@@ -504,10 +520,16 @@ class StateArchivalService:
 
             state_data = state_bytes.decode("utf-8")
 
-            # Restore to Redis for fast access
-            await self.state_service.save_state_by_hash(
-                state_hash, state_data, ttl_seconds=settings.state_ttl_seconds
-            )
+            # Only restore to Redis if under the size threshold
+            import base64 as _b64
+
+            raw_size = len(_b64.b64decode(state_data))
+            max_redis_bytes = settings.state_max_redis_size_mb * 1024 * 1024
+
+            if raw_size <= max_redis_bytes:
+                await self.state_service.save_state_by_hash(
+                    state_hash, state_data, ttl_seconds=settings.state_ttl_seconds
+                )
 
             logger.debug(
                 "Restored state by hash from MinIO",

@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from typing import AsyncGenerator, Generator
 import redis.asyncio as redis
 from minio import Minio
-from docker import DockerClient
 from datetime import datetime, timezone
+from pathlib import Path
 import os
 
 # Set test environment before importing config
@@ -73,23 +73,34 @@ def mock_minio():
 
 
 @pytest.fixture
-def mock_docker():
-    """Mock Docker client for testing."""
-    mock_client = MagicMock(spec=DockerClient)
-    mock_container = MagicMock()
+def mock_sandbox_manager():
+    """Mock SandboxManager for testing."""
+    from src.services.sandbox.nsjail import SandboxInfo
 
-    # Mock container operations
-    mock_container.id = "test_container_id"
-    mock_container.status = "running"
-    mock_container.reload.return_value = None
-    mock_container.exec_run.return_value = MagicMock(exit_code=0, output=b"test output")
+    manager = AsyncMock()
+    manager.is_available.return_value = True
+    manager.get_initialization_error.return_value = None
 
-    mock_client.containers.create.return_value = mock_container
-    mock_client.containers.get.return_value = mock_container
-    mock_client.images.pull.return_value = None
-    mock_client.images.get.return_value = MagicMock()
+    # Create a mock SandboxInfo
+    mock_sandbox = SandboxInfo(
+        sandbox_id="test-sandbox-123",
+        sandbox_dir=Path("/tmp/test-sandbox"),
+        data_dir=Path("/tmp/test-sandbox/data"),
+        language="py",
+        session_id="test-session",
+        created_at=datetime.utcnow(),
+        repl_mode=False,
+    )
 
-    return mock_client
+    manager.create_sandbox.return_value = mock_sandbox
+    manager.destroy_sandbox.return_value = True
+    manager.copy_content_to_sandbox.return_value = True
+    manager.get_file_content_from_sandbox.return_value = b"test content"
+    manager.execute_command.return_value = (0, "output", "")
+    manager.get_user_id_for_language.return_value = 1001
+    manager.close.return_value = None
+
+    return manager
 
 
 @pytest.fixture
@@ -101,27 +112,12 @@ async def session_service(mock_redis):
 
 
 @pytest.fixture
-def execution_service():
+def execution_service(mock_sandbox_manager):
     """Create CodeExecutionService instance with mocked dependencies."""
     with patch(
-        "src.services.execution.runner.ContainerManager"
-    ) as mock_container_manager:
-        mock_manager = MagicMock()
-        mock_container_manager.return_value = mock_manager
-
-        # Mock container manager methods
-        mock_manager.get_image_for_language.return_value = "python:3.11"
-        mock_manager.pull_image_if_needed = AsyncMock()
-        mock_manager.create_container.return_value = MagicMock(id="test_container")
-        mock_manager.start_container = AsyncMock()
-        mock_manager.execute_command = AsyncMock(return_value=(0, "output", ""))
-        mock_manager.get_container_stats = AsyncMock(
-            return_value={"memory_usage_mb": 50}
-        )
-        mock_manager.stop_container = AsyncMock()
-        mock_manager.remove_container = AsyncMock()
-        mock_manager.close.return_value = None
-
+        "src.services.execution.runner.SandboxManager",
+        return_value=mock_sandbox_manager,
+    ):
         service = CodeExecutionService()
         yield service
 
@@ -173,8 +169,6 @@ def mock_settings():
         mock_settings.redis_url = None
         mock_settings.session_ttl_hours = 24
         mock_settings.session_cleanup_interval_minutes = 60
-        mock_settings.container_ttl_minutes = 5
-        mock_settings.container_cleanup_interval_minutes = 5
         mock_settings.minio_endpoint = "localhost:9000"
         mock_settings.minio_access_key = "test_key"
         mock_settings.minio_secret_key = "test_secret"
@@ -185,12 +179,9 @@ def mock_settings():
         mock_settings.max_file_size_mb = 10
         mock_settings.max_output_files = 10
 
-        # Add helper methods for backward compatibility
+        # Add helper methods
         mock_settings.get_session_ttl_minutes = (
             lambda: mock_settings.session_ttl_hours * 60
-        )
-        mock_settings.get_container_ttl_minutes = (
-            lambda: mock_settings.container_ttl_minutes
         )
 
         yield mock_settings

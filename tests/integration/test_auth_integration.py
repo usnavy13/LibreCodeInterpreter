@@ -57,29 +57,23 @@ class TestAPIKeyAuthentication:
             # Should not fail with authentication error
             assert response.status_code != 401
 
-    def test_valid_api_key_authorization_bearer(self, client, mock_services):
-        """Test authentication with valid API key in Authorization Bearer header."""
+    def test_authorization_bearer_rejected(self, client, mock_services):
+        """Test that Authorization Bearer header is not accepted."""
         headers = {"Authorization": "Bearer test-api-key-for-testing-12345"}
 
-        with patch("src.services.auth.settings") as mock_settings:
-            mock_settings.api_key = "test-api-key-for-testing-12345"
+        response = client.get("/sessions", headers=headers)
 
-            response = client.get("/sessions", headers=headers)
+        # Bearer auth is not supported; only x-api-key header is accepted
+        assert response.status_code == 401
 
-            # Should not fail with authentication error
-            assert response.status_code != 401
-
-    def test_valid_api_key_authorization_apikey(self, client, mock_services):
-        """Test authentication with valid API key in Authorization ApiKey header."""
+    def test_authorization_apikey_rejected(self, client, mock_services):
+        """Test that Authorization ApiKey header is not accepted."""
         headers = {"Authorization": "ApiKey test-api-key-for-testing-12345"}
 
-        with patch("src.services.auth.settings") as mock_settings:
-            mock_settings.api_key = "test-api-key-for-testing-12345"
+        response = client.get("/sessions", headers=headers)
 
-            response = client.get("/sessions", headers=headers)
-
-            # Should not fail with authentication error
-            assert response.status_code != 401
+        # ApiKey auth is not supported; only x-api-key header is accepted
+        assert response.status_code == 401
 
     def test_invalid_api_key(self, client, mock_services):
         """Test authentication with invalid API key."""
@@ -265,8 +259,8 @@ class TestAuthenticationEdgeCases:
             # Should either trim whitespace or reject
             assert response.status_code in [401, 200]  # Depends on implementation
 
-    def test_multiple_auth_headers(self, client, mock_services):
-        """Test request with multiple authentication headers."""
+    def test_multiple_auth_headers_only_x_api_key_used(self, client, mock_services):
+        """Test that only x-api-key header is used, Authorization header is ignored."""
         with patch("src.services.auth.settings") as mock_settings:
             mock_settings.api_key = "test-api-key-for-testing-12345"
 
@@ -277,7 +271,7 @@ class TestAuthenticationEdgeCases:
 
             response = client.get("/sessions", headers=headers)
 
-            # Should use one of the headers (typically x-api-key takes precedence)
+            # Only x-api-key is used, Authorization header is ignored
             assert response.status_code != 401
 
     def test_auth_header_injection_attempt(self, client, mock_services):

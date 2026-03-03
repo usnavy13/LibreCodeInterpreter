@@ -60,7 +60,21 @@ DEFAULT_THRESHOLDS = {
 }
 
 # Supported languages
-SUPPORTED_LANGUAGES = ["py", "js", "ts", "go", "java", "c", "cpp", "php", "rs", "r", "f90", "d"]
+SUPPORTED_LANGUAGES = [
+    "py",
+    "js",
+    "ts",
+    "go",
+    "java",
+    "c",
+    "cpp",
+    "php",
+    "rs",
+    "r",
+    "f90",
+    "d",
+    "bash",
+]
 
 
 @dataclass
@@ -112,11 +126,7 @@ ENVIRONMENTS: Dict[str, EnvironmentProfile] = {
 }
 
 
-def get_vm_type(
-    cpu_cores: int,
-    memory_gb: int,
-    provider: str = "azure"
-) -> str:
+def get_vm_type(cpu_cores: int, memory_gb: int, provider: str = "azure") -> str:
     """Get recommended VM type for given resources."""
     vm_maps = {
         "azure": AZURE_VM_TYPES,
@@ -162,7 +172,7 @@ class LoadTestDefaults:
     warmup_requests: int = 10
     timeout_seconds: int = 60
     monitor_interval_seconds: float = 1.0
-    enable_docker_stats: bool = True
+    enable_sandbox_stats: bool = True
     output_dir: str = "./load_test_results"
 
     # Thresholds

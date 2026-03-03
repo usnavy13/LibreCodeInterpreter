@@ -534,9 +534,9 @@ async def main():
     print("\n\n>>> New version testing complete.")
     print(">>> Results saved to /tmp/new_results.json")
     print("\n>>> To test the old version:")
-    print(">>>   1. docker compose down")
-    print(">>>   2. Edit docker-compose.yml to use 'codeinterperter-api:pro'")
-    print(">>>   3. docker compose up -d")
+    print(">>>   1. Stop the running API server")
+    print(">>>   2. Switch to the old version branch")
+    print(">>>   3. Start the API server again")
     print(">>>   4. Run this script again with --old flag")
 
 

@@ -11,8 +11,6 @@ from .services import (
     get_state_archival_service,
     FileServiceDep,
     SessionServiceDep,
-    StateServiceDep,
-    StateArchivalServiceDep,
 )
 
 __all__ = [
@@ -24,6 +22,4 @@ __all__ = [
     "get_state_archival_service",
     "FileServiceDep",
     "SessionServiceDep",
-    "StateServiceDep",
-    "StateArchivalServiceDep",
 ]

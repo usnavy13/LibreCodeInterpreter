@@ -167,18 +167,81 @@ class StateService:
 
             await pipe.execute()
 
-            logger.info(
+            logger.debug(
                 "Saved state to Redis",
                 session_id=session_id[:12],
                 state_size=len(raw_bytes),
                 hash=state_hash[:12],
-                ttl_seconds=ttl_seconds,
-                from_upload=from_upload,
             )
             return True, state_hash
         except Exception as e:
             logger.error(
                 "Failed to save state", session_id=session_id[:12], error=str(e)
+            )
+            return False, None
+
+    async def save_state_pointer(
+        self,
+        session_id: str,
+        state_b64: str,
+        ttl_seconds: Optional[int] = None,
+    ) -> Tuple[bool, Optional[str]]:
+        """Save only hash and metadata to Redis (state blob stored in MinIO).
+
+        Used when state exceeds the Redis size threshold. The full state
+        is stored in MinIO; Redis only holds the hash and metadata for
+        fast lookups. The orchestrator's _load_state MinIO fallback
+        handles retrieval.
+
+        Args:
+            session_id: Session identifier
+            state_b64: Base64-encoded state (used to compute hash/size, not stored in Redis)
+            ttl_seconds: TTL in seconds (default from settings)
+
+        Returns:
+            Tuple of (success: bool, state_hash: Optional[str])
+        """
+        if not state_b64:
+            return True, None
+
+        if ttl_seconds is None:
+            ttl_seconds = settings.state_ttl_seconds
+
+        try:
+            raw_bytes = base64.b64decode(state_b64)
+            state_hash = self.compute_hash(raw_bytes)
+            now = datetime.now(timezone.utc)
+
+            pipe = self.redis.pipeline(transaction=True)
+
+            # Save hash (small — just the SHA256 string)
+            pipe.setex(self._hash_key(session_id), ttl_seconds, state_hash)
+
+            # Save metadata with storage location marker
+            meta = json.dumps(
+                {
+                    "size_bytes": len(raw_bytes),
+                    "hash": state_hash,
+                    "created_at": now.isoformat(),
+                    "storage": "minio",
+                }
+            )
+            pipe.setex(self._meta_key(session_id), ttl_seconds, meta)
+
+            await pipe.execute()
+
+            logger.info(
+                "Saved state pointer to Redis (blob in MinIO)",
+                session_id=session_id[:12],
+                state_size=len(raw_bytes),
+                hash=state_hash[:12],
+            )
+            return True, state_hash
+        except Exception as e:
+            logger.error(
+                "Failed to save state pointer",
+                session_id=session_id[:12],
+                error=str(e),
             )
             return False, None
 

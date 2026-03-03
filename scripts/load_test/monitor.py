@@ -11,7 +11,7 @@ try:
 except ImportError:
     PSUTIL_AVAILABLE = False
 
-from .models import DockerStats, SystemMetrics
+from .models import SandboxStats, SystemMetrics
 
 
 class ResourceMonitor:
@@ -20,14 +20,14 @@ class ResourceMonitor:
     def __init__(
         self,
         sample_interval: float = 1.0,
-        enable_docker_stats: bool = True,
+        enable_sandbox_stats: bool = True,
     ):
         self.sample_interval = sample_interval
-        self.enable_docker_stats = enable_docker_stats
+        self.enable_sandbox_stats = enable_sandbox_stats
         self._running = False
         self._task: Optional[asyncio.Task] = None
         self._samples: List[SystemMetrics] = []
-        self._docker_samples: List[DockerStats] = []
+        self._sandbox_samples: List[SandboxStats] = []
         self._initial_disk_io: Optional[tuple] = None
         self._initial_net_io: Optional[tuple] = None
 
@@ -38,7 +38,7 @@ class ResourceMonitor:
 
         self._running = True
         self._samples = []
-        self._docker_samples = []
+        self._sandbox_samples = []
 
         # Capture initial I/O counters
         if PSUTIL_AVAILABLE:
@@ -71,10 +71,10 @@ class ResourceMonitor:
                 metrics = self._get_current_system_metrics()
                 self._samples.append(metrics)
 
-                if self.enable_docker_stats:
-                    docker_stats = await self._get_docker_stats()
-                    if docker_stats:
-                        self._docker_samples.append(docker_stats)
+                if self.enable_sandbox_stats:
+                    sandbox_stats = self._get_sandbox_stats()
+                    if sandbox_stats:
+                        self._sandbox_samples.append(sandbox_stats)
 
                 await asyncio.sleep(self.sample_interval)
             except asyncio.CancelledError:
@@ -121,80 +121,43 @@ class ResourceMonitor:
             network_recv_mb=net_recv_mb,
         )
 
-    async def _get_docker_stats(self) -> Optional[DockerStats]:
-        """Get Docker container statistics."""
+    def _get_sandbox_stats(self) -> Optional[SandboxStats]:
+        """Get nsjail sandbox process statistics."""
+        if not PSUTIL_AVAILABLE:
+            return None
+
         try:
-            # Run docker stats --no-stream in subprocess
-            proc = await asyncio.create_subprocess_exec(
-                "docker", "stats", "--no-stream", "--format",
-                '{"name":"{{.Name}}","cpu":"{{.CPUPerc}}","mem":"{{.MemUsage}}","mem_perc":"{{.MemPerc}}"}',
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5.0)
-
-            if proc.returncode != 0:
-                return None
-
-            containers = []
+            nsjail_procs = []
             total_cpu = 0.0
             total_memory_mb = 0.0
 
-            for line in stdout.decode().strip().split("\n"):
-                if not line:
-                    continue
+            for proc in psutil.process_iter(["pid", "name", "cpu_percent", "memory_info"]):
                 try:
-                    container = json.loads(line)
-                    # Parse CPU percentage (e.g., "0.50%")
-                    cpu_str = container.get("cpu", "0%").replace("%", "")
-                    cpu = float(cpu_str) if cpu_str else 0.0
-                    total_cpu += cpu
+                    if proc.info["name"] and "nsjail" in proc.info["name"]:
+                        cpu = proc.info.get("cpu_percent", 0.0) or 0.0
+                        mem_info = proc.info.get("memory_info")
+                        mem_mb = mem_info.rss / (1024 * 1024) if mem_info else 0.0
 
-                    # Parse memory usage (e.g., "50MiB / 1GiB")
-                    mem_str = container.get("mem", "0MiB / 0GiB").split("/")[0].strip()
-                    mem_mb = self._parse_memory_string(mem_str)
-                    total_memory_mb += mem_mb
+                        total_cpu += cpu
+                        total_memory_mb += mem_mb
 
-                    containers.append({
-                        "name": container.get("name", "unknown"),
-                        "cpu_percent": cpu,
-                        "memory_mb": mem_mb,
-                    })
-                except (json.JSONDecodeError, ValueError):
+                        nsjail_procs.append({
+                            "name": f"nsjail-{proc.info['pid']}",
+                            "cpu_percent": cpu,
+                            "memory_mb": mem_mb,
+                        })
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
                     continue
 
-            # Filter for code-interpreter containers only
-            code_interpreter_containers = [
-                c for c in containers
-                if "code-interpreter" in c["name"].lower() or "executor" in c["name"].lower()
-            ]
-
-            return DockerStats(
-                container_count=len(code_interpreter_containers),
-                total_cpu_percent=sum(c["cpu_percent"] for c in code_interpreter_containers),
-                total_memory_mb=sum(c["memory_mb"] for c in code_interpreter_containers),
-                containers=code_interpreter_containers,
+            return SandboxStats(
+                container_count=len(nsjail_procs),
+                total_cpu_percent=total_cpu,
+                total_memory_mb=total_memory_mb,
+                containers=nsjail_procs,
             )
 
-        except (asyncio.TimeoutError, FileNotFoundError):
-            return None
         except Exception:
             return None
-
-    def _parse_memory_string(self, mem_str: str) -> float:
-        """Parse memory string like '50MiB' or '1.5GiB' to MB."""
-        mem_str = mem_str.strip().upper()
-        try:
-            if "GIB" in mem_str or "GB" in mem_str:
-                return float(mem_str.replace("GIB", "").replace("GB", "")) * 1024
-            elif "MIB" in mem_str or "MB" in mem_str:
-                return float(mem_str.replace("MIB", "").replace("MB", ""))
-            elif "KIB" in mem_str or "KB" in mem_str:
-                return float(mem_str.replace("KIB", "").replace("KB", "")) / 1024
-            else:
-                return float(mem_str)
-        except ValueError:
-            return 0.0
 
     def _aggregate_metrics(self) -> SystemMetrics:
         """Aggregate all samples into summary metrics."""
@@ -221,21 +184,21 @@ class ResourceMonitor:
             network_recv_mb=last_sample.network_recv_mb,
         )
 
-    def get_docker_summary(self) -> Optional[DockerStats]:
-        """Get aggregated Docker statistics."""
-        if not self._docker_samples:
+    def get_sandbox_summary(self) -> Optional[SandboxStats]:
+        """Get aggregated sandbox statistics."""
+        if not self._sandbox_samples:
             return None
 
         # Calculate averages
-        container_counts = [s.container_count for s in self._docker_samples]
-        cpu_totals = [s.total_cpu_percent for s in self._docker_samples]
-        memory_totals = [s.total_memory_mb for s in self._docker_samples]
+        container_counts = [s.container_count for s in self._sandbox_samples]
+        cpu_totals = [s.total_cpu_percent for s in self._sandbox_samples]
+        memory_totals = [s.total_memory_mb for s in self._sandbox_samples]
 
-        return DockerStats(
+        return SandboxStats(
             container_count=max(container_counts) if container_counts else 0,
             total_cpu_percent=sum(cpu_totals) / len(cpu_totals) if cpu_totals else 0.0,
             total_memory_mb=max(memory_totals) if memory_totals else 0.0,
-            containers=[],  # Don't include individual container details in summary
+            containers=[],  # Don't include individual details in summary
         )
 
     def get_current_metrics(self) -> SystemMetrics:
@@ -243,19 +206,18 @@ class ResourceMonitor:
         return self._get_current_system_metrics()
 
 
-async def get_docker_container_count() -> int:
-    """Get count of running Docker containers."""
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "docker", "ps", "-q",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5.0)
-
-        if proc.returncode == 0:
-            lines = stdout.decode().strip().split("\n")
-            return len([l for l in lines if l])
+async def get_sandbox_process_count() -> int:
+    """Get count of running nsjail sandbox processes."""
+    if not PSUTIL_AVAILABLE:
         return 0
+    try:
+        count = 0
+        for proc in psutil.process_iter(["name"]):
+            try:
+                if proc.info["name"] and "nsjail" in proc.info["name"]:
+                    count += 1
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        return count
     except Exception:
         return 0

@@ -178,8 +178,6 @@ class FunctionalTester:
                 ))
                 return
 
-            has_state = r1.json().get("has_state", False)
-
             # Step 2: Use variable
             r2 = await client.post(
                 "/exec",
@@ -196,7 +194,7 @@ class FunctionalTester:
             stdout = r2.json().get("stdout", "")
             if "43" in stdout:
                 passed = True
-                msg = f"OK - state persisted (has_state={has_state})"
+                msg = "OK - state persisted"
             else:
                 passed = False
                 msg = f"Expected '43' in stdout, got: {stdout[:100]}, stderr: {r2.json().get('stderr', '')[:100]}"

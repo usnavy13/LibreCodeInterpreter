@@ -1,4 +1,4 @@
-"""Functional tests for code execution across all 12 supported languages."""
+"""Functional tests for code execution across all 13 supported languages."""
 
 import time
 

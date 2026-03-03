@@ -67,8 +67,8 @@ class SystemMetrics:
 
 
 @dataclass
-class DockerStats:
-    """Docker container resource statistics."""
+class SandboxStats:
+    """Sandbox process resource statistics."""
 
     container_count: int = 0
     total_cpu_percent: float = 0.0
@@ -97,7 +97,7 @@ class ConcurrencyTestResult:
     errors: Dict[str, int] = field(default_factory=dict)
     duration_seconds: float = 0.0
     system_metrics: SystemMetrics = field(default_factory=SystemMetrics)
-    docker_stats: Optional[DockerStats] = None
+    sandbox_stats: Optional[SandboxStats] = None
 
     @property
     def success_rate(self) -> float:
@@ -179,8 +179,8 @@ class ConcurrencyTestResult:
             "errors": self.errors,
             "system_metrics": self.system_metrics.to_dict(),
         }
-        if self.docker_stats:
-            result["docker_stats"] = self.docker_stats.to_dict()
+        if self.sandbox_stats:
+            result["sandbox_stats"] = self.sandbox_stats.to_dict()
         return result
 
 
@@ -288,7 +288,7 @@ class LoadTestConfig:
     warmup_requests: int = 10
     timeout_seconds: int = 60
     monitor_interval_seconds: float = 1.0
-    enable_docker_stats: bool = True
+    enable_sandbox_stats: bool = True
     output_dir: str = "./load_test_results"
 
     def to_dict(self) -> Dict[str, Any]:
@@ -302,7 +302,7 @@ class LoadTestConfig:
             "warmup_requests": self.warmup_requests,
             "timeout_seconds": self.timeout_seconds,
             "monitor_interval_seconds": self.monitor_interval_seconds,
-            "enable_docker_stats": self.enable_docker_stats,
+            "enable_sandbox_stats": self.enable_sandbox_stats,
             "output_dir": self.output_dir,
         }
 

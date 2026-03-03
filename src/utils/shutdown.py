@@ -5,7 +5,7 @@ from typing import List, Callable, Awaitable
 import structlog
 
 from ..services.health import health_service
-from ..services.metrics import metrics_collector
+from ..services.metrics import metrics_service
 
 logger = structlog.get_logger(__name__)
 
@@ -73,14 +73,14 @@ async def cleanup_services() -> None:
     except Exception as e:
         logger.error("Error stopping session service", error=str(e))
 
-    # Stop metrics collector with timeout
+    # Stop metrics service with timeout
     try:
-        await asyncio.wait_for(metrics_collector.stop(), timeout=5.0)
-        logger.info("Metrics collector stopped")
+        await asyncio.wait_for(metrics_service.stop(), timeout=5.0)
+        logger.info("Metrics service stopped")
     except asyncio.TimeoutError:
-        logger.warning("Metrics collector stop timed out")
+        logger.warning("Metrics service stop timed out")
     except Exception as e:
-        logger.error("Error stopping metrics collector", error=str(e))
+        logger.error("Error stopping metrics service", error=str(e))
 
     # Close health service with timeout
     try:
@@ -92,9 +92,9 @@ async def cleanup_services() -> None:
         logger.error("Error closing health service", error=str(e))
 
 
-async def cleanup_active_containers() -> None:
-    """Cleanup active containers during shutdown."""
-    logger.info("Cleaning up active containers")
+async def cleanup_active_sandboxes() -> None:
+    """Cleanup active sandboxes during shutdown."""
+    logger.info("Cleaning up active sandboxes")
 
     try:
         # Import here to avoid circular imports and handle import errors
@@ -104,14 +104,14 @@ async def cleanup_active_containers() -> None:
         execution_service = get_execution_service()
 
         # Stop all active executions with shorter timeout to prevent hanging
-        await asyncio.wait_for(execution_service.cleanup_all_containers(), timeout=8.0)
-        logger.info("Container cleanup completed")
+        await asyncio.wait_for(execution_service.cleanup_all_sandboxes(), timeout=8.0)
+        logger.info("Sandbox cleanup completed")
     except asyncio.TimeoutError:
-        logger.warning("Container cleanup timed out after 8 seconds - forcing shutdown")
+        logger.warning("Sandbox cleanup timed out after 8 seconds - forcing shutdown")
     except ImportError as e:
         logger.warning(f"Could not import execution service during shutdown: {e}")
     except Exception as e:
-        logger.error("Error cleaning up containers", error=str(e))
+        logger.error("Error cleaning up sandboxes", error=str(e))
 
 
 async def flush_logs_and_metrics() -> None:
@@ -130,7 +130,7 @@ def setup_graceful_shutdown() -> None:
     """Setup graceful shutdown handling."""
     # Add shutdown callbacks in order of execution (reversed during shutdown)
     shutdown_handler.add_shutdown_callback(flush_logs_and_metrics)
-    shutdown_handler.add_shutdown_callback(cleanup_active_containers)
+    shutdown_handler.add_shutdown_callback(cleanup_active_sandboxes)
     shutdown_handler.add_shutdown_callback(cleanup_services)
 
     logger.info("Graceful shutdown handling configured")

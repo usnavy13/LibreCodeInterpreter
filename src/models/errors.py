@@ -79,111 +79,12 @@ class CodeInterpreterException(Exception):
         )
 
 
-class AuthenticationError(CodeInterpreterException):
-    """Authentication related errors."""
-
-    def __init__(self, message: str = "Authentication failed", **kwargs):
-        super().__init__(
-            message=message,
-            error_type=ErrorType.AUTHENTICATION,
-            status_code=401,
-            **kwargs,
-        )
-
-
-class AuthorizationError(CodeInterpreterException):
-    """Authorization related errors."""
-
-    def __init__(self, message: str = "Access denied", **kwargs):
-        super().__init__(
-            message=message,
-            error_type=ErrorType.AUTHORIZATION,
-            status_code=403,
-            **kwargs,
-        )
-
-
 class ValidationError(CodeInterpreterException):
     """Request validation errors."""
 
     def __init__(self, message: str = "Validation failed", **kwargs):
         super().__init__(
             message=message, error_type=ErrorType.VALIDATION, status_code=400, **kwargs
-        )
-
-
-class ResourceNotFoundError(CodeInterpreterException):
-    """Resource not found errors."""
-
-    def __init__(self, resource: str, resource_id: str = None, **kwargs):
-        message = f"{resource} not found"
-        if resource_id:
-            message += f": {resource_id}"
-        super().__init__(
-            message=message,
-            error_type=ErrorType.RESOURCE_NOT_FOUND,
-            status_code=404,
-            **kwargs,
-        )
-
-
-class ResourceConflictError(CodeInterpreterException):
-    """Resource conflict errors."""
-
-    def __init__(self, message: str = "Resource conflict", **kwargs):
-        super().__init__(
-            message=message,
-            error_type=ErrorType.RESOURCE_CONFLICT,
-            status_code=409,
-            **kwargs,
-        )
-
-
-class ResourceExhaustedError(CodeInterpreterException):
-    """Resource exhaustion errors."""
-
-    def __init__(self, resource: str, **kwargs):
-        super().__init__(
-            message=f"{resource} limit exceeded",
-            error_type=ErrorType.RESOURCE_EXHAUSTED,
-            status_code=429,
-            **kwargs,
-        )
-
-
-class ExecutionError(CodeInterpreterException):
-    """Code execution related errors."""
-
-    def __init__(self, message: str = "Code execution failed", **kwargs):
-        super().__init__(
-            message=message,
-            error_type=ErrorType.EXECUTION_FAILED,
-            status_code=422,
-            **kwargs,
-        )
-
-
-class TimeoutError(CodeInterpreterException):
-    """Timeout related errors."""
-
-    def __init__(self, operation: str, timeout: int, **kwargs):
-        super().__init__(
-            message=f"{operation} timed out after {timeout} seconds",
-            error_type=ErrorType.TIMEOUT,
-            status_code=408,
-            **kwargs,
-        )
-
-
-class RateLimitError(CodeInterpreterException):
-    """Rate limiting errors."""
-
-    def __init__(self, message: str = "Rate limit exceeded", **kwargs):
-        super().__init__(
-            message=message,
-            error_type=ErrorType.RATE_LIMITED,
-            status_code=429,
-            **kwargs,
         )
 
 
@@ -196,18 +97,5 @@ class ServiceUnavailableError(CodeInterpreterException):
             message=error_message,
             error_type=ErrorType.SERVICE_UNAVAILABLE,
             status_code=503,
-            **kwargs,
-        )
-
-
-class ExternalServiceError(CodeInterpreterException):
-    """External service integration errors."""
-
-    def __init__(self, service: str, message: str = None, **kwargs):
-        error_message = message or f"External service error: {service}"
-        super().__init__(
-            message=error_message,
-            error_type=ErrorType.EXTERNAL_SERVICE,
-            status_code=502,
             **kwargs,
         )
