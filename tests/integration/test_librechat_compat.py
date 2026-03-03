@@ -1420,3 +1420,366 @@ class TestLibreChatEdgeCases:
             assert item["id"] == "full-file-789"
         finally:
             app.dependency_overrides.clear()
+
+    def test_detail_full_has_original_filename_metadata(self, client, auth_headers):
+        """
+        GET /files/{sid}?detail=full must include metadata['original-filename'].
+
+        LibreChat reads this field at CodeExecutor.ts:170 to map sanitized
+        filenames back to original upload names.
+        """
+        mock_file_service = AsyncMock()
+        mock_file_service.list_files.return_value = [
+            FileInfo(
+                file_id="meta-file-001",
+                filename="my_report.pdf",
+                size=2048,
+                content_type="application/pdf",
+                created_at=datetime.now(timezone.utc),
+                path="/my_report.pdf",
+            ),
+            FileInfo(
+                file_id="meta-file-002",
+                filename="data.csv",
+                size=512,
+                content_type="text/csv",
+                created_at=datetime.now(timezone.utc),
+                path="/data.csv",
+            ),
+        ]
+
+        from src.dependencies.services import get_file_service
+
+        app.dependency_overrides[get_file_service] = lambda: mock_file_service
+
+        try:
+            response = client.get(
+                "/files/meta-test-session?detail=full", headers=auth_headers
+            )
+
+            assert response.status_code == 200
+            data = response.json()
+            assert isinstance(data, list)
+            assert len(data) == 2
+
+            for item in data:
+                assert "metadata" in item, "Full detail must include 'metadata'"
+                assert (
+                    "original-filename" in item["metadata"]
+                ), "metadata must include 'original-filename'"
+                assert isinstance(
+                    item["metadata"]["original-filename"], str
+                ), "original-filename must be a string"
+                assert (
+                    len(item["metadata"]["original-filename"]) > 0
+                ), "original-filename must not be empty"
+        finally:
+            app.dependency_overrides.clear()
+
+
+# =============================================================================
+# LIBRECHAT BASH EXECUTION
+# =============================================================================
+
+
+class TestLibreChatBashExecution:
+    """Test bash execution compatibility with LibreChat.
+
+    Bash was added as a supported language. These tests verify that bash
+    requests follow the same API contract as other languages.
+    """
+
+    @patch("src.services.orchestrator.ExecutionOrchestrator.execute")
+    def test_bash_minimal_request(self, mock_execute, client, auth_headers):
+        """Minimal bash request should return 200 with standard response shape."""
+        mock_execute.return_value = ExecResponse(
+            session_id="bash-session-123",
+            stdout="hello\n",
+            stderr="",
+            files=[],
+        )
+
+        response = client.post(
+            "/exec",
+            json={"code": "echo hello", "lang": "bash"},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["session_id"] == "bash-session-123"
+        assert data["stdout"] == "hello\n"
+        assert data["stderr"] == ""
+
+    @patch("src.services.orchestrator.ExecutionOrchestrator.execute")
+    def test_bash_error_returns_200(self, mock_execute, client, auth_headers):
+        """Bash syntax error should return 200 with error in stderr."""
+        mock_execute.return_value = ExecResponse(
+            session_id="bash-err-session",
+            stdout="",
+            stderr="bash: syntax error near unexpected token\n",
+            files=[],
+        )
+
+        response = client.post(
+            "/exec",
+            json={"code": "if then fi done", "lang": "bash"},
+            headers=auth_headers,
+        )
+
+        # CRITICAL: Same as other languages - execution errors return 200
+        assert response.status_code == 200
+        data = response.json()
+        assert "session_id" in data
+        assert data["stderr"] != ""
+
+    @patch("src.services.orchestrator.ExecutionOrchestrator.execute")
+    def test_bash_response_matches_python_shape(
+        self, mock_execute, client, auth_headers
+    ):
+        """Bash response must have the same 4 fields as Python response."""
+        mock_execute.return_value = ExecResponse(
+            session_id="bash-shape-session",
+            stdout="result\n",
+            stderr="",
+            files=[],
+        )
+
+        response = client.post(
+            "/exec",
+            json={"code": "echo result", "lang": "bash"},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        # Must have the same 4 required fields as any other language
+        assert "session_id" in data
+        assert "stdout" in data
+        assert "stderr" in data
+        assert "files" in data
+
+        # Type validation
+        assert isinstance(data["session_id"], str)
+        assert isinstance(data["stdout"], str)
+        assert isinstance(data["stderr"], str)
+        assert isinstance(data["files"], list)
+
+
+# =============================================================================
+# LIBRECHAT PROGRAMMATIC TOOL CALLING (PTC)
+# =============================================================================
+
+
+class TestLibreChatProgrammaticToolCalling:
+    """Test PTC endpoint compatibility from a LibreChat client perspective.
+
+    These tests verify the /exec/programmatic endpoint contract using the
+    same mocking pattern as test_programmatic_api.py.
+    """
+
+    @patch("src.api.programmatic._get_ptc_service")
+    def test_ptc_initial_request_completed(
+        self, mock_get_service, client, auth_headers
+    ):
+        """Initial PTC request with code+tools should return completed response."""
+        from src.models.programmatic import ProgrammaticExecResponse
+
+        mock_service = AsyncMock()
+        mock_service.start_execution.return_value = ProgrammaticExecResponse(
+            status="completed",
+            session_id="ptc-compat-session",
+            stdout="Hello from PTC\n",
+            stderr="",
+        )
+        mock_get_service.return_value = mock_service
+
+        from src.dependencies.services import get_session_service
+
+        mock_session_svc = AsyncMock()
+        mock_session_svc.create_session.return_value = Session(
+            session_id="ptc-compat-session",
+            status=SessionStatus.ACTIVE,
+            created_at=datetime.now(timezone.utc),
+            last_activity=datetime.now(timezone.utc),
+            expires_at=datetime.now(timezone.utc),
+            metadata={},
+        )
+        app.dependency_overrides[get_session_service] = lambda: mock_session_svc
+
+        try:
+            response = client.post(
+                "/exec/programmatic",
+                json={
+                    "code": "print('Hello from PTC')",
+                    "tools": [{"name": "get_data", "description": "Get data"}],
+                },
+                headers=auth_headers,
+            )
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "completed"
+        assert "session_id" in data
+        assert isinstance(data["stdout"], str)
+        assert isinstance(data["stderr"], str)
+
+    @patch("src.api.programmatic._get_ptc_service")
+    def test_ptc_tool_call_required_response(
+        self, mock_get_service, client, auth_headers
+    ):
+        """PTC request that calls a tool should return tool_call_required."""
+        from src.models.programmatic import ProgrammaticExecResponse, PTCToolCall
+
+        mock_service = AsyncMock()
+        mock_service.start_execution.return_value = ProgrammaticExecResponse(
+            status="tool_call_required",
+            session_id="ptc-tool-session",
+            continuation_token="cont-token-xyz",
+            tool_calls=[
+                PTCToolCall(
+                    id="call-abc", name="get_weather", input={"city": "NYC"}
+                ),
+            ],
+            stdout="",
+            stderr="",
+        )
+        mock_get_service.return_value = mock_service
+
+        from src.dependencies.services import get_session_service
+
+        mock_session_svc = AsyncMock()
+        mock_session_svc.create_session.return_value = Session(
+            session_id="ptc-tool-session",
+            status=SessionStatus.ACTIVE,
+            created_at=datetime.now(timezone.utc),
+            last_activity=datetime.now(timezone.utc),
+            expires_at=datetime.now(timezone.utc),
+            metadata={},
+        )
+        app.dependency_overrides[get_session_service] = lambda: mock_session_svc
+
+        try:
+            response = client.post(
+                "/exec/programmatic",
+                json={
+                    "code": "result = await get_weather(city='NYC')",
+                    "tools": [
+                        {
+                            "name": "get_weather",
+                            "description": "Get weather",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {"city": {"type": "string"}},
+                            },
+                        }
+                    ],
+                },
+                headers=auth_headers,
+            )
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "tool_call_required"
+        assert "continuation_token" in data
+        assert isinstance(data["continuation_token"], str)
+        assert len(data["tool_calls"]) == 1
+
+        tool_call = data["tool_calls"][0]
+        assert "id" in tool_call
+        assert "name" in tool_call
+        assert "input" in tool_call
+        assert tool_call["name"] == "get_weather"
+
+    @patch("src.api.programmatic._get_ptc_service")
+    def test_ptc_continuation_flow(self, mock_get_service, client, auth_headers):
+        """Continuation with tool_results should return completed response."""
+        from src.models.programmatic import ProgrammaticExecResponse
+
+        mock_service = AsyncMock()
+        mock_service.continue_execution.return_value = ProgrammaticExecResponse(
+            status="completed",
+            session_id="ptc-cont-session",
+            stdout="Weather in NYC: 72F\n",
+            stderr="",
+        )
+        mock_get_service.return_value = mock_service
+
+        from src.dependencies.services import get_session_service
+
+        mock_session_svc = AsyncMock()
+        app.dependency_overrides[get_session_service] = lambda: mock_session_svc
+
+        try:
+            response = client.post(
+                "/exec/programmatic",
+                json={
+                    "continuation_token": "cont-token-xyz",
+                    "tool_results": [
+                        {
+                            "call_id": "call-abc",
+                            "result": {"temp": 72, "conditions": "sunny"},
+                            "is_error": False,
+                        }
+                    ],
+                },
+                headers=auth_headers,
+            )
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "completed"
+        assert data["stdout"] == "Weather in NYC: 72F\n"
+
+        mock_service.continue_execution.assert_called_once()
+
+    @patch("src.api.programmatic._get_ptc_service")
+    def test_ptc_error_tool_result(self, mock_get_service, client, auth_headers):
+        """Tool result with is_error=true should be handled correctly."""
+        from src.models.programmatic import ProgrammaticExecResponse
+
+        mock_service = AsyncMock()
+        mock_service.continue_execution.return_value = ProgrammaticExecResponse(
+            status="completed",
+            session_id="ptc-err-session",
+            stdout="Tool failed: API unavailable\n",
+            stderr="",
+        )
+        mock_get_service.return_value = mock_service
+
+        from src.dependencies.services import get_session_service
+
+        mock_session_svc = AsyncMock()
+        app.dependency_overrides[get_session_service] = lambda: mock_session_svc
+
+        try:
+            response = client.post(
+                "/exec/programmatic",
+                json={
+                    "continuation_token": "cont-token-err",
+                    "tool_results": [
+                        {
+                            "call_id": "call-fail",
+                            "result": None,
+                            "is_error": True,
+                            "error_message": "API unavailable",
+                        }
+                    ],
+                },
+                headers=auth_headers,
+            )
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        data = response.json()
+        # Response should be valid regardless of tool error
+        assert data["status"] in ("completed", "error")
+        mock_service.continue_execution.assert_called_once()

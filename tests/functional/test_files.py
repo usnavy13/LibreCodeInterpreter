@@ -183,6 +183,83 @@ class TestFileList:
         assert isinstance(files_list, list)
 
 
+class TestFileMetadata:
+    """Test file metadata fields required by LibreChat."""
+
+    @pytest.mark.asyncio
+    async def test_detail_full_has_original_filename_metadata(
+        self, async_client, auth_headers, unique_entity_id
+    ):
+        """GET /files/{sid}?detail=full must include metadata['original-filename'].
+
+        LibreChat reads this field at CodeExecutor.ts:170 to map sanitized
+        filenames back to original upload names.
+        """
+        # Upload a file with a distinctive name
+        files = {"files": ("My Report (2024).csv", b"a,b\n1,2", "text/csv")}
+        upload = await async_client.post(
+            "/upload",
+            headers={"x-api-key": auth_headers["x-api-key"]},
+            files=files,
+            data={"entity_id": unique_entity_id},
+        )
+        assert upload.status_code == 200
+        session_id = upload.json()["session_id"]
+
+        # Get full detail
+        response = await async_client.get(
+            f"/files/{session_id}?detail=full",
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert isinstance(data, list)
+        assert len(data) >= 1
+
+        for item in data:
+            assert "metadata" in item, "Full detail must include 'metadata'"
+            assert "original-filename" in item["metadata"], (
+                "metadata must include 'original-filename'"
+            )
+            assert isinstance(item["metadata"]["original-filename"], str)
+            assert len(item["metadata"]["original-filename"]) > 0
+
+    @pytest.mark.asyncio
+    async def test_detail_full_has_required_fields(
+        self, async_client, auth_headers, unique_entity_id
+    ):
+        """GET /files/{sid}?detail=full returns all fields LibreChat expects."""
+        files = {"files": ("test.txt", b"content", "text/plain")}
+        upload = await async_client.post(
+            "/upload",
+            headers={"x-api-key": auth_headers["x-api-key"]},
+            files=files,
+            data={"entity_id": unique_entity_id},
+        )
+        session_id = upload.json()["session_id"]
+
+        response = await async_client.get(
+            f"/files/{session_id}?detail=full",
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) >= 1
+
+        item = data[0]
+        # Fields LibreChat expects in full detail
+        assert "id" in item
+        assert "name" in item
+        assert "size" in item
+        assert "lastModified" in item
+        assert "contentType" in item
+        assert "metadata" in item
+        assert "content-type" in item["metadata"]
+        assert "original-filename" in item["metadata"]
+
+
 class TestFileDownload:
     """Test GET /download/{session_id}/{file_id}."""
 

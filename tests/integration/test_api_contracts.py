@@ -134,6 +134,7 @@ def mock_file_service():
         path="/test.txt",
     )
     service.download_file.return_value = "https://minio.example.com/download-url"
+    service.validate_uploads = MagicMock(return_value=None)
     return service
 
 
