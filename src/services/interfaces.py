@@ -116,6 +116,13 @@ class FileServiceInterface(ABC):
         pass
 
     @abstractmethod
+    async def stream_file_to_path(
+        self, session_id: str, file_id: str, dest_path: str
+    ) -> bool:
+        """Stream file content directly to a local file path."""
+        pass
+
+    @abstractmethod
     async def delete_file(self, session_id: str, file_id: str) -> bool:
         """Delete a file from storage."""
         pass

@@ -701,11 +701,23 @@ class CodeExecutionRunner:
         files: List[Dict[str, Any]],
         language: str = "py",
     ) -> None:
-        """Mount files to sandbox workspace."""
+        """Mount files to sandbox workspace.
+
+        Uses streaming (MinIO fget_object) to transfer files directly to the
+        sandbox data directory without loading entire files into memory. This
+        avoids blocking the asyncio event loop during large file transfers.
+        """
         try:
             from ..file import FileService
+            from ...config.languages import get_user_id_for_language
 
             file_service = FileService()
+            user_id = get_user_id_for_language(language)
+
+            def _set_file_perms(path, uid):
+                os.chown(path, uid, uid)
+                os.chmod(path, 0o644)
+                return os.path.getsize(path)
 
             for file_info in files:
                 filename = file_info.get("filename", "unknown")
@@ -717,36 +729,37 @@ class CodeExecutionRunner:
                     continue
 
                 try:
-                    file_content = await file_service.get_file_content(
-                        session_id, file_id
+                    normalized_filename = OutputProcessor.sanitize_filename(filename)
+                    dest_path = str(sandbox_info.data_dir / normalized_filename)
+
+                    file_size = file_info.get("size", 0)
+                    if file_size > 10 * 1024 * 1024:
+                        logger.info(
+                            "Mounting large file",
+                            filename=filename,
+                            size_mb=round(file_size / 1024 / 1024, 1),
+                        )
+
+                    # Stream directly from MinIO to sandbox directory (non-blocking)
+                    success = await file_service.stream_file_to_path(
+                        session_id, file_id, dest_path
                     )
 
-                    if file_content is not None:
-                        # Direct memory-to-sandbox transfer (no tempfiles)
-                        normalized_filename = OutputProcessor.sanitize_filename(
-                            filename
+                    if success:
+                        actual_size = await asyncio.to_thread(
+                            _set_file_perms, dest_path, user_id
                         )
-                        dest_path = f"/mnt/data/{normalized_filename}"
-
-                        if self.sandbox_manager.copy_content_to_sandbox(
-                            sandbox_info, file_content, dest_path, language=language
-                        ):
-                            logger.debug(
-                                "Mounted file",
-                                filename=filename,
-                                size=len(file_content),
-                            )
-                        else:
-                            logger.warning("Failed to mount file", filename=filename)
-                            await self._create_placeholder_file(sandbox_info, filename)
+                        logger.debug(
+                            "Mounted file",
+                            filename=filename,
+                            size=actual_size,
+                        )
                     else:
-                        logger.warning(
-                            f"Could not retrieve content for file {filename}"
-                        )
+                        logger.warning("Failed to mount file", filename=filename)
                         await self._create_placeholder_file(sandbox_info, filename)
 
                 except Exception as file_error:
-                    logger.error(f"Error retrieving file {filename}: {file_error}")
+                    logger.error(f"Error mounting file {filename}: {file_error}")
                     await self._create_placeholder_file(sandbox_info, filename)
 
         except Exception as e:
