@@ -546,16 +546,17 @@ class FileService(FileServiceInterface):
         object_key = metadata["object_key"]
 
         try:
-            # Get object content
             loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None, self.minio_client.get_object, self.bucket_name, object_key
-            )
 
-            content = response.read()
-            response.close()
-            response.release_conn()
+            def _download():
+                response = self.minio_client.get_object(self.bucket_name, object_key)
+                try:
+                    return response.read()
+                finally:
+                    response.close()
+                    response.release_conn()
 
+            content = await loop.run_in_executor(None, _download)
             return content
 
         except S3Error as e:
@@ -566,6 +567,49 @@ class FileService(FileServiceInterface):
                 file_id=file_id,
             )
             return None
+
+    async def stream_file_to_path(
+        self, session_id: str, file_id: str, dest_path: str
+    ) -> bool:
+        """Stream file content from MinIO directly to a local file path.
+
+        Uses MinIO's fget_object for efficient disk-to-disk transfer
+        without loading the entire file into memory. Runs in a thread
+        pool executor to avoid blocking the async event loop.
+
+        Args:
+            session_id: Session identifier
+            file_id: File identifier
+            dest_path: Local filesystem path to write the file to
+
+        Returns:
+            True if successful, False otherwise
+        """
+        metadata = await self.get_file_metadata(session_id, file_id)
+        if not metadata:
+            return False
+
+        object_key = metadata["object_key"]
+
+        try:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None,
+                self.minio_client.fget_object,
+                self.bucket_name,
+                object_key,
+                dest_path,
+            )
+            return True
+        except S3Error as e:
+            logger.error(
+                "Failed to stream file to path",
+                error=str(e),
+                session_id=session_id,
+                file_id=file_id,
+                dest_path=dest_path,
+            )
+            return False
 
     async def store_uploaded_file(
         self,
