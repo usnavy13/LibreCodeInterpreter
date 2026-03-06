@@ -35,7 +35,7 @@ flake8==7.3.0
 mypy==1.19.1
 
 # Environment management
-python-dotenv==1.2.1
+python-dotenv==1.2.2
 
 # Logging
 structlog==25.5.0
