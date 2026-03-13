@@ -106,7 +106,7 @@ Code is analyzed for potentially dangerous patterns:
 - **Seccomp filtering**: Restricts available system calls
 - **Cgroup limits**: Memory, CPU, and PID limits enforced
 - **rlimits**: File size, open files, and stack size restricted
-- **Non-root execution**: Code runs as uid 1001 (codeuser)
+- **Non-root execution**: Code runs as a shared non-root sandbox UID (default `1001`, configurable with `SANDBOX_UID`)
 
 **Note**: The API container requires `SYS_ADMIN` capability for nsjail to create namespaces and cgroups. No Docker socket is mounted.
 

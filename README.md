@@ -136,7 +136,7 @@ For comprehensive testing details, see [TESTING.md](docs/TESTING.md).
 - Seccomp syscall filtering restricts available system calls
 - Cgroup-based resource limits prevent CPU, memory, and process exhaustion
 - rlimits restrict file sizes, open file descriptors, etc.
-- Code runs as non-root user (uid 1001)
+- Code runs as a shared non-root sandbox user (default uid `1001`, configurable with `SANDBOX_UID`)
 - Read-only bind mounts for language runtimes and libraries
 - API key authentication protects all endpoints
 - Input validation prevents injection attacks

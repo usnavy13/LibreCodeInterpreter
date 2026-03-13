@@ -363,7 +363,7 @@ settings.max_memory_mb
 │   4. Seccomp Filtering    : Restricted syscalls                            │
 │   5. Cgroup Limits        : Memory, CPU, pids                              │
 │   6. rlimits              : File size, open files, stack size              │
-│   7. Non-root Execution   : Code runs as uid 1001 (codeuser)              │
+│   7. Non-root Execution   : Code runs as shared uid 1001 by default       │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```

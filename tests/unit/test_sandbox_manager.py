@@ -291,9 +291,8 @@ class TestManagerUtility:
                 manager._base_dir = Path("/tmp/test")
                 manager._initialization_error = None
 
-                # Python user ID is 999
-                assert manager.get_user_id_for_language("py") == 999
-                # JS user ID is 1001
+                # All sandbox languages share the same non-root UID by default
+                assert manager.get_user_id_for_language("py") == 1001
                 assert manager.get_user_id_for_language("js") == 1001
 
     def test_close_is_noop(self):

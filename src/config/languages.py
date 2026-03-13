@@ -4,6 +4,7 @@ This module defines all supported programming languages and their
 execution settings (commands, resource multipliers, user IDs, etc.).
 """
 
+import os
 from dataclasses import dataclass, field
 from typing import Dict, Optional
 
@@ -26,12 +27,33 @@ class LanguageConfig:
     environment: Dict[str, str] = field(default_factory=dict)
 
 
+def _get_sandbox_user_id(default: int = 1001) -> int:
+    """Read the shared sandbox UID override from the environment."""
+    raw_value = os.getenv("SANDBOX_UID")
+    if raw_value in (None, ""):
+        return default
+    assert raw_value is not None
+
+    try:
+        user_id = int(raw_value)
+    except ValueError as exc:
+        raise ValueError(f"SANDBOX_UID must be an integer, got: {raw_value}") from exc
+
+    if user_id < 0:
+        raise ValueError(f"SANDBOX_UID must be >= 0, got: {user_id}")
+
+    return user_id
+
+
+SANDBOX_USER_ID = _get_sandbox_user_id()
+
+
 # All 13 supported languages with complete configuration
 LANGUAGES: Dict[str, LanguageConfig] = {
     "py": LanguageConfig(
         code="py",
         name="Python",
-        user_id=999,
+        user_id=SANDBOX_USER_ID,
         file_extension="py",
         execution_command="python3 -",
         uses_stdin=True,
@@ -41,7 +63,7 @@ LANGUAGES: Dict[str, LanguageConfig] = {
     "js": LanguageConfig(
         code="js",
         name="JavaScript",
-        user_id=1001,
+        user_id=SANDBOX_USER_ID,
         file_extension="js",
         execution_command="node",
         uses_stdin=True,
@@ -51,7 +73,7 @@ LANGUAGES: Dict[str, LanguageConfig] = {
     "ts": LanguageConfig(
         code="ts",
         name="TypeScript",
-        user_id=1001,
+        user_id=SANDBOX_USER_ID,
         file_extension="ts",
         execution_command="tsc code.ts --outDir . --module commonjs "
         "--target ES2019 && node code.js",
@@ -62,7 +84,7 @@ LANGUAGES: Dict[str, LanguageConfig] = {
     "go": LanguageConfig(
         code="go",
         name="Go",
-        user_id=1001,
+        user_id=SANDBOX_USER_ID,
         file_extension="go",
         execution_command="go build -o code code.go && ./code",
         uses_stdin=False,
@@ -72,7 +94,7 @@ LANGUAGES: Dict[str, LanguageConfig] = {
     "java": LanguageConfig(
         code="java",
         name="Java",
-        user_id=999,
+        user_id=SANDBOX_USER_ID,
         file_extension="java",
         execution_command="javac Code.java && java Code",
         uses_stdin=False,
@@ -82,7 +104,7 @@ LANGUAGES: Dict[str, LanguageConfig] = {
     "c": LanguageConfig(
         code="c",
         name="C",
-        user_id=1001,
+        user_id=SANDBOX_USER_ID,
         file_extension="c",
         execution_command="gcc -o code code.c && ./code",
         uses_stdin=False,
@@ -92,7 +114,7 @@ LANGUAGES: Dict[str, LanguageConfig] = {
     "cpp": LanguageConfig(
         code="cpp",
         name="C++",
-        user_id=1001,
+        user_id=SANDBOX_USER_ID,
         file_extension="cpp",
         execution_command="g++ -o code code.cpp && ./code",
         uses_stdin=False,
@@ -102,7 +124,7 @@ LANGUAGES: Dict[str, LanguageConfig] = {
     "php": LanguageConfig(
         code="php",
         name="PHP",
-        user_id=1001,
+        user_id=SANDBOX_USER_ID,
         file_extension="php",
         execution_command="php",
         uses_stdin=True,
@@ -112,7 +134,7 @@ LANGUAGES: Dict[str, LanguageConfig] = {
     "rs": LanguageConfig(
         code="rs",
         name="Rust",
-        user_id=1001,
+        user_id=SANDBOX_USER_ID,
         file_extension="rs",
         execution_command="rustc code.rs -o code && ./code",
         uses_stdin=False,
@@ -122,7 +144,7 @@ LANGUAGES: Dict[str, LanguageConfig] = {
     "r": LanguageConfig(
         code="r",
         name="R",
-        user_id=1001,
+        user_id=SANDBOX_USER_ID,
         file_extension="r",
         execution_command="Rscript code.r",
         uses_stdin=False,
@@ -132,7 +154,7 @@ LANGUAGES: Dict[str, LanguageConfig] = {
     "f90": LanguageConfig(
         code="f90",
         name="Fortran",
-        user_id=1001,
+        user_id=SANDBOX_USER_ID,
         file_extension="f90",
         execution_command="gfortran -o code code.f90 && ./code",
         uses_stdin=False,
@@ -142,7 +164,7 @@ LANGUAGES: Dict[str, LanguageConfig] = {
     "d": LanguageConfig(
         code="d",
         name="D",
-        user_id=0,
+        user_id=SANDBOX_USER_ID,
         file_extension="d",
         execution_command="ldc2 code.d -of=code && ./code",
         uses_stdin=False,
@@ -152,7 +174,7 @@ LANGUAGES: Dict[str, LanguageConfig] = {
     "bash": LanguageConfig(
         code="bash",
         name="Bash",
-        user_id=1001,
+        user_id=SANDBOX_USER_ID,
         file_extension="sh",
         execution_command="bash",
         uses_stdin=True,

@@ -147,7 +147,8 @@ nsjail is used for secure code execution in isolated sandboxes.
 **Security Notes:**
 
 - nsjail provides PID, mount, and network namespace isolation
-- Code runs as non-root user (uid 1001) inside the sandbox
+- Code runs as a shared non-root UID inside the sandbox
+- All sandbox languages default to UID `1001`, and can be moved with `SANDBOX_UID`
 - The API container requires `SYS_ADMIN` capability for nsjail namespace creation
 
 ### Resource Limits
@@ -184,6 +185,8 @@ Pre-warmed Python REPL sandboxes reduce execution latency by eliminating interpr
 | `SANDBOX_POOL_ENABLED`             | `true`  | Enable Python REPL pool                |
 | `SANDBOX_POOL_WARMUP_ON_STARTUP`   | `true`  | Pre-warm Python REPLs at startup       |
 | `SANDBOX_POOL_PY`                  | `5`     | Number of pre-warmed Python REPLs      |
+| `SANDBOX_POOL_PARALLEL_BATCH`      | `5`     | Number of warmup sandboxes started concurrently |
+| `SANDBOX_UID`                      | `1001`  | Shared host UID used by all sandbox languages |
 
 **Note:** Sandboxes are destroyed immediately after execution. The pool is automatically replenished in the background. Non-Python languages do not use pooling.
 

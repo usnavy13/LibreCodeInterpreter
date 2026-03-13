@@ -4,11 +4,12 @@ Tests the unified language configuration: language definitions, lookup
 functions, and correctness of all 13 supported languages.
 """
 
+import importlib
 import pytest
+import src.config.languages as languages_module
 
 from src.config.languages import (
     LANGUAGES,
-    LanguageConfig,
     get_language,
     get_supported_languages,
     is_supported_language,
@@ -52,7 +53,7 @@ class TestLanguageRegistry:
     def test_language_config_is_frozen_dataclass(self, code):
         """Each language config must be a frozen LanguageConfig dataclass."""
         lang = LANGUAGES[code]
-        assert isinstance(lang, LanguageConfig)
+        assert isinstance(lang, languages_module.LanguageConfig)
         with pytest.raises(AttributeError):
             lang.code = "modified"
 
@@ -104,13 +105,23 @@ class TestPythonLanguage:
 
     def test_python_user_id(self):
         lang = get_language("py")
-        assert lang.user_id == 999
+        assert lang.user_id == 1001
 
     def test_python_uses_stdin(self):
         assert uses_stdin("py") is True
 
     def test_python_extension(self):
         assert get_file_extension("py") == "py"
+
+    def test_python_user_id_can_be_overridden(self, monkeypatch):
+        monkeypatch.setenv("SANDBOX_UID", "1002")
+        reloaded = importlib.reload(languages_module)
+        try:
+            assert reloaded.get_user_id_for_language("py") == 1002
+            assert reloaded.get_user_id_for_language("js") == 1002
+        finally:
+            monkeypatch.delenv("SANDBOX_UID", raising=False)
+            importlib.reload(languages_module)
 
 
 class TestStdinVsFileLanguages:
@@ -137,7 +148,7 @@ class TestGetLanguage:
     def test_returns_config_for_known_code(self, code):
         result = get_language(code)
         assert result is not None
-        assert isinstance(result, LanguageConfig)
+        assert isinstance(result, languages_module.LanguageConfig)
         assert result.code == code
 
     def test_returns_none_for_unknown(self):
@@ -187,16 +198,28 @@ class TestGetUserIdForLanguage:
     """Test get_user_id_for_language() function."""
 
     def test_python_user_id(self):
-        assert get_user_id_for_language("py") == 999
+        assert get_user_id_for_language("py") == 1001
 
     def test_java_user_id(self):
-        assert get_user_id_for_language("java") == 999
+        assert get_user_id_for_language("java") == 1001
+
+    def test_all_languages_share_overridden_user_id(self, monkeypatch):
+        monkeypatch.setenv("SANDBOX_UID", "1003")
+        reloaded = importlib.reload(languages_module)
+        try:
+            assert reloaded.get_user_id_for_language("py") == 1003
+            assert reloaded.get_user_id_for_language("java") == 1003
+            assert reloaded.get_user_id_for_language("bash") == 1003
+            assert reloaded.get_user_id_for_language("d") == 1003
+        finally:
+            monkeypatch.delenv("SANDBOX_UID", raising=False)
+            importlib.reload(languages_module)
 
     def test_bash_user_id(self):
         assert get_user_id_for_language("bash") == 1001
 
     def test_d_user_id(self):
-        assert get_user_id_for_language("d") == 0
+        assert get_user_id_for_language("d") == 1001
 
     def test_raises_for_unknown(self):
         with pytest.raises(ValueError, match="Unsupported language"):
