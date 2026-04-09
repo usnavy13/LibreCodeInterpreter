@@ -47,6 +47,8 @@ Most users should run the published Docker image from GHCR. You do not need to b
 The API will be available at `http://localhost:8000`.
 Visit `http://localhost:8000/docs` for the interactive API documentation.
 
+To enable HTTPS with either compose file, set `PORT`, `ENABLE_HTTPS`, `SSL_CERTS_PATH`, `SSL_CERT_FILE`, and `SSL_KEY_FILE` in `.env`. `SSL_CERTS_PATH` is the host path mounted into the container at `/app/ssl`, while `SSL_CERT_FILE` and `SSL_KEY_FILE` must point to the certificate files inside the container. See [docs/CONFIGURATION.md](docs/CONFIGURATION.md#sslhttps-configuration).
+
 ### Common Consumer Commands
 
 ```bash
@@ -96,7 +98,7 @@ The dashboard requires the master API key for authentication.
 - **Session Management**: Redis-based session handling with automatic cleanup
 - **S3-Compatible Storage**: MinIO integration for persistent file storage
 - **Authentication**: API key-based authentication for secure access
-- **HTTPS/SSL Support**: Optional SSL/TLS encryption with automatic HTTP to HTTPS redirection
+- **HTTPS/SSL Support**: Optional in-container SSL/TLS termination for both compose workflows
 - **Health Monitoring**: Comprehensive health check endpoints for all dependencies
 - **Metrics Collection**: Execution and API metrics for monitoring and debugging
 - **Unicode Support**: Full Unicode filename support in file downloads

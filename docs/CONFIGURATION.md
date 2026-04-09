@@ -43,41 +43,72 @@ Controls the basic API server settings.
 
 Configures SSL/TLS support for secure HTTPS connections.
 
-| Variable         | Default  | Description                                              |
-| ---------------- | -------- | -------------------------------------------------------- |
-| `ENABLE_HTTPS`   | `false`  | Enable HTTPS/SSL support                                 |
-| `SSL_CERTS_PATH` | `./ssl`  | Host path to directory containing `cert.pem` and `key.pem` |
+Both `docker-compose.yml` and `docker-compose.prod.yml` use the same HTTPS contract:
 
-> **Note:** The certificate files are automatically mapped to `/app/ssl/` inside the API container via `docker-compose.yml`. You only need to set `SSL_CERTS_PATH` to point to your certificates directory on the host.
+- `PORT` is the external host port published by Docker.
+- `SSL_CERTS_PATH` is a host path mounted into the API container at `/app/ssl`.
+- `SSL_CERT_FILE` and `SSL_KEY_FILE` are paths inside the container.
+- For predictable restarts, set `ENABLE_HTTPS=true` explicitly instead of relying on auto-detection.
+
+| Variable         | Default                | Description |
+| ---------------- | ---------------------- | ----------- |
+| `PORT`           | `8000`                 | External host port published by Docker Compose |
+| `ENABLE_HTTPS`   | auto                   | When unset, HTTPS auto-enables only if the configured cert and key files exist inside the container |
+| `SSL_CERTS_PATH` | `./ssl`                | Host path mounted into the container at `/app/ssl` |
+| `SSL_CERT_FILE`  | `/app/ssl/fullchain.pem` | Certificate file path inside the container |
+| `SSL_KEY_FILE`   | `/app/ssl/privkey.pem` | Private key file path inside the container |
+| `SSL_CA_CERTS`   | -                      | Optional CA bundle path inside the container |
 
 **HTTPS Setup:**
 
-1. **Generate or obtain SSL certificates**:
+1. **Use a simple cert directory on the host**:
 
    ```bash
-   # For development (self-signed certificate)
-   mkdir ssl
-   openssl req -x509 -newkey rsa:4096 -nodes -out ssl/cert.pem -keyout ssl/key.pem -days 365
-
-   # For production, use certificates from a trusted CA
+   mkdir -p ssl
+   openssl req -x509 -newkey rsa:4096 -nodes \
+     -out ssl/fullchain.pem \
+     -keyout ssl/privkey.pem \
+     -days 365
    ```
 
-2. **Configure HTTPS in .env**:
+   Then set:
 
    ```bash
+   PORT=443
    ENABLE_HTTPS=true
-
-   # If using the default ./ssl directory, no additional config needed.
-   # If your certs are elsewhere, set the path:
-   # SSL_CERTS_PATH=/path/to/your/ssl/certs
+   SSL_CERTS_PATH=./ssl
+   SSL_CERT_FILE=/app/ssl/fullchain.pem
+   SSL_KEY_FILE=/app/ssl/privkey.pem
    ```
 
-   The directory must contain files named `cert.pem` and `key.pem`.
+2. **Use Let's Encrypt from the host**:
 
-3. **Deploy with docker compose**:
+   If the host already has certificates in `/etc/letsencrypt`, mount that tree and point the app at the files inside `/app/ssl`:
+
+   ```bash
+   PORT=443
+   ENABLE_HTTPS=true
+   SSL_CERTS_PATH=/etc/letsencrypt
+   SSL_CERT_FILE=/app/ssl/live/example.com/fullchain.pem
+   SSL_KEY_FILE=/app/ssl/live/example.com/privkey.pem
+   ```
+
+3. **Start the stack with either compose file**:
+
    ```bash
    docker compose up -d
+
+   # or
+   docker compose -f docker-compose.prod.yml up -d
    ```
+
+4. **Verify HTTPS**:
+
+   ```bash
+   curl -fsk https://localhost/health
+   ```
+
+If you terminate TLS at an external reverse proxy instead, keep the API on HTTP by leaving `ENABLE_HTTPS` unset or setting it to `false`, and publish the proxy on `443` instead of the API container.
 
 **Security Notes:**
 
