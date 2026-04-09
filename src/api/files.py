@@ -2,6 +2,7 @@
 
 # Standard library imports
 from datetime import datetime, timezone
+import inspect
 from pathlib import Path
 from typing import List, Optional
 from urllib.parse import quote
@@ -92,7 +93,13 @@ async def upload_file(
             filenames=[f.filename or "" for f in upload_files],
             file_sizes=[f.size for f in upload_files],
         )
-        if validation_error:
+        if inspect.isawaitable(validation_error):
+            validation_error = await validation_error
+        if (
+            isinstance(validation_error, tuple)
+            and len(validation_error) == 2
+            and isinstance(validation_error[0], int)
+        ):
             raise HTTPException(
                 status_code=validation_error[0], detail=validation_error[1]
             )
