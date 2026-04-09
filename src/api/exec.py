@@ -15,7 +15,13 @@ from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
 from ..models import ExecRequest, ExecResponse
-from ..models.errors import ErrorResponse, ValidationError, ServiceUnavailableError
+from ..models.errors import (
+    CodeInterpreterException,
+    ErrorResponse,
+    ErrorType,
+    ValidationError,
+    ServiceUnavailableError,
+)
 from ..services.orchestrator import ExecutionOrchestrator
 from ..dependencies.services import (
     SessionServiceDep,
@@ -106,6 +112,14 @@ async def execute_code(
         )
         return response
     except asyncio.TimeoutError:
+        if execution_task.done():
+            response = await execution_task
+            logger.info(
+                "Code execution completed",
+                request_id=request_id,
+                session_id=response.session_id,
+            )
+            return response
         # Fall through to streamed keepalives for genuinely long-running work.
         pass
     except (ValidationError, ServiceUnavailableError):
@@ -119,6 +133,12 @@ async def execute_code(
         whitespace is ignored by JSON parsers, so this is transparent
         to clients.
         """
+        # The endpoint already spent one interval deciding whether to switch to
+        # streaming. Emit a first keepalive immediately so long-running
+        # requests stay under client-side socket timeout thresholds.
+        if not execution_task.done():
+            yield b" "
+
         # Send keepalive spaces while execution is running
         while not execution_task.done():
             try:
@@ -127,7 +147,11 @@ async def execute_code(
                 )
             except asyncio.TimeoutError:
                 # Execution still running — send keepalive space
-                yield b" "
+                if not execution_task.done():
+                    yield b" "
+            except Exception:
+                # Task raised an exception — it will be handled below.
+                break
 
         # Ensure the task is complete
         try:
@@ -135,9 +159,12 @@ async def execute_code(
         except Exception as err:
             # Once the streaming response has started, surface failures as a JSON
             # error payload instead of raising after headers have been sent.
+            error_type = ErrorType.INTERNAL_SERVER
+            if isinstance(err, CodeInterpreterException):
+                error_type = err.error_type
             error_resp = ErrorResponse(
                 error=str(err),
-                error_type="execution",
+                error_type=error_type,
             )
             yield error_resp.model_dump_json().encode()
             return

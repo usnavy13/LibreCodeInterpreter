@@ -217,6 +217,15 @@ class TestAPIKeyAuthentication:
 class TestAuthenticationEdgeCases:
     """Test edge cases in authentication."""
 
+    @staticmethod
+    def _protected_exec_request(client, headers):
+        """Hit a real authenticated endpoint with a minimal valid payload."""
+        return client.post(
+            "/exec",
+            headers=headers,
+            json={"code": "print('auth edge')", "lang": "py"},
+        )
+
     def test_auth_with_special_characters_in_key(self, client, mock_services):
         """Test authentication with special characters in API key."""
         special_key = "test-key-with-special-chars!@#$%^&*()"
@@ -225,10 +234,10 @@ class TestAuthenticationEdgeCases:
             mock_settings.api_key = special_key
             headers = {"x-api-key": special_key}
 
-            response = client.get("/sessions", headers=headers)
+            response = self._protected_exec_request(client, headers)
 
             # Should handle special characters correctly
-            # If 401, it means auth failed, but we want to ensure no 500 error
+            # If 401, auth rejected the key. If 200, auth accepted it.
             assert response.status_code in [200, 401]
 
     def test_auth_with_very_long_key(self, client, mock_services):
@@ -239,7 +248,7 @@ class TestAuthenticationEdgeCases:
             mock_settings.api_key = long_key
             headers = {"x-api-key": long_key}
 
-            response = client.get("/sessions", headers=headers)
+            response = self._protected_exec_request(client, headers)
 
             # Should handle long keys (within reason)
             assert response.status_code in [200, 401]

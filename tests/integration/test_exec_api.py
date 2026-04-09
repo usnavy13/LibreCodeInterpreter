@@ -1,5 +1,6 @@
 """Integration tests for the /exec endpoint."""
 
+import asyncio
 import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import AsyncMock, patch, MagicMock
@@ -8,7 +9,13 @@ import time
 from datetime import datetime, timezone, timedelta
 
 from src.main import app
-from src.models import CodeExecution, ExecutionStatus, ExecutionOutput, OutputType
+from src.models import (
+    CodeExecution,
+    ExecutionStatus,
+    ExecutionOutput,
+    OutputType,
+    ServiceUnavailableError,
+)
 
 
 @pytest.fixture
@@ -380,6 +387,33 @@ class TestExecEndpoint:
         # 503 Service Unavailable for backend service errors
         assert response.status_code == 503
         assert "error" in response.json()
+
+    def test_exec_delayed_service_error_after_stream_start(
+        self, client, auth_headers
+    ):
+        """Delayed failures should return a JSON error payload, not crash the stream."""
+
+        async def _delayed_failure(*args, **kwargs):
+            await asyncio.sleep(3.2)
+            raise ServiceUnavailableError(
+                service="Code Execution",
+                message="Delayed backend failure",
+            )
+
+        with patch(
+            "src.services.orchestrator.ExecutionOrchestrator.execute",
+            side_effect=_delayed_failure,
+        ):
+            response = client.post(
+                "/exec",
+                json={"code": "print('Hello')", "lang": "py"},
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 200
+        response_data = json.loads(response.text.lstrip())
+        assert response_data["error_type"] == "service_unavailable"
+        assert "Delayed backend failure" in response_data["error"]
 
     def test_exec_response_format_compatibility(
         self, client, auth_headers, mock_execution_service
