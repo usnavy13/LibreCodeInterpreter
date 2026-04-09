@@ -40,6 +40,7 @@ from .interfaces import (
     ExecutionServiceInterface,
     FileServiceInterface,
 )
+from .execution.output import OutputProcessor
 from .state import StateService
 from .state_archival import StateArchivalService
 
@@ -317,19 +318,55 @@ class ExecutionOrchestrator:
         """Mount files for code execution.
 
         Behavior:
-        1. If request.files[] is provided, mount those files (explicit mounting)
-        2. If no request.files[] but session_id exists, auto-mount ALL session files
-        3. If neither, return empty list
+        1. Mount explicit file references from request.files[]
+        2. Also auto-mount files already tracked in the current session
+        3. Deduplicate by mounted filename with precedence:
+           explicit refs > native current-session files > linked-input aliases
         """
-        # If explicit files provided, mount those (existing behavior)
+        explicit_files = []
         if ctx.request.files:
-            return await self._mount_explicit_files(ctx)
+            explicit_files = await self._mount_explicit_files(ctx)
 
-        # Auto-mount all session files when session_id exists but no explicit files
+        session_files = []
         if ctx.session_id:
-            return await self._auto_mount_session_files(ctx)
+            session_files = await self._auto_mount_session_files(ctx)
 
-        return []
+        native_session_files = [
+            file_info
+            for file_info in session_files
+            if not file_info.get("is_linked_input")
+        ]
+        linked_session_files = [
+            file_info for file_info in session_files if file_info.get("is_linked_input")
+        ]
+
+        return self._merge_mounted_files(
+            explicit_files,
+            native_session_files,
+            linked_session_files,
+        )
+
+    def _mount_dedupe_key(self, file_info: Dict[str, Any]) -> str:
+        """Return the normalized filename key used for mount precedence."""
+        return OutputProcessor.sanitize_filename(file_info.get("filename", ""))
+
+    def _merge_mounted_files(
+        self, *groups: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Merge mounted file groups using filename-based precedence."""
+        merged: List[Dict[str, Any]] = []
+        mounted_names = set()
+
+        for group in groups:
+            for file_info in group:
+                dedupe_key = self._mount_dedupe_key(file_info)
+                if not dedupe_key or dedupe_key in mounted_names:
+                    continue
+
+                merged.append(file_info)
+                mounted_names.add(dedupe_key)
+
+        return merged
 
     async def _mount_explicit_files(
         self, ctx: ExecutionContext
@@ -363,6 +400,13 @@ class ExecutionOrchestrator:
             if key in mounted_ids:
                 continue
 
+            if ctx.session_id and file_ref.session_id != ctx.session_id:
+                await self.file_service.link_file_into_session(
+                    ctx.session_id,
+                    file_ref.session_id,
+                    file_info.file_id,
+                )
+
             mounted.append(
                 {
                     "file_id": file_info.file_id,
@@ -370,6 +414,7 @@ class ExecutionOrchestrator:
                     "path": file_info.path,
                     "size": file_info.size,
                     "session_id": file_ref.session_id,
+                    "is_linked_input": False,
                 }
             )
             mounted_ids.add(key)
@@ -399,6 +444,13 @@ class ExecutionOrchestrator:
         session_files = await self.file_service.list_files(ctx.session_id)
 
         for file_info in session_files:
+            file_metadata = await self.file_service.get_file_metadata(
+                ctx.session_id, file_info.file_id
+            )
+            is_linked_input = (
+                file_metadata.get("type") == "linked_input" if file_metadata else False
+            )
+
             # Skip duplicates (shouldn't happen, but defensive)
             key = (ctx.session_id, file_info.file_id)
             if key in mounted_ids:
@@ -411,6 +463,7 @@ class ExecutionOrchestrator:
                     "path": file_info.path,
                     "size": file_info.size,
                     "session_id": ctx.session_id,
+                    "is_linked_input": is_linked_input,
                 }
             )
             mounted_ids.add(key)
@@ -595,6 +648,14 @@ class ExecutionOrchestrator:
                 if file_metadata and file_metadata.get("is_agent_file") == "1":
                     logger.debug(
                         "Skipping update for agent-assigned file (read-only)",
+                        filename=filename,
+                        file_id=file_id,
+                    )
+                    continue
+
+                if file_metadata and file_metadata.get("is_read_only") == "1":
+                    logger.debug(
+                        "Skipping update for read-only linked file",
                         filename=filename,
                         file_id=file_id,
                     )

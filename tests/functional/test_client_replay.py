@@ -20,7 +20,9 @@ def _normalize_artifact_files(result: dict) -> list[dict]:
     ]
 
 
-async def _fetch_runtime_file_refs(async_client, auth_headers, session_id: str) -> list[dict]:
+async def _fetch_runtime_file_refs(
+    async_client, auth_headers, session_id: str
+) -> list[dict]:
     """Mirror librechat-agents /files?detail=full fallback behavior."""
     response = await async_client.get(
         f"/files/{session_id}?detail=full",
@@ -113,6 +115,84 @@ async def _start_ptc_like_runtime(
 
 class TestDirectClientReplay:
     """Replay the real direct execute_code client flow."""
+
+    @pytest.mark.asyncio
+    async def test_uploaded_files_follow_runtime_session_when_first_exec_has_no_outputs(
+        self, async_client, auth_headers, unique_entity_id
+    ):
+        """An uploaded file should remain available after the first exec returns no artifacts."""
+        upload = await async_client.post(
+            "/upload",
+            headers={"x-api-key": auth_headers["x-api-key"]},
+            files={"files": ("report.csv", b"a,b\n1,2\n", "text/csv")},
+            data={"entity_id": unique_entity_id},
+        )
+        assert upload.status_code == 200, upload.text
+        upload_session_id = upload.json()["session_id"]
+        upload_refs = await _fetch_runtime_file_refs(
+            async_client, auth_headers, upload_session_id
+        )
+
+        first = await _exec_like_runtime(
+            async_client,
+            auth_headers,
+            code="print(open('report.csv').read().strip())",
+            injected_files=upload_refs,
+        )
+        assert "a,b" in first["stdout"]
+        assert first["files"] == []
+
+        second = await _exec_like_runtime(
+            async_client,
+            auth_headers,
+            code="print(open('report.csv').read().strip())",
+            session_id=first["session_id"],
+        )
+        assert "a,b" in second["stdout"]
+        assert "1,2" in second["stdout"]
+
+    @pytest.mark.asyncio
+    async def test_uploaded_files_survive_runtime_fallback_after_outputs_are_generated(
+        self, async_client, auth_headers, unique_entity_id
+    ):
+        """Runtime fallback should surface both linked uploads and generated files."""
+        upload = await async_client.post(
+            "/upload",
+            headers={"x-api-key": auth_headers["x-api-key"]},
+            files={"files": ("report.csv", b"a,b\n1,2\n", "text/csv")},
+            data={"entity_id": unique_entity_id},
+        )
+        assert upload.status_code == 200, upload.text
+        upload_session_id = upload.json()["session_id"]
+        upload_refs = await _fetch_runtime_file_refs(
+            async_client, auth_headers, upload_session_id
+        )
+
+        first = await _exec_like_runtime(
+            async_client,
+            auth_headers,
+            code=(
+                "from pathlib import Path\n"
+                "report = Path('/mnt/data/report.csv').read_text().strip()\n"
+                "Path('/mnt/data/analysis.txt').write_text(f'copied:{report}')\n"
+                "print(report)\n"
+            ),
+            injected_files=upload_refs,
+        )
+        assert "a,b" in first["stdout"]
+        assert first["files"], "Expected generated output file from first execution"
+
+        second = await _exec_like_runtime(
+            async_client,
+            auth_headers,
+            code=(
+                "print(open('report.csv').read().strip())\n"
+                "print(open('analysis.txt').read().strip())\n"
+            ),
+            session_id=first["session_id"],
+        )
+        assert "a,b" in second["stdout"]
+        assert "copied:a,b\n1,2" in second["stdout"]
 
     @pytest.mark.asyncio
     async def test_generated_files_replay_with_injected_files_and_fallback(
@@ -262,9 +342,7 @@ class TestProgrammaticClientReplay:
         assert "suffix=done" in result["stdout"]
 
     @pytest.mark.asyncio
-    async def test_ptc_supports_multiple_round_trips(
-        self, async_client, auth_headers
-    ):
+    async def test_ptc_supports_multiple_round_trips(self, async_client, auth_headers):
         """Sequential awaits should produce multiple tool-call rounds."""
         initial = await _start_ptc_like_runtime(
             async_client,
@@ -350,9 +428,7 @@ class TestExecStreamingReplay:
             json={
                 "lang": "py",
                 "code": (
-                    "import time\n"
-                    "time.sleep(5)\n"
-                    "print('stream complete')\n"
+                    "import time\n" "time.sleep(5)\n" "print('stream complete')\n"
                 ),
             },
             timeout=timeout,
@@ -372,7 +448,7 @@ class TestExecStreamingReplay:
         assert "stream complete" in payload["stdout"]
 
         if async_client.base_url.scheme == "http":
-            assert first_chunk_latency < 4.5, (
-                f"First keepalive arrived after {first_chunk_latency:.2f}s"
-            )
+            assert (
+                first_chunk_latency < 4.5
+            ), f"First keepalive arrived after {first_chunk_latency:.2f}s"
             assert body.startswith(" "), "Expected leading whitespace keepalive chunk"

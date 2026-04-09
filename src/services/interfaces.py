@@ -84,6 +84,13 @@ class FileServiceInterface(ABC):
     """Interface for file management service."""
 
     @abstractmethod
+    async def get_file_metadata(
+        self, session_id: str, file_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Retrieve raw file metadata."""
+        pass
+
+    @abstractmethod
     async def upload_file(
         self, session_id: str, request: FileUploadRequest
     ) -> Tuple[str, str]:
@@ -120,6 +127,13 @@ class FileServiceInterface(ABC):
         self, session_id: str, file_id: str, dest_path: str
     ) -> bool:
         """Stream file content directly to a local file path."""
+        pass
+
+    @abstractmethod
+    async def link_file_into_session(
+        self, target_session_id: str, source_session_id: str, source_file_id: str
+    ) -> Optional[FileInfo]:
+        """Create or reuse a read-only alias for a source file in another session."""
         pass
 
     @abstractmethod

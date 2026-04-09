@@ -75,6 +75,62 @@ class FileService(FileServiceInterface):
         """Generate Redis key for session file list."""
         return f"session_files:{session_id}"
 
+    def _get_file_links_key(self, session_id: str, file_id: str) -> str:
+        """Generate Redis key for aliases that reference a source file."""
+        return f"file_links:{session_id}:{file_id}"
+
+    async def _register_link_reference(
+        self,
+        source_session_id: str,
+        source_file_id: str,
+        linked_session_id: str,
+        linked_file_id: str,
+    ) -> None:
+        """Track a linked-input alias for cleanup safety."""
+        links_key = self._get_file_links_key(source_session_id, source_file_id)
+        ttl_seconds = settings.get_session_ttl_minutes() * 60
+        await self.redis_client.sadd(links_key, f"{linked_session_id}:{linked_file_id}")
+        await self.redis_client.expire(links_key, ttl_seconds)
+
+    async def _remove_link_reference(
+        self,
+        source_session_id: str,
+        source_file_id: str,
+        linked_session_id: str,
+        linked_file_id: str,
+    ) -> None:
+        """Remove a linked-input alias reference."""
+        links_key = self._get_file_links_key(source_session_id, source_file_id)
+        await self.redis_client.srem(links_key, f"{linked_session_id}:{linked_file_id}")
+
+    async def _has_link_references(self, session_id: str, file_id: str) -> bool:
+        """Return True when other session aliases still reference a file."""
+        links_key = self._get_file_links_key(session_id, file_id)
+        return bool(await self.redis_client.smembers(links_key))
+
+    async def _find_linked_file(
+        self, target_session_id: str, source_session_id: str, source_file_id: str
+    ) -> Optional[str]:
+        """Return an existing linked-input alias for the given source file."""
+        session_files_key = self._get_session_files_key(target_session_id)
+        file_ids = await self.redis_client.smembers(session_files_key)
+
+        for candidate_file_id in file_ids:
+            metadata = await self.get_file_metadata(
+                target_session_id, candidate_file_id
+            )
+            if not metadata:
+                continue
+
+            if (
+                metadata.get("type") == "linked_input"
+                and metadata.get("source_session_id") == source_session_id
+                and metadata.get("source_file_id") == source_file_id
+            ):
+                return candidate_file_id
+
+        return None
+
     async def _store_file_metadata(
         self, session_id: str, file_id: str, metadata: Dict[str, Any]
     ) -> None:
@@ -317,6 +373,69 @@ class FileService(FileServiceInterface):
             logger.error("Failed to list files", error=str(e), session_id=session_id)
             return []
 
+    async def link_file_into_session(
+        self, target_session_id: str, source_session_id: str, source_file_id: str
+    ) -> Optional[FileInfo]:
+        """Create or reuse a read-only linked alias in the target session."""
+        source_metadata = await self.get_file_metadata(
+            source_session_id, source_file_id
+        )
+        if not source_metadata:
+            logger.warning(
+                "Cannot link missing source file",
+                source_session_id=source_session_id,
+                source_file_id=source_file_id,
+                target_session_id=target_session_id,
+            )
+            return None
+
+        existing_linked_file_id = await self._find_linked_file(
+            target_session_id, source_session_id, source_file_id
+        )
+        if existing_linked_file_id:
+            return await self.get_file_info(target_session_id, existing_linked_file_id)
+
+        linked_file_id = generate_file_id()
+        metadata = {
+            "file_id": linked_file_id,
+            "filename": source_metadata["filename"],
+            "content_type": source_metadata["content_type"],
+            "object_key": source_metadata["object_key"],
+            "session_id": target_session_id,
+            "created_at": datetime.utcnow().isoformat(),
+            "size": source_metadata["size"],
+            "path": source_metadata["path"],
+            "type": "linked_input",
+            "source_session_id": source_session_id,
+            "source_file_id": source_file_id,
+            "is_read_only": "1",
+        }
+
+        await self._store_file_metadata(target_session_id, linked_file_id, metadata)
+        await self._register_link_reference(
+            source_session_id,
+            source_file_id,
+            target_session_id,
+            linked_file_id,
+        )
+
+        logger.debug(
+            "Linked file into session",
+            target_session_id=target_session_id,
+            linked_file_id=linked_file_id,
+            source_session_id=source_session_id,
+            source_file_id=source_file_id,
+        )
+
+        return FileInfo(
+            file_id=linked_file_id,
+            filename=metadata["filename"],
+            size=metadata["size"],
+            content_type=metadata["content_type"],
+            created_at=datetime.fromisoformat(metadata["created_at"]),
+            path=metadata["path"],
+        )
+
     async def download_file(self, session_id: str, file_id: str) -> Optional[str]:
         """Generate download URL for a file."""
         metadata = await self.get_file_metadata(session_id, file_id)
@@ -352,6 +471,30 @@ class FileService(FileServiceInterface):
         metadata = await self.get_file_metadata(session_id, file_id)
         if not metadata:
             return False
+
+        if metadata.get("type") == "linked_input":
+            await self._delete_file_metadata(session_id, file_id)
+            await self._remove_link_reference(
+                metadata["source_session_id"],
+                metadata["source_file_id"],
+                session_id,
+                file_id,
+            )
+            logger.debug(
+                "Deleted linked file alias",
+                session_id=session_id,
+                file_id=file_id,
+            )
+            return True
+
+        if await self._has_link_references(session_id, file_id):
+            await self._delete_file_metadata(session_id, file_id)
+            logger.debug(
+                "Deleted file metadata but retained shared object",
+                session_id=session_id,
+                file_id=file_id,
+            )
+            return True
 
         object_key = metadata["object_key"]
 
@@ -753,6 +896,12 @@ class FileService(FileServiceInterface):
                 if object_session_id in active_session_ids:
                     continue
 
+                source_file_id = parts[3] if len(parts) >= 4 else None
+                if source_file_id and await self._has_link_references(
+                    object_session_id, source_file_id
+                ):
+                    continue
+
                 # Double-check via Redis existence in case index is stale
                 if object_session_id not in checked_missing_sessions:
                     try:
@@ -824,6 +973,14 @@ class FileService(FileServiceInterface):
             if not metadata:
                 logger.warning(
                     "File not found for content update",
+                    session_id=session_id[:12],
+                    file_id=file_id,
+                )
+                return False
+
+            if metadata.get("is_read_only") == "1":
+                logger.debug(
+                    "Skipping update for read-only file",
                     session_id=session_id[:12],
                     file_id=file_id,
                 )

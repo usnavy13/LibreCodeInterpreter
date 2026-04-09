@@ -2,7 +2,7 @@
 
 import pytest
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from unittest.mock import AsyncMock
 
 from src.services.orchestrator import ExecutionOrchestrator, ExecutionContext
 from src.models.exec import ExecRequest, FileRef
@@ -48,7 +48,8 @@ def mock_file_service():
     service = AsyncMock()
     service.get_file_info = AsyncMock(return_value=None)
     service.list_files = AsyncMock(return_value=[])
-    service._get_file_metadata = AsyncMock(return_value=None)
+    service.get_file_metadata = AsyncMock(return_value=None)
+    service.link_file_into_session = AsyncMock(return_value=None)
     return service
 
 
@@ -108,6 +109,12 @@ class TestMountFiles:
                 ),
             ]
         )
+        mock_file_service.get_file_metadata = AsyncMock(
+            side_effect=[
+                {"type": "upload"},
+                {"type": "output"},
+            ]
+        )
 
         request = ExecRequest(code="print('hello')", lang="py")
         ctx = ExecutionContext(
@@ -147,28 +154,39 @@ class TestMountFiles:
     async def test_mount_files_explicit_files_takes_precedence(
         self, orchestrator, mock_file_service
     ):
-        """When explicit files provided, should use those instead of auto-mount."""
+        """Explicit files should win over current-session files with the same name."""
         from src.models.exec import RequestFile
 
-        # Setup: explicit file
         mock_file_service.get_file_info = AsyncMock(
             return_value=FileInfo(
                 file_id="explicit-file",
-                filename="explicit.txt",
+                filename="report.csv",
                 size=50,
                 content_type="text/plain",
                 created_at=datetime.now(),
-                path="/mnt/data/explicit.txt",
+                path="/mnt/data/report.csv",
             )
         )
-        mock_file_service.list_files = AsyncMock(return_value=[])
+        mock_file_service.list_files = AsyncMock(
+            return_value=[
+                FileInfo(
+                    file_id="native-file",
+                    filename="report.csv",
+                    size=60,
+                    content_type="text/csv",
+                    created_at=datetime.now(),
+                    path="/mnt/data/report.csv",
+                ),
+            ]
+        )
+        mock_file_service.get_file_metadata = AsyncMock(return_value={"type": "upload"})
 
         request = ExecRequest(
             code="print('hello')",
             lang="py",
             files=[
                 RequestFile(
-                    id="explicit-file", session_id="other-session", name="explicit.txt"
+                    id="explicit-file", session_id="other-session", name="report.csv"
                 ),
             ],
         )
@@ -180,14 +198,19 @@ class TestMountFiles:
 
         result = await orchestrator._mount_files(ctx)
 
-        # Verify only explicit file was mounted
+        # Verify only the explicit file wins for the mounted filename
         assert len(result) == 1
         assert result[0]["file_id"] == "explicit-file"
-        assert result[0]["filename"] == "explicit.txt"
+        assert result[0]["filename"] == "report.csv"
         assert result[0]["session_id"] == "other-session"  # Uses file's session_id
 
-        # Verify get_file_info was called, not list_files for auto-mount
+        # Verify cross-session explicit files are linked into the current session
         mock_file_service.get_file_info.assert_called_once()
+        mock_file_service.link_file_into_session.assert_called_once_with(
+            "test-session-123",
+            "other-session",
+            "explicit-file",
+        )
 
 
 class TestAutoMountSessionFiles:
@@ -208,6 +231,7 @@ class TestAutoMountSessionFiles:
                 ),
             ]
         )
+        mock_file_service.get_file_metadata = AsyncMock(return_value={"type": "upload"})
 
         request = ExecRequest(code="print('hello')", lang="py")
         ctx = ExecutionContext(
@@ -237,6 +261,7 @@ class TestAutoMountSessionFiles:
                 ),
             ]
         )
+        mock_file_service.get_file_metadata = AsyncMock(return_value={"type": "upload"})
 
         request = ExecRequest(code="print('hello')", lang="py")
         ctx = ExecutionContext(
@@ -254,8 +279,41 @@ class TestAutoMountSessionFiles:
                 "path": "/mnt/data/data.csv",
                 "size": 100,
                 "session_id": "test-session-123",
+                "is_linked_input": False,
             }
         ]
+
+    @pytest.mark.asyncio
+    async def test_auto_mount_marks_linked_input_aliases(
+        self, orchestrator, mock_file_service
+    ):
+        """Auto-mount should flag linked-input aliases for precedence and read-only handling."""
+        mock_file_service.list_files = AsyncMock(
+            return_value=[
+                FileInfo(
+                    file_id="linked-file",
+                    filename="report.csv",
+                    size=100,
+                    content_type="text/csv",
+                    created_at=datetime.now(),
+                    path="/report.csv",
+                ),
+            ]
+        )
+        mock_file_service.get_file_metadata = AsyncMock(
+            return_value={"type": "linked_input", "is_read_only": "1"}
+        )
+
+        request = ExecRequest(code="print('hello')", lang="py")
+        ctx = ExecutionContext(
+            request=request,
+            request_id="test-123",
+            session_id="test-session-123",
+        )
+
+        result = await orchestrator._auto_mount_session_files(ctx)
+
+        assert result[0]["is_linked_input"] is True
 
 
 class TestFileRefResponse:
@@ -350,9 +408,7 @@ class TestAgentFileSessionIsolation:
             lang="py",
             user_id="userA",
             files=[
-                RequestFile(
-                    id="file-1", session_id="user-session-S2", name="data.csv"
-                ),
+                RequestFile(id="file-1", session_id="user-session-S2", name="data.csv"),
             ],
         )
         ctx = ExecutionContext(request=request, request_id="test-isolation-2")
@@ -388,9 +444,7 @@ class TestAgentFileSessionIsolation:
             lang="py",
             user_id="userB",  # Different user
             files=[
-                RequestFile(
-                    id="file-1", session_id="user-session-S2", name="data.csv"
-                ),
+                RequestFile(id="file-1", session_id="user-session-S2", name="data.csv"),
             ],
         )
         ctx = ExecutionContext(request=request, request_id="test-isolation-3")
@@ -463,9 +517,7 @@ class TestExplicitFileMounting:
     """Tests for explicit file mounting behavior."""
 
     @pytest.mark.asyncio
-    async def test_explicit_mount_files(
-        self, orchestrator, mock_file_service
-    ):
+    async def test_explicit_mount_files(self, orchestrator, mock_file_service):
         """Explicit mount should mount requested files."""
         from src.models.exec import RequestFile
 
