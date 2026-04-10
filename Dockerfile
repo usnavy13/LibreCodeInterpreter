@@ -1,13 +1,12 @@
 # syntax=docker/dockerfile:1.7
 # Unified multi-stage Dockerfile:
-# - runtime-core: common polyglot runtime without R
-# - runtime-r: heavyweight R layer
-# - app: API/application layer
+# - runtime-core: internal polyglot build stage without R
+# - runtime-r: internal heavyweight R build stage
+# - app: published API/application image
 
 ARG UBUNTU_VERSION=24.04
 ARG GO_VERSION=1.23.6
 ARG NSJAIL_REF=b7ff9f30188a7845d41366e1e3b3929f464ac443
-ARG RUNTIME_R_BASE=runtime-r
 
 FROM ubuntu:${UBUNTU_VERSION} AS runtime-core
 
@@ -268,7 +267,7 @@ RUN R -e "options(repos = c(CRAN = 'https://cloud.r-project.org')); \
 
 ENV R_LIBS_USER=/usr/local/lib/R/site-library
 
-FROM ${RUNTIME_R_BASE} AS app
+FROM runtime-r AS app
 
 ARG DEBIAN_FRONTEND=noninteractive
 

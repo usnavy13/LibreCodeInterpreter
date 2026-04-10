@@ -16,34 +16,41 @@ permissions:
 
 env:
   PYTHON_VERSION: "3.11"
-  REGISTRY_IMAGE: ghcr.io/usnavy13/librecodeinterpreter
-  RUNTIME_R_IMAGE: ghcr.io/usnavy13/librecodeinterpreter/runtime-r
-  BUILDCACHE_IMAGE: ghcr.io/usnavy13/librecodeinterpreter/buildcache
+  REGISTRY_IMAGE_MAIN: ghcr.io/usnavy13/librecodeinterpreter
+  REGISTRY_IMAGE_DEV: ghcr.io/usnavy13/librecodeinterpreter-dev
 
 jobs:
   prepare:
     runs-on: ubuntu-latest
     outputs:
-      runtime_hash: ${{ steps.runtime.outputs.runtime_hash }}
+      registry_image: ${{ steps.tags.outputs.registry_image }}
       sha_tag: ${{ steps.tags.outputs.sha_tag }}
       moving_tag: ${{ steps.tags.outputs.moving_tag }}
+      publish_latest: ${{ steps.tags.outputs.publish_latest }}
       version_tag: ${{ steps.tags.outputs.version_tag }}
     steps:
       - uses: actions/checkout@v4
-
-      - id: runtime
-        run: echo "runtime_hash=$(scripts/ci/compute_runtime_hash.sh)" >> "${GITHUB_OUTPUT}"
 
       - id: tags
         run: |
           echo "sha_tag=sha-${GITHUB_SHA}" >> "${GITHUB_OUTPUT}"
 
           if [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
+            echo "registry_image=${REGISTRY_IMAGE_MAIN}" >> "${GITHUB_OUTPUT}"
             echo "moving_tag=main" >> "${GITHUB_OUTPUT}"
+            echo "publish_latest=true" >> "${GITHUB_OUTPUT}"
           elif [[ "${GITHUB_REF}" == "refs/heads/dev" ]]; then
+            echo "registry_image=${REGISTRY_IMAGE_DEV}" >> "${GITHUB_OUTPUT}"
             echo "moving_tag=dev" >> "${GITHUB_OUTPUT}"
-          else
+            echo "publish_latest=true" >> "${GITHUB_OUTPUT}"
+          elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            echo "registry_image=${REGISTRY_IMAGE_MAIN}" >> "${GITHUB_OUTPUT}"
             echo "moving_tag=" >> "${GITHUB_OUTPUT}"
+            echo "publish_latest=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "registry_image=${REGISTRY_IMAGE_MAIN}" >> "${GITHUB_OUTPUT}"
+            echo "moving_tag=" >> "${GITHUB_OUTPUT}"
+            echo "publish_latest=false" >> "${GITHUB_OUTPUT}"
           fi
 
           if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
@@ -76,12 +83,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - id: runtime
-        name: Resolve runtime base
-        run: |
-          runtime_base="$(scripts/ci/resolve_runtime_base.sh "${RUNTIME_R_IMAGE}" "${{ needs.prepare.outputs.runtime_hash }}")"
-          echo "runtime_base=${runtime_base}" >> "${GITHUB_OUTPUT}"
-
       - name: Build and push app image
         uses: docker/build-push-action@v6
         with:
@@ -90,13 +91,9 @@ jobs:
           push: true
           platforms: ${{ matrix.platform }}
           provenance: false
-          tags: ${{ env.REGISTRY_IMAGE }}:${{ github.sha }}-${{ matrix.arch }}
-          build-args: |
-            RUNTIME_R_BASE=${{ steps.runtime.outputs.runtime_base }}
-          cache-from: |
-            type=registry,ref=${{ env.BUILDCACHE_IMAGE }}:app-${{ matrix.arch }}
-            type=registry,ref=${{ env.BUILDCACHE_IMAGE }}:runtime-r-${{ matrix.arch }}
-          cache-to: type=registry,ref=${{ env.BUILDCACHE_IMAGE }}:app-${{ matrix.arch }},mode=max
+          tags: ${{ needs.prepare.outputs.registry_image }}:${{ github.sha }}-${{ matrix.arch }}
+          cache-from: type=gha,scope=release-app-${{ matrix.arch }}
+          cache-to: type=gha,scope=release-app-${{ matrix.arch }},mode=max
 
   smoke:
     needs: [prepare, build-app]
@@ -131,11 +128,11 @@ jobs:
           pip install pytest pytest-asyncio pytest-cov pytest-mock
 
       - name: Pull release candidate
-        run: docker pull "${REGISTRY_IMAGE}:${GITHUB_SHA}-${{ matrix.arch }}"
+        run: docker pull "${{ needs.prepare.outputs.registry_image }}:${GITHUB_SHA}-${{ matrix.arch }}"
 
       - name: Start smoke stack
         env:
-          API_IMAGE: ${{ env.REGISTRY_IMAGE }}:${{ github.sha }}-${{ matrix.arch }}
+          API_IMAGE: ${{ needs.prepare.outputs.registry_image }}:${{ github.sha }}-${{ matrix.arch }}
         run: |
           cp .env.example .env
           docker compose up -d
@@ -194,18 +191,22 @@ jobs:
       - name: Publish multi-arch manifest tags
         run: |
           tags=(
-            "-t" "${REGISTRY_IMAGE}:${{ needs.prepare.outputs.sha_tag }}"
+            "-t" "${{ needs.prepare.outputs.registry_image }}:${{ needs.prepare.outputs.sha_tag }}"
           )
 
           if [[ -n "${{ needs.prepare.outputs.moving_tag }}" ]]; then
-            tags+=("-t" "${REGISTRY_IMAGE}:${{ needs.prepare.outputs.moving_tag }}")
+            tags+=("-t" "${{ needs.prepare.outputs.registry_image }}:${{ needs.prepare.outputs.moving_tag }}")
+          fi
+
+          if [[ "${{ needs.prepare.outputs.publish_latest }}" == "true" ]]; then
+            tags+=("-t" "${{ needs.prepare.outputs.registry_image }}:latest")
           fi
 
           if [[ -n "${{ needs.prepare.outputs.version_tag }}" ]]; then
-            tags+=("-t" "${REGISTRY_IMAGE}:${{ needs.prepare.outputs.version_tag }}")
+            tags+=("-t" "${{ needs.prepare.outputs.registry_image }}:${{ needs.prepare.outputs.version_tag }}")
           fi
 
           docker buildx imagetools create \
             "${tags[@]}" \
-            "${REGISTRY_IMAGE}:${GITHUB_SHA}-amd64" \
-            "${REGISTRY_IMAGE}:${GITHUB_SHA}-arm64"
+            "${{ needs.prepare.outputs.registry_image }}:${GITHUB_SHA}-amd64" \
+            "${{ needs.prepare.outputs.registry_image }}:${GITHUB_SHA}-arm64"

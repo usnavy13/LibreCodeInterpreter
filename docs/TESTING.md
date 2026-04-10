@@ -99,11 +99,10 @@ If a mocked integration test passes but a `live_api` or `client_replay` test fai
 
 ## CI/CD Test Tiers
 
-GitHub Actions now uses four workflow tiers:
+GitHub Actions now uses three workflow tiers:
 
 - `ci.yml`: required PR checks for static analysis, unit tests, `contract_only` integration tests, amd64 app build validation, amd64 live smoke tests, and amd64 `client_replay`
-- `runtime.yml`: publishes `runtime-core` and `runtime-r` images when Docker/runtime inputs change
-- `release.yml`: publishes multi-arch app images after per-arch smoke validation
-- `nightly.yml`: refreshes heavy runtime layers and runs the full/slow live validation suites
+- `release.yml`: publishes the multi-arch app image used by `docker-compose.prod.yml` after per-arch smoke validation
+- `nightly.yml`: builds the app image locally and runs the full/slow live validation suites
 
 The amd64 live smoke suite is the required compatibility gate on pull requests. Slow live scenarios stay in nightly validation so the PR path keeps the authoritative checks without forcing the heaviest runtime coverage into every change.

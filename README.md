@@ -63,6 +63,49 @@ docker compose -f docker-compose.prod.yml pull
 docker compose -f docker-compose.prod.yml up -d
 ```
 
+### Published Image Channels
+
+The project now publishes two app-image channels:
+
+- `ghcr.io/usnavy13/librecodeinterpreter`
+  - stable branch tags: `main`, `latest`
+  - immutable build tags: `sha-<commit>`, release tags like `v1.2.3`
+- `ghcr.io/usnavy13/librecodeinterpreter-dev`
+  - development branch tags: `dev`, `latest`
+  - immutable build tags: `sha-<commit>`
+
+`docker-compose.prod.yml` stays pinned to the stable package by default:
+
+```yaml
+image: ghcr.io/usnavy13/librecodeinterpreter:main
+```
+
+### Use A Local Override File
+
+If you want to pull the current `dev` image or build from your working tree without changing tracked compose files:
+
+1. Copy the example override:
+
+   ```bash
+   cp docker-compose.override.example.yml docker-compose.override.yml
+   ```
+
+2. Use it with the production compose stack:
+
+   ```bash
+   docker compose -f docker-compose.prod.yml -f docker-compose.override.yml pull
+   docker compose -f docker-compose.prod.yml -f docker-compose.override.yml up -d
+   ```
+
+The checked-in example defaults to `ghcr.io/usnavy13/librecodeinterpreter-dev:latest`.
+If you want to build from your local checkout instead, edit `docker-compose.override.yml`
+and switch to the commented `build:` block in the example. In that case, skip the
+`pull` step and run:
+
+```bash
+docker compose -f docker-compose.prod.yml -f docker-compose.override.yml up --build -d
+```
+
 ## Build From Source
 
 If you are developing locally or need to customize the image, use the source-backed workflow instead:
@@ -72,7 +115,7 @@ docker build --target app -t code-interpreter:nsjail .
 docker compose up -d
 ```
 
-The Dockerfile is split into `runtime-core`, `runtime-r`, and `app` targets so CI can reuse published runtime layers and avoid rebuilding the heavyweight R stage on every app change.
+The Dockerfile keeps `runtime-core` and `runtime-r` as internal build stages, but only the unified `app` image is published for deployment.
 
 ## Admin Dashboard
 
@@ -164,14 +207,13 @@ For comprehensive testing details, see [TESTING.md](docs/TESTING.md).
 
 ## CI/CD
 
-GitHub Actions is split into four workflows:
+GitHub Actions is split into three workflows:
 
 - `ci.yml`: PR validation and required checks
-- `runtime.yml`: publish `runtime-core` and `runtime-r` cacheable base images
 - `release.yml`: publish multi-arch app images for `main`, `dev`, and release tags
-- `nightly.yml`: rebuild heavy runtime layers and run slow/full live validation
+- `nightly.yml`: build the app image locally and run slow/full live validation
 
-Published images now use native `amd64` and `arm64` builds instead of a single emulated multi-arch build, and the app image can reuse the previously published `runtime-r` layer when runtime inputs have not changed.
+Published images use native `amd64` and `arm64` builds and are exposed as separate stable and dev GHCR packages.
 
 ## Security
 

@@ -4,8 +4,6 @@ services:
     build:
       context: .
       target: app
-      args:
-        RUNTIME_R_BASE: ${RUNTIME_R_BASE:-runtime-r}
     image: ${API_IMAGE:-code-interpreter:nsjail}
     pull_policy: never
     container_name: code-interpreter-api
