@@ -21,21 +21,35 @@ def mock_services():
         get_session_service,
         get_execution_service,
         get_file_service,
+        get_state_service,
+        get_state_archival_service,
     )
 
     mock_session_service = AsyncMock()
     mock_execution_service = AsyncMock()
     mock_file_service = AsyncMock()
+    mock_state_service = AsyncMock()
+    mock_state_archival_service = AsyncMock()
+
+    mock_state_service.get_state.return_value = None
+    mock_state_archival_service.restore_state.return_value = None
+    mock_state_archival_service.archive_state.return_value = True
 
     # Override the dependencies in the FastAPI app
     app.dependency_overrides[get_session_service] = lambda: mock_session_service
     app.dependency_overrides[get_execution_service] = lambda: mock_execution_service
     app.dependency_overrides[get_file_service] = lambda: mock_file_service
+    app.dependency_overrides[get_state_service] = lambda: mock_state_service
+    app.dependency_overrides[get_state_archival_service] = (
+        lambda: mock_state_archival_service
+    )
 
     yield {
         "session": mock_session_service,
         "execution": mock_execution_service,
         "file": mock_file_service,
+        "state": mock_state_service,
+        "state_archival": mock_state_archival_service,
     }
 
     # Clean up after test

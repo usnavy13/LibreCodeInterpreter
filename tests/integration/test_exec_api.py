@@ -92,18 +92,47 @@ def mock_file_service():
 
 
 @pytest.fixture(autouse=True)
-def mock_dependencies(mock_session_service, mock_execution_service, mock_file_service):
+def mock_state_service():
+    """Mock state service for testing."""
+    service = AsyncMock()
+    service.get_state.return_value = None
+    return service
+
+
+@pytest.fixture
+def mock_state_archival_service():
+    """Mock state archival service for testing."""
+    service = AsyncMock()
+    service.restore_state.return_value = None
+    service.archive_state.return_value = True
+    return service
+
+
+@pytest.fixture(autouse=True)
+def mock_dependencies(
+    mock_session_service,
+    mock_execution_service,
+    mock_file_service,
+    mock_state_service,
+    mock_state_archival_service,
+):
     """Mock all dependencies for testing."""
     from src.dependencies.services import (
         get_session_service,
         get_execution_service,
         get_file_service,
+        get_state_service,
+        get_state_archival_service,
     )
 
     # Override the dependencies in the FastAPI app
     app.dependency_overrides[get_session_service] = lambda: mock_session_service
     app.dependency_overrides[get_execution_service] = lambda: mock_execution_service
     app.dependency_overrides[get_file_service] = lambda: mock_file_service
+    app.dependency_overrides[get_state_service] = lambda: mock_state_service
+    app.dependency_overrides[get_state_archival_service] = (
+        lambda: mock_state_archival_service
+    )
 
     yield
 
