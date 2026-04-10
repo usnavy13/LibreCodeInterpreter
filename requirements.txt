@@ -1,7 +1,7 @@
 requests>=2.31.0,<3
 # Core API framework
 fastapi==0.129.0
-uvicorn[standard]==0.41.0
+uvicorn[standard]==0.42.0
 
 # Data validation and serialization
 pydantic==2.12.5
