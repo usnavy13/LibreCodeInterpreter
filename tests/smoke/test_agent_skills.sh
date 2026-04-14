@@ -71,11 +71,17 @@ echo "=== Python Packages (Media) ==="
 check_python cv2
 
 echo ""
+echo "=== Python Packages (PPTX) ==="
+check_python pptx
+check_python markitdown
+
+echo ""
 echo "=== Node.js Packages ==="
 check_node docx
 check_node pdf-lib
 check_node xlsx
 check_node exceljs
+check_node pptxgenjs
 
 echo ""
 echo "=== Skills Directory ==="
@@ -95,7 +101,11 @@ for f in \
     docx/scripts/office/pack.py \
     docx/scripts/office/validate.py \
     xlsx/scripts/recalc.py \
-    xlsx/scripts/office/soffice.py; do
+    xlsx/scripts/office/soffice.py \
+    pptx/scripts/add_slide.py \
+    pptx/scripts/clean.py \
+    pptx/scripts/thumbnail.py \
+    pptx/scripts/office/soffice.py; do
     if [ -f "$SKILLS_ROOT/$f" ]; then pass "$f"; else fail "$f missing"; fi
 done
 

@@ -34,3 +34,4 @@ handlebars
 cheerio
 marked
 docx
+pptxgenjs

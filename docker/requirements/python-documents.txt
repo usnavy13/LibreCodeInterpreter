@@ -11,6 +11,7 @@ reportlab>=4.0
 # Office documents
 python-docx>=1.1
 python-pptx>=0.6
+markitdown[pptx]>=0.1
 mammoth>=1.6
 docx2txt>=0.8
 docx2python>=2.0

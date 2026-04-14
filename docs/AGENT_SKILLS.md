@@ -9,6 +9,7 @@ The image includes pre-installed skills, system binaries, and Python/Node packag
 | Agent | Key Dependencies | Skills Directory |
 |-------|-----------------|-----------------|
 | Word DOCX "Complete" | LibreOffice, pandoc, python-docx, lxml | `/opt/skills/docx/` |
+| PowerPoint PPTX | LibreOffice Impress, python-pptx, pptxgenjs, markitdown | `/opt/skills/pptx/` |
 | Excel/XLSX | LibreOffice Calc, openpyxl, pandas | `/opt/skills/xlsx/` |
 | PDF | qpdf, pdfplumber, pypdf, tesseract-ocr, poppler-utils | — |
 | Quick Edits | ffmpeg, ffprobe, Pillow | — |
@@ -42,6 +43,15 @@ Skills are embedded in the image at `/opt/skills/` and mounted read-only inside 
 │       │   │   └── redlining.py
 │       │   └── schemas/          # XSD schemas (ISO 29500, ECMA, Microsoft)
 │       └── templates/            # XML templates for comments
+├── pptx/
+│   ├── SKILL.md
+│   ├── editing.md                # Template-based editing workflow
+│   ├── pptxgenjs.md              # PptxGenJS tutorial (create from scratch)
+│   └── scripts/
+│       ├── add_slide.py          # Duplicate slide or create from layout
+│       ├── clean.py              # Remove orphaned slides/media
+│       ├── thumbnail.py          # Visual thumbnail grid for templates
+│       └── office/ → ../../docx/scripts/office  (symlink, shared)
 └── xlsx/
     ├── SKILL.md
     └── scripts/
@@ -66,8 +76,10 @@ The `SKILLS_ROOT` environment variable is set to `/opt/skills` in all sandbox ex
 | `pdfplumber` (Python) | PDF table extraction | PDF agent |
 | `pypdf` (Python) | Modern PDF library | PDF agent |
 | `docx` (Node.js) | Word document generation from JS | Word agent |
+| `markitdown[pptx]` (Python) | PPTX/document to markdown conversion | PPTX agent |
+| `pptxgenjs` (Node.js) | PowerPoint generation from JS | PPTX agent |
 
-Already present in base image: `pandoc`, `poppler-utils`, `tesseract-ocr`, `ffmpeg`, `python-docx`, `openpyxl`, `matplotlib`, `seaborn`, `pandas`, `numpy`, `scipy`, `Pillow`, `pdf-lib` (Node), `xlsx`/`exceljs` (Node).
+Already present in base image: `pandoc`, `poppler-utils` (pdftoppm), `tesseract-ocr`, `ffmpeg`, `python-docx`, `python-pptx`, `openpyxl`, `defusedxml`, `matplotlib`, `seaborn`, `pandas`, `numpy`, `scipy`, `Pillow`, `pdf-lib` (Node), `xlsx`/`exceljs` (Node).
 
 ## nsjail Sandbox Visibility
 
