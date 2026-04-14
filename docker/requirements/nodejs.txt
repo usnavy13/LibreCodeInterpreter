@@ -33,3 +33,4 @@ zod
 handlebars
 cheerio
 marked
+docx

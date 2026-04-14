@@ -168,6 +168,7 @@ class SandboxExecutor:
             "PATH": "/usr/local/bin:/usr/bin:/bin",
             "HOME": "/tmp",
             "TMPDIR": "/tmp",
+            "SKILLS_ROOT": "/opt/skills",
         }
 
         if normalized_lang in {"py", "python"}:
@@ -178,13 +179,14 @@ class SandboxExecutor:
                     "PYTHONPATH": "/mnt/data",
                     "MPLCONFIGDIR": "/tmp/mplconfig",
                     "XDG_CACHE_HOME": "/tmp/.cache",
+                    "XDG_CONFIG_HOME": "/tmp/.config",
                     "MPLBACKEND": "Agg",
                 }
             )
         elif normalized_lang in {"js", "ts"}:
             env_whitelist.update(
                 {
-                    "NODE_PATH": "/usr/local/lib/node_modules",
+                    "NODE_PATH": "/usr/lib/node_modules:/usr/local/lib/node_modules",
                 }
             )
         elif normalized_lang == "java":

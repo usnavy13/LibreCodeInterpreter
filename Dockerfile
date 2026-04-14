@@ -227,6 +227,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # ============================================
+# Document processing: LibreOffice, qpdf, fonts
+# ============================================
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libreoffice-writer libreoffice-calc libreoffice-core libreoffice-common \
+    fonts-liberation fonts-dejavu-core fonts-noto-core \
+    qpdf \
+    && rm -rf /var/lib/apt/lists/*
+
+# ============================================
 # Sandbox directory structure
 # ============================================
 RUN mkdir -p /var/lib/code-interpreter/sandboxes && \
@@ -288,6 +297,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 COPY src/ /app/src/
 COPY dashboard/ /app/dashboard/
+COPY skills/ /opt/skills/
 
 RUN find / -path /proc -prune -o -path /sys -prune -o \
     \( -perm -4000 -o -perm -2000 \) -type f -exec chmod u-s,g-s {} + 2>/dev/null || true
