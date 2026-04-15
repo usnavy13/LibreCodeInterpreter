@@ -84,11 +84,12 @@ class SandboxExecutor:
                 shlex.quote(str(a)) for a in [settings.nsjail_binary] + nsjail_args
             )
             # BUG-003: Mask /proc for most languages.
-            # Java and Rust need /proc/self/exe to locate shared libraries
-            # (JVM needs libjli.so, rustc needs its own binary path).
-            # For these languages, /proc remains accessible (known limitation).
+            # Java/Rust need /proc/self/exe for shared library resolution.
+            # Python needs /proc for LibreOffice (soffice) which is used by
+            # DOCX/XLSX/PPTX agent skills for document conversion.
+            # PID namespace (nsjail) ensures /proc only shows sandbox processes.
             lang = sandbox_info.language.lower().strip()
-            if lang in ("java", "rs"):
+            if lang in ("java", "rs", "py", "python"):
                 proc_mask = ""
             else:
                 proc_mask = "mount --bind /tmp/empty_proc /proc && "

@@ -400,8 +400,8 @@ class SandboxPool:
                 f"mount -t tmpfs -o size=1k tmpfs /app/ssl && "
                 f"mount -t tmpfs -o size=1k tmpfs /app/dashboard && "
                 f"mount -t tmpfs -o size=1k tmpfs /app/src && "
-                # BUG-003: Hide /proc (REPL is Python-only, always safe to mask)
-                f"mount --bind /tmp/empty_proc /proc && "
+                # /proc kept accessible: Python REPL may invoke LibreOffice
+                # (soffice) for DOCX/XLSX/PPTX skills. PID namespace isolates.
                 # Execute nsjail
                 f"{nsjail_cmd}"
             )

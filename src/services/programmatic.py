@@ -173,7 +173,7 @@ class ProgrammaticService:
                 f"mount -t tmpfs -o size=1k tmpfs /app/ssl && "
                 f"mount -t tmpfs -o size=1k tmpfs /app/dashboard && "
                 f"mount -t tmpfs -o size=1k tmpfs /app/src && "
-                f"mount --bind /tmp/empty_proc /proc && "
+                # /proc kept accessible: PTC may invoke LibreOffice (soffice).
                 f"{nsjail_cmd}"
             )
 
