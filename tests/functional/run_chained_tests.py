@@ -189,6 +189,193 @@ else:
 """, session_id=sid2, timeout=180)
 
 # ====================================================================
+# ====================================================================
+print("\n=== Pipeline PPTX: create (PptxGenJS) -> unpack -> edit XML -> add_slide -> clean -> pack -> validate -> markitdown -> PDF ===")
+# ====================================================================
+sid_pptx = str(uuid.uuid4())
+
+sid_pptx, ok = exec_code("PPTX-1: Create with PptxGenJS (Node.js)", """
+const pptxgen = require("pptxgenjs");
+const pptx = new pptxgen();
+
+let s1 = pptx.addSlide();
+s1.background = { color: "003366" };
+s1.addText("Innovation 2026", {x:1, y:1.5, fontSize:40, bold:true, color:"FFFFFF"});
+s1.addText("Strategie et Vision", {x:1, y:2.5, fontSize:20, color:"CCCCCC"});
+
+let s2 = pptx.addSlide();
+s2.addText("Axes strategiques", {x:0.5, y:0.3, fontSize:28, bold:true, color:"003366"});
+s2.addText([
+    {text:"Intelligence Artificielle\\n", options:{bullet:true, fontSize:16}},
+    {text:"Cloud Native\\n", options:{bullet:true, fontSize:16}},
+    {text:"Experience Client\\n", options:{bullet:true, fontSize:16}}
+], {x:0.5, y:1.2, w:9, h:3});
+
+let s3 = pptx.addSlide();
+s3.addText("Investissements", {x:0.5, y:0.3, fontSize:28, bold:true, color:"003366"});
+s3.addChart(pptx.ChartType.bar, [{
+    name: "Budget (M EUR)",
+    labels: ["IA","Cloud","UX","Securite"],
+    values: [2.5, 1.8, 1.2, 0.8]
+}], {x:0.5, y:1, w:8, h:3.5});
+
+let s4 = pptx.addSlide();
+s4.addText("Calendrier", {x:0.5, y:0.3, fontSize:28, bold:true, color:"003366"});
+s4.addTable(
+    [["Phase","T1","T2","T3","T4"],
+     ["IA","POC","MVP","Pilot","Prod"],
+     ["Cloud","Audit","Migration","--","--"],
+     ["UX","Research","Design","Dev","Launch"]],
+    {x:0.5, y:1.2, w:9, fontSize:14, border:{type:"solid",pt:1,color:"003366"},
+     colW:[2,1.5,1.5,1.5,1.5]}
+);
+
+pptx.writeFile({fileName:"/mnt/data/innovation.pptx"}).then(() => {
+    const fs = require("fs");
+    console.log("PPTX created:", fs.statSync("/mnt/data/innovation.pptx").size, "bytes");
+    console.log("4 slides: title, bullets, chart, timeline");
+});
+""", lang="js", timeout=30, session_id=sid_pptx)
+
+if ok:
+    sid_pptx, ok = exec_code("PPTX-2: Unpack to XML", """
+import subprocess, os
+r = subprocess.run(["python3", "/opt/skills/pptx/scripts/office/unpack.py",
+    "/mnt/data/innovation.pptx", "/mnt/data/innovation_unpacked"],
+    capture_output=True, text=True)
+print("rc:", r.returncode)
+print(r.stdout.strip()[:200])
+assert r.returncode == 0, r.stderr[:300]
+slides = [f for f in os.listdir("/mnt/data/innovation_unpacked/ppt/slides") if f.endswith(".xml")]
+print("Slides found:", sorted(slides))
+""", session_id=sid_pptx, timeout=60)
+
+if ok:
+    sid_pptx, ok = exec_code("PPTX-3: Edit XML (replace text in all slides)", """
+import os, re
+unpacked = "/mnt/data/innovation_unpacked"
+slides_dir = os.path.join(unpacked, "ppt", "slides")
+count = 0
+for fname in sorted(os.listdir(slides_dir)):
+    if not fname.endswith(".xml"):
+        continue
+    path = os.path.join(slides_dir, fname)
+    with open(path, "r", encoding="utf-8") as f:
+        content = f.read()
+    new_content = content.replace("2026", "2027")
+    if new_content != content:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(new_content)
+        count += 1
+        print(f"  {fname}: replaced 2026->2027")
+print(f"Modified {count} slide(s)")
+assert count > 0
+""", session_id=sid_pptx)
+
+if ok:
+    sid_pptx, ok = exec_code("PPTX-4: Add slide (duplicate slide 2)", """
+import subprocess
+r = subprocess.run(["python3", "/opt/skills/pptx/scripts/add_slide.py",
+    "/mnt/data/innovation_unpacked", "--source", "2"],
+    capture_output=True, text=True)
+print("rc:", r.returncode)
+print(r.stdout.strip()[:200])
+if r.stderr:
+    print("stderr:", r.stderr.strip()[:200])
+""", session_id=sid_pptx, timeout=60)
+
+if ok:
+    sid_pptx, ok = exec_code("PPTX-5: Clean orphans", """
+import subprocess
+r = subprocess.run(["python3", "/opt/skills/pptx/scripts/clean.py",
+    "/mnt/data/innovation_unpacked"],
+    capture_output=True, text=True)
+print("rc:", r.returncode)
+print(r.stdout.strip()[:200])
+if r.stderr:
+    print("stderr:", r.stderr.strip()[:200])
+""", session_id=sid_pptx, timeout=60)
+
+if ok:
+    sid_pptx, ok = exec_code("PPTX-6: Pack back to PPTX", """
+import subprocess, os
+r = subprocess.run(["python3", "/opt/skills/pptx/scripts/office/pack.py",
+    "/mnt/data/innovation_unpacked", "/mnt/data/innovation_edited.pptx"],
+    capture_output=True, text=True)
+print("rc:", r.returncode)
+print(r.stdout.strip()[:200])
+if os.path.exists("/mnt/data/innovation_edited.pptx"):
+    print("Edited PPTX:", os.path.getsize("/mnt/data/innovation_edited.pptx"), "bytes")
+else:
+    print("Pack output:", r.stderr.strip()[:200])
+""", session_id=sid_pptx, timeout=60)
+
+if ok:
+    sid_pptx, ok = exec_code("PPTX-7: Validate", """
+import subprocess
+r = subprocess.run(["python3", "/opt/skills/pptx/scripts/office/validate.py",
+    "/mnt/data/innovation_edited.pptx"],
+    capture_output=True, text=True)
+print("rc:", r.returncode)
+for line in r.stdout.strip().split(chr(10))[:5]:
+    if line.strip():
+        print(" ", line)
+""", session_id=sid_pptx, timeout=60)
+
+sid_pptx, ok = exec_code("PPTX-8: Markitdown extract markdown", """
+from markitdown import MarkItDown
+import os
+src = "/mnt/data/innovation_edited.pptx"
+if not os.path.exists(src):
+    src = "/mnt/data/innovation.pptx"
+md = MarkItDown()
+result = md.convert(src)
+text = result.text_content
+print("Markdown length:", len(text))
+print("First 300 chars:")
+print(text[:300])
+assert len(text) > 50
+""", session_id=sid_pptx, timeout=60)
+
+sid_pptx, ok = exec_code("PPTX-9: Convert to PDF (soffice)", """
+import sys, subprocess, os
+sys.path.insert(0, "/opt/skills/pptx/scripts")
+from office.soffice import run_soffice
+src = "/mnt/data/innovation_edited.pptx"
+if not os.path.exists(src):
+    src = "/mnt/data/innovation.pptx"
+r = run_soffice(["--headless", "--norestore", "--convert-to", "pdf", "--outdir", "/mnt/data", src],
+    capture_output=True, text=True, timeout=90)
+print("soffice:", r.stdout.strip()[:200])
+if r.stderr:
+    print("stderr:", r.stderr.strip()[:100])
+pdfs = [f for f in os.listdir("/mnt/data") if f.endswith(".pdf")]
+for p in pdfs:
+    print(p, os.path.getsize("/mnt/data/" + p), "bytes")
+assert len(pdfs) > 0, "No PDF produced"
+""", session_id=sid_pptx, timeout=180)
+
+sid_pptx, _ = exec_code("PPTX-10: python-pptx read + analyse", """
+from pptx import Presentation
+import os
+src = "/mnt/data/innovation_edited.pptx"
+if not os.path.exists(src):
+    src = "/mnt/data/innovation.pptx"
+prs = Presentation(src)
+print("Slides:", len(prs.slides))
+print("Width:", prs.slide_width, "Height:", prs.slide_height)
+for i, slide in enumerate(prs.slides):
+    texts = []
+    for shape in slide.shapes:
+        if shape.has_text_frame:
+            for para in shape.text_frame.paragraphs:
+                t = para.text.strip()
+                if t:
+                    texts.append(t)
+    print(f"  Slide {i+1}: {len(texts)} text(s) - {texts[0][:50] if texts else '(no text)'}")
+""", session_id=sid_pptx)
+
+# ====================================================================
 print("\n=== Pipeline PDF: create -> extract text -> extract tables -> merge -> split -> watermark ===")
 # ====================================================================
 sid3 = str(uuid.uuid4())
