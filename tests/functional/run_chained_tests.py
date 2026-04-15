@@ -276,7 +276,7 @@ if ok:
     sid_pptx, ok = exec_code("PPTX-4: Add slide (duplicate slide 2)", """
 import subprocess
 r = subprocess.run(["python3", "/opt/skills/pptx/scripts/add_slide.py",
-    "/mnt/data/innovation_unpacked", "--source", "2"],
+    "/mnt/data/innovation_unpacked", "slide2.xml"],
     capture_output=True, text=True)
 print("rc:", r.returncode)
 print(r.stdout.strip()[:200])

@@ -230,7 +230,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Document processing: LibreOffice, qpdf, fonts
 # ============================================
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libreoffice-writer libreoffice-calc libreoffice-core libreoffice-common \
+    libreoffice-writer libreoffice-calc libreoffice-impress libreoffice-core libreoffice-common \
     fonts-liberation fonts-dejavu-core fonts-noto-core \
     qpdf \
     && rm -rf /var/lib/apt/lists/*
