@@ -194,14 +194,15 @@ class NsjailConfig:
 
         # Seccomp policy: block dangerous syscalls
         # - ptrace: prevents process inspection/debugging (BUG-006a)
-        # - bind: prevents opening server sockets even with network access (BUG-006c)
-        # Using ERRNO(1) so the process gets EPERM rather than SIGSYS
-        args.extend(
-            [
-                "--seccomp_string",
-                "POLICY policy { ERRNO(1) { ptrace, bind } } USE policy DEFAULT ALLOW",
-            ]
-        )
+        # - bind: prevents opening server sockets (BUG-006c)
+        # Python exempts bind because LibreOffice needs AF_UNIX sockets
+        # for IPC between oosplash and soffice.bin. Network namespace
+        # isolation (--iface_no_lo) already prevents external connections.
+        if normalized_lang in ("py", "python", "java"):
+            seccomp = "POLICY policy { ERRNO(1) { ptrace } } USE policy DEFAULT ALLOW"
+        else:
+            seccomp = "POLICY policy { ERRNO(1) { ptrace, bind } } USE policy DEFAULT ALLOW"
+        args.extend(["--seccomp_string", seccomp])
 
         # Working directory: /mnt/data (bind-mounted by the executor wrapper)
         args.extend(["--cwd", "/mnt/data"])
