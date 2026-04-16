@@ -31,6 +31,9 @@ subprocess.run(["python3", "/opt/skills/docx/scripts/office/validate.py", "outpu
 # Scripts disponibles (chemin absolu $SKILLS_ROOT)
 
 ```
+# CRÉATION de document depuis template (RECOMMANDÉ)
+python3 $SKILLS_ROOT/docx/scripts/fill_template.py <template.docx> <output.docx> <config.json>
+
 $SKILLS_ROOT = /opt/skills
 
 # Pipeline édition
@@ -75,38 +78,89 @@ $SKILLS_ROOT/docx/templates/onbehalfai/
 └── logo-onbehalfai.svg             # Logo On Behalf AI (SVG)
 ```
 
-## Workflow de création (dans UN SEUL code block)
+## Workflow de création : utiliser fill_template.py (RECOMMANDÉ)
+
+Le script `fill_template.py` gère automatiquement l'unpack, l'insertion XML avec lxml, le pack et la validation.
+
+```python
+import subprocess, json, os
+os.chdir('/mnt/data')
+
+config = {
+    "placeholders": {
+        "[TITRE DU DOCUMENT]": "Guide d'Installation n8n",
+        "[Sous-titre du document]": "Automatisation Workflow",
+        "[Auteur]": "Damien Juillard",
+        "[Date]": "16/04/2026"
+    },
+    "sections": [
+        {
+            "title": "Introduction",
+            "level": 0,
+            "content": [
+                {"type": "text", "text": "Description du document."},
+                {"type": "text", "text": "Texte en gras.", "bold": True}
+            ]
+        },
+        {
+            "title": "Prérequis",
+            "level": 1,
+            "content": [
+                {"type": "bullets", "items": ["Item 1", "Item 2", "Item 3"]},
+                {"type": "code", "text": "docker compose up -d"}
+            ]
+        }
+    ]
+}
+
+with open("config.json", "w") as f:
+    json.dump(config, f, ensure_ascii=False)
+
+subprocess.run([
+    "python3", "/opt/skills/docx/scripts/fill_template.py",
+    "/opt/skills/docx/templates/onbehalfai/template-base.docx",
+    "output.docx",
+    "config.json"
+], check=True)
+```
+
+### Types de blocs de contenu
+
+| Type | JSON | Rendu |
+|------|------|-------|
+| Texte | `{"type": "text", "text": "..."}` | Paragraphe Normal |
+| Texte gras | `{"type": "text", "text": "...", "bold": true}` | Paragraphe Normal en gras |
+| Liste à tirets | `{"type": "bullets", "items": ["a", "b"]}` | Liste avec tirets "-" |
+| Bloc de code | `{"type": "code", "text": "ligne1\nligne2"}` | Courier New, style PrformatHTML |
+| Espace vide | `{"type": "empty"}` | Paragraphe vide |
+
+### Niveaux de titres (paramètre `level`)
+
+| Level | Style | Rendu |
+|-------|-------|-------|
+| 0 | Titre1sansnumrotation | Titre sans numéro |
+| 1 | Titre1 | 1. Chapitre numéroté |
+| 2 | Titre2 | 1.1 Sous-chapitre numéroté |
+| 3 | Titre3 | 1.1.1 Sous-sous-chapitre |
+
+### Workflow alternatif (unpack/edit/pack manuel)
+
+Si `fill_template.py` ne couvre pas un besoin spécifique (ex: insertion de tableaux, images), utiliser le pipeline manuel avec lxml (jamais de string replace sur le XML) :
 
 ```python
 import subprocess, shutil, os
+from lxml import etree
 os.chdir('/mnt/data')
+shutil.copy('/opt/skills/docx/templates/onbehalfai/template-base.docx', 'output.docx')
+subprocess.run(["python3", "/opt/skills/docx/scripts/office/unpack.py", "output.docx", "unpacked/"], check=True)
 
-# 1. Copier le template comme base
-shutil.copy('$SKILLS_ROOT/docx/templates/onbehalfai/template-base.docx', 'output.docx')
+# Utiliser lxml pour manipuler le XML (JAMAIS string replace)
+tree = etree.parse("unpacked/word/document.xml")
+# ... manipulations avec lxml ...
+tree.write("unpacked/word/document.xml", xml_declaration=True, encoding="UTF-8", standalone=True)
 
-# 2. Décompresser pour éditer le XML
-subprocess.run(["python3", "$SKILLS_ROOT/docx/scripts/office/unpack.py", "output.docx", "unpacked/"], check=True)
-
-# 3. Lire le document.xml
-with open("unpacked/word/document.xml", "r") as f:
-    content = f.read()
-
-# 4. Remplacer les placeholders et ajouter du contenu
-#    - Modifier les tables de la cover page (titre, sous-titre, version, auteur, date)
-#    - Ajouter les sections avec les bons styles :
-#      Titre1 = <w:pStyle w:val="Titre1"/>              (chapitres numérotés)
-#      Titre2 = <w:pStyle w:val="Titre2"/>              (sous-chapitres numérotés)
-#      Titre1sansnumrotation = titres non numérotés
-#      ListParagraph + numId=7 = listes à tirets
-#      PrformatHTML = blocs de code (Courier New)
-#      Normal = texte courant
-
-with open("unpacked/word/document.xml", "w") as f:
-    f.write(content)
-
-# 5. Repack et valider
-subprocess.run(["python3", "$SKILLS_ROOT/docx/scripts/office/pack.py", "unpacked/", "output.docx"], check=True)
-subprocess.run(["python3", "$SKILLS_ROOT/docx/scripts/office/validate.py", "output.docx"], check=True)
+subprocess.run(["python3", "/opt/skills/docx/scripts/office/pack.py", "unpacked/", "output.docx"], check=True)
+subprocess.run(["python3", "/opt/skills/docx/scripts/office/validate.py", "output.docx"], check=True)
 ```
 
 ## Choix du template
@@ -154,7 +208,7 @@ subprocess.run(["python3", "$SKILLS_ROOT/docx/scripts/office/validate.py", "outp
 | Sous-chapitre numéroté | `Titre2` | 1.1 Sous-titre (13pt, navy) |
 | Titre non numéroté | `Titre1sansnumrotation` | Titre (14pt, bold, navy, sans numéro) |
 | Texte courant | `Normal` | Arial 10pt |
-| Liste à tirets | `ListParagraph` + `<w:numPr><w:ilvl w:val="0"/><w:numId w:val="7"/></w:numPr>` | - item |
+| Liste à tirets | `Paragraphedeliste` + `<w:numPr><w:ilvl w:val="0"/><w:numId w:val="7"/></w:numPr>` | - item |
 | Bloc de code | `PrformatHTML` | Courier New, fond gris |
 | Sous-titre page de garde | `Stylesubheader` | Arial 10pt bold |
 
