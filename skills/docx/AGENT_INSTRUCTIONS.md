@@ -8,7 +8,7 @@ import subprocess, os
 os.chdir('/mnt/data')
 subprocess.run(["python3", "/opt/skills/docx/scripts/office/unpack.py", "input.docx", "unpacked/"], check=True)
 # ... modifications ...
-subprocess.run(["python3", "/opt/skills/docx/scripts/office/pack.py", "unpacked/", "-o", "output.docx", "--original", "input.docx"], check=True)
+subprocess.run(["python3", "/opt/skills/docx/scripts/office/pack.py", "unpacked/", "output.docx", "--original", "input.docx"], check=True)
 subprocess.run(["python3", "/opt/skills/docx/scripts/office/validate.py", "output.docx"], check=True)
 ```
 
@@ -35,7 +35,7 @@ $SKILLS_ROOT = /opt/skills
 
 # Pipeline édition
 python3 $SKILLS_ROOT/docx/scripts/office/unpack.py <file.docx> <output_dir/>
-python3 $SKILLS_ROOT/docx/scripts/office/pack.py <dir/> -o <output.docx> [--original <source.docx>] [--validate false]
+python3 $SKILLS_ROOT/docx/scripts/office/pack.py <dir/> <output.docx> [--original <source.docx>] [--validate false]
 python3 $SKILLS_ROOT/docx/scripts/office/validate.py <file.docx>
 
 # Tracked changes
@@ -105,7 +105,7 @@ with open("unpacked/word/document.xml", "w") as f:
     f.write(content)
 
 # 5. Repack et valider
-subprocess.run(["python3", "$SKILLS_ROOT/docx/scripts/office/pack.py", "unpacked/", "-o", "output.docx"], check=True)
+subprocess.run(["python3", "$SKILLS_ROOT/docx/scripts/office/pack.py", "unpacked/", "output.docx"], check=True)
 subprocess.run(["python3", "$SKILLS_ROOT/docx/scripts/office/validate.py", "output.docx"], check=True)
 ```
 
@@ -114,6 +114,34 @@ subprocess.run(["python3", "$SKILLS_ROOT/docx/scripts/office/validate.py", "outp
 - **Compte-rendu de réunion** → `template-compte-rendu.docx` (tables header/metadata/participants pré-formatées)
 - **Guide d'installation, doc technique, rapport, proposition** → `template-base.docx` (cover page + version table)
 - **Conversion depuis markdown** → pandoc avec reference-pandoc.docx :
+
+## Placeholders dans template-base.docx (texte exact à remplacer)
+
+| Placeholder | Emplacement | Remplacer par |
+|-------------|-------------|---------------|
+| `[TITRE DU DOCUMENT]` | Table cover page, row 0, cell 0 | Titre du document |
+| `[Sous-titre du document]` | Table cover page, row 2, cell 0 | Sous-titre ou nom client |
+| `[Auteur]` | Table version | Nom de l'auteur |
+| `[Date]` | Table version | Date (JJ/MM/AAAA) |
+| `Note` | Premier Titre1sansnumrotation | Garder ou remplacer |
+| `Section 1`, `Section 2` | Titres placeholder | Remplacer par vrais titres |
+| `[Contenu de la section 1]` etc. | Texte placeholder | Remplacer par le contenu |
+
+## Placeholders dans template-compte-rendu.docx
+
+| Placeholder | Emplacement | Remplacer par |
+|-------------|-------------|---------------|
+| `[Titre du Compte-Rendu]` | Table header, row 0, cell 0 | Titre du CR |
+| `[Client / Objet]` | Table header, row 1, cell 0 | Client et objet |
+| `[Date]` | Table metadata | Date de la réunion |
+| `[Lieu]` | Table metadata | Lieu |
+| `[Organisateur]` | Table metadata | Nom organisateur |
+| `[Nom]`, `[Fonction]`, `[Entreprise]` | Table participants | Données des participants |
+
+**ATTENTION** :
+- Utiliser `content.replace(...)` sur ces placeholders EXACTS. Ne pas inventer d'autres noms de variables.
+- Ne JAMAIS insérer de commentaires XML (`<!-- ... -->`) dans le document — ils cassent la validation OOXML.
+- Le contenu ajouté doit être inséré AVANT le `</w:body>` (ou avant `<w:sectPr>`), pas après les tables.
   ```bash
   pandoc input.md -o output.docx --reference-doc=$SKILLS_ROOT/docx/templates/onbehalfai/reference-pandoc.docx --shift-heading-level-by=-1 --lua-filter=$SKILLS_ROOT/docx/templates/onbehalfai/heading-unnumbered-v4.lua
   ```
@@ -250,7 +278,7 @@ with open("unpacked/word/document.xml", "w") as f:
     f.write(content)
 
 # Repack et valider
-subprocess.run(["python3", "/opt/skills/docx/scripts/office/pack.py", "unpacked/", "-o", "output.docx", "--original", "input.docx"], check=True)
+subprocess.run(["python3", "/opt/skills/docx/scripts/office/pack.py", "unpacked/", "output.docx", "--original", "input.docx"], check=True)
 subprocess.run(["python3", "/opt/skills/docx/scripts/office/validate.py", "output.docx"], check=True)
 ```
 
