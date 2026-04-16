@@ -20,7 +20,9 @@ Config JSON format:
                 {"type": "text", "text": "Paragraph text here."},
                 {"type": "text", "text": "Bold text.", "bold": true},
                 {"type": "bullets", "items": ["Item 1", "Item 2"]},
-                {"type": "code", "text": "docker compose up -d"}
+                {"type": "numbered", "items": ["Step 1", "Step 2"]},
+                {"type": "code", "text": "docker compose up -d"},
+                {"type": "table", "headers": ["Col A", "Col B"], "rows": [["a1", "b1"], ["a2", "b2"]]}
             ]
         }
     ]
@@ -68,6 +70,12 @@ STYLE_NORMAL = "Normal"
 STYLE_LIST = "Paragraphedeliste"
 STYLE_CODE = "Code"
 BULLET_NUM_ID = "7"
+NUMBERED_NUM_ID = "5"
+
+# Table styling constants
+TABLE_BORDER_COLOR = "CCCCCC"
+TABLE_HEADER_FILL = "DAE5EF"
+TABLE_WIDTH_DXA = 9360  # Full width for A4 with ~2cm margins
 
 SCRIPTS_DIR = Path(__file__).parent
 OFFICE_DIR = SCRIPTS_DIR / "office"
@@ -145,6 +153,74 @@ def _make_code_line(text: str) -> etree._Element:
     pStyle.set(_w("val"), STYLE_CODE)
     p.append(_make_run(text))
     return p
+
+
+def _make_numbered(text: str) -> etree._Element:
+    """Create a numbered list paragraph (1., 2., 3.)."""
+    p = etree.Element(_w("p"))
+    pPr = etree.SubElement(p, _w("pPr"))
+    pStyle = etree.SubElement(pPr, _w("pStyle"))
+    pStyle.set(_w("val"), STYLE_LIST)
+    numPr = etree.SubElement(pPr, _w("numPr"))
+    ilvl = etree.SubElement(numPr, _w("ilvl"))
+    ilvl.set(_w("val"), "0")
+    numId = etree.SubElement(numPr, _w("numId"))
+    numId.set(_w("val"), NUMBERED_NUM_ID)
+    p.append(_make_run(text))
+    return p
+
+
+def _make_table(headers: list, rows: list) -> etree._Element:
+    """Create a table with header row and data rows."""
+    num_cols = len(headers)
+    col_width = TABLE_WIDTH_DXA // num_cols
+
+    tbl = etree.Element(_w("tbl"))
+
+    # Table properties
+    tblPr = etree.SubElement(tbl, _w("tblPr"))
+    tblStyle = etree.SubElement(tblPr, _w("tblStyle"))
+    tblStyle.set(_w("val"), "TableGrid")
+    tblW = etree.SubElement(tblPr, _w("tblW"))
+    tblW.set(_w("w"), str(TABLE_WIDTH_DXA))
+    tblW.set(_w("type"), "dxa")
+    tblLook = etree.SubElement(tblPr, _w("tblLook"))
+    tblLook.set(_w("val"), "04A0")
+    tblLook.set(_w("firstRow"), "1")
+
+    # Table grid (column widths)
+    tblGrid = etree.SubElement(tbl, _w("tblGrid"))
+    for _ in range(num_cols):
+        gridCol = etree.SubElement(tblGrid, _w("gridCol"))
+        gridCol.set(_w("w"), str(col_width))
+
+    def _make_cell(text: str, bold: bool = False, shading: str = None) -> etree._Element:
+        tc = etree.Element(_w("tc"))
+        tcPr = etree.SubElement(tc, _w("tcPr"))
+        tcW = etree.SubElement(tcPr, _w("tcW"))
+        tcW.set(_w("w"), str(col_width))
+        tcW.set(_w("type"), "dxa")
+        if shading:
+            shd = etree.SubElement(tcPr, _w("shd"))
+            shd.set(_w("val"), "clear")
+            shd.set(_w("color"), "auto")
+            shd.set(_w("fill"), shading)
+        p = etree.SubElement(tc, _w("p"))
+        p.append(_make_run(text, bold=bold))
+        return tc
+
+    # Header row
+    header_tr = etree.SubElement(tbl, _w("tr"))
+    for h in headers:
+        header_tr.append(_make_cell(h, bold=True, shading=TABLE_HEADER_FILL))
+
+    # Data rows
+    for row in rows:
+        tr = etree.SubElement(tbl, _w("tr"))
+        for i, cell_text in enumerate(row):
+            tr.append(_make_cell(str(cell_text) if cell_text else ""))
+
+    return tbl
 
 
 def _make_page_break() -> etree._Element:
@@ -231,10 +307,21 @@ def insert_sections(body: etree._Element, sections: list) -> int:
                 for item in items:
                     elements.append(_make_bullet(item))
 
+            elif block_type == "numbered":
+                items = block.get("items", [])
+                for item in items:
+                    elements.append(_make_numbered(item))
+
             elif block_type == "code":
                 code_text = block.get("text", "")
                 for line in code_text.split("\n"):
                     elements.append(_make_code_line(line))
+
+            elif block_type == "table":
+                headers = block.get("headers", [])
+                rows = block.get("rows", [])
+                if headers:
+                    elements.append(_make_table(headers, rows))
 
             elif block_type == "empty":
                 elements.append(_make_empty_para())
