@@ -363,8 +363,7 @@ test("A02", "agent_data_viz", "DataViz",
      "(1) courbe CA mensuel, (2) camembert par catégorie, (3) barres top clients, "
      "(4) scatter quantité vs montant. Utilise la palette de couleurs OBA.",
      patterns=[
-         r"dashboard|subplots|graphique|OBA|palette",
-         r"execute_code",
+         r"dashboard|subplots|graphique|OBA|palette|4.*graph",
      ],
      description="Dashboard 4 graphiques avec palette OBA",
      expect_file=True, file_ext=".png")
