@@ -8,11 +8,18 @@ Ce document décrit les tests métier pour valider le bon fonctionnement de chaq
 
 **Comment vérifier la méthodologie** : dans LibreChat, chaque appel `execute_code` est visible dans le fil de conversation (bloc de code exécuté + sortie). On vérifie que les commandes/imports correspondent à la méthodologie attendue.
 
+**Règles transversales (tous les agents)** :
+- **Chaînage obligatoire** : toutes les étapes doivent être dans UN SEUL bloc `execute_code` (les fichiers temporaires ne persistent pas entre les appels)
+- **Auteur** : pour les tracked changes et métadonnées, l'agent doit utiliser le nom réel de l'utilisateur LibreChat (via `{{current_user}}`)
+- **pack.py** : syntaxe positionnelle `pack.py <dir/> <output.docx>` (pas de flag `-o`)
+- **Fichiers temporaires** : écrits dans `/tmp/`, pas `/mnt/data/` (seuls les fichiers de sortie vont dans `/mnt/data/`)
+- **Palette OBA** : quand l'utilisateur ne fournit pas de charte, utiliser les couleurs On Behalf AI
+
 ---
 
 ## Agent 1 — Word DOCX Complete
 
-### D01 — Reproduire un CR à partir d'un template
+### D01 — Reproduire un CR à partir d'un template utilisateur
 
 **Prérequis** : uploader un DOCX de compte-rendu existant (avec logo, styles, en-têtes)
 
@@ -23,14 +30,51 @@ Ce document décrit les tests métier pour valider le bon fonctionnement de chaq
 
 **Méthodologie attendue** :
 1. `unpack.py` sur le template DOCX pour analyser la structure XML (styles, headers, footers)
-2. Lecture du XML pour identifier les styles utilisés (Normal, Heading1, etc.)
-3. Création du nouveau document en réutilisant le template (copie + remplacement du contenu via python-docx ou manipulation XML)
-4. `pack.py` pour recompresser
+2. Lecture du XML avec **lxml** pour identifier les styles utilisés
+3. Copie du template + remplacement du contenu via **lxml** (jamais `content.replace()` sur le XML brut)
+4. `pack.py unpacked/ output.docx` pour recompresser (syntaxe positionnelle, pas `-o`)
 5. `validate.py` pour valider le résultat
+6. Le tout dans **un seul bloc** `execute_code`
 
 **Validation utilisateur** : ouvrir le DOCX produit dans Word/LibreOffice — en-têtes, pieds de page, polices et mise en forme identiques au template.
 
-**Validation technique** : vérifier dans les blocs de code que `unpack.py` a été appelé, que le XML a été lu/analysé, et que le résultat a été validé.
+**Validation technique** : vérifier dans les blocs de code que `unpack.py` a été appelé, que lxml est utilisé (pas `content.replace()`), et que le résultat a été validé.
+
+---
+
+### D01b — Créer un CR depuis le template OBA (sans template utilisateur)
+
+**Prérequis** : aucun fichier uploadé
+
+**Prompt** :
+> Crée un compte-rendu de la réunion suivante : "Réunion du 10 avril 2026, visioconférence Teams, organisée par Damien Juillard. Participants : Sophie Martin (Directrice RH, Nextera Corp) et Damien Juillard (Consultant IA, On Behalf AI). Sujet : cadrage projet IA RH. Décisions : lancement POC chatbot RH. Actions : étude faisabilité avant le 24 avril."
+
+**Méthodologie attendue** :
+1. `fill_cr_template.py` avec le template OBA `template-compte-rendu.docx`
+2. Config JSON avec `meeting` (title, date, location, organizer) + `participants` + `sections`
+3. Le config.json écrit dans `/tmp/` (pas `/mnt/data/`)
+
+**Validation utilisateur** : DOCX avec page de garde OBA (logo, titre, métadonnées), tableau participants rempli, sections structurées.
+
+**Validation technique** : vérifier que `fill_cr_template.py` est appelé (pas de manipulation XML manuelle).
+
+---
+
+### D01c — Créer un document technique depuis le template OBA
+
+**Prérequis** : aucun fichier uploadé
+
+**Prompt** :
+> Crée un guide d'installation pour Docker sur Ubuntu, avec prérequis, étapes d'installation, configuration, et dépannage.
+
+**Méthodologie attendue** :
+1. `fill_template.py` avec le template OBA `template-base.docx`
+2. Config JSON avec `placeholders` (titre, auteur, date) + `sections` avec `text`, `bullets`, `numbered`, `code`, `table`
+3. Le config.json écrit dans `/tmp/`
+
+**Validation utilisateur** : DOCX avec page de garde OBA, titres numérotés, listes à tirets, blocs de code en blanc sur noir (style "Code"), tableaux avec en-têtes bleus.
+
+**Validation technique** : vérifier que `fill_template.py` est appelé, que le config JSON contient des types variés (`bullets`, `code`, `table`, `numbered`).
 
 ---
 
@@ -43,8 +87,8 @@ Ce document décrit les tests métier pour valider le bon fonctionnement de chaq
 
 **Méthodologie attendue** :
 1. `unpack.py` sur le DOCX source
-2. `tracked_replace.py` avec `--old "le Client" --new "l'Utilisateur" --author "AI-Agent"`
-3. `tracked_replace.py` avec `--old "30 jours" --new "15 jours ouvrés" --author "AI-Agent"`
+2. `tracked_replace.py` avec `--old "le Client" --new "l'Utilisateur" --author "{{current_user}}"`
+3. `tracked_replace.py` avec `--old "30 jours" --new "15 jours ouvrés" --author "{{current_user}}"`
 4. `pack.py` pour recompresser
 5. `validate.py` pour valider
 
@@ -109,13 +153,13 @@ Ce document décrit les tests métier pour valider le bon fonctionnement de chaq
 > ```
 
 **Méthodologie attendue** :
-1. `pandoc` pour convertir markdown → DOCX (préserve les styles Heading1, Heading2, etc.)
-2. Optionnel : ajustement des styles via python-docx
+1. `pandoc` avec `--reference-doc=$SKILLS_ROOT/docx/templates/onbehalfai/reference-pandoc.docx` pour appliquer les styles OBA
+2. Optionnel : `--lua-filter=heading-unnumbered-v4.lua` pour les titres non numérotés
 3. `validate.py` sur le résultat
 
-**Validation utilisateur** : dans Word, les titres sont bien en style Heading1/Heading2 (pas du texte en gras), les listes sont des vraies listes Word.
+**Validation utilisateur** : dans Word, les titres sont en style Heading1/Heading2 avec la charte OBA (Arial, couleurs navy), les listes sont des vraies listes Word.
 
-**Validation technique** : vérifier que `pandoc` a été utilisé pour la conversion (pas une création manuelle paragraphe par paragraphe via python-docx).
+**Validation technique** : vérifier que `pandoc` avec `--reference-doc` OBA a été utilisé (pas une création manuelle via python-docx).
 
 ---
 
@@ -190,17 +234,16 @@ Ce document décrit les tests métier pour valider le bon fonctionnement de chaq
 ### D10 — Création d'un document Word depuis des données structurées
 
 **Prompt** :
-> Crée un document Word "Fiche produit" avec : un titre centré "Fiche Produit — Widget Pro X200", un tableau de spécifications (Poids: 1.2 kg, Dimensions: 30x20x10 cm, Couleur: Noir mat, Prix HT: 149.90€), un paragraphe de description marketing de 3 lignes, et en pied de page "Confidentiel — Ne pas diffuser".
+> Crée un document Word "Fiche produit" avec : un titre "Fiche Produit — Widget Pro X200", un tableau de spécifications (Poids: 1.2 kg, Dimensions: 30x20x10 cm, Couleur: Noir mat, Prix HT: 149.90€), un paragraphe de description marketing de 3 lignes.
 
 **Méthodologie attendue** :
-1. `python-docx` (from docx import Document) pour la création programmatique
-2. Utilisation des styles Word (pas juste du formatage direct)
-3. Ajout du pied de page via les sections python-docx
-4. `validate.py` optionnel
+1. `fill_template.py` avec le template OBA `template-base.docx`
+2. Config JSON avec une section contenant un bloc `table` pour les spécifications et un bloc `text` pour la description
+3. Placeholders remplis : titre, auteur, date
 
-**Validation utilisateur** : le document est professionnel, le tableau est formaté, le pied de page est présent.
+**Validation utilisateur** : le document utilise le template OBA (page de garde, styles), le tableau est formaté avec en-têtes bleus.
 
-**Validation technique** : vérifier l'utilisation de `python-docx` avec styles, pas de `pandoc` depuis markdown (qui ne permet pas le contrôle fin).
+**Validation technique** : vérifier que `fill_template.py` est utilisé (pas python-docx from scratch).
 
 ---
 
@@ -213,7 +256,7 @@ Ce document décrit les tests métier pour valider le bon fonctionnement de chaq
 
 **Méthodologie attendue** :
 1. `unpack.py`
-2. `tracked_replace.py --old "Directeur" --new "Directrice" --first --author "AI-Agent"`
+2. `tracked_replace.py --old "Directeur" --new "Directrice" --first --author "{{current_user}}"`
 3. `pack.py` + `validate.py`
 
 **Validation utilisateur** : seule la première occurrence est modifiée en tracked change.
@@ -231,16 +274,17 @@ Ce document décrit les tests métier pour valider le bon fonctionnement de chaq
 
 **Méthodologie attendue** :
 1. `unpack.py` du template
-2. Manipulation XML ou python-docx pour remplir les champs
-3. `pack.py` pour une version intermédiaire
-4. `unpack.py` à nouveau
-5. `tracked_replace.py` pour le changement de formulation
-6. `pack.py` + `validate.py`
-7. `soffice --convert-to pdf` pour l'export final
+2. Manipulation XML avec **lxml** pour remplir les champs (jamais `content.replace()`)
+3. `pack.py unpacked/ intermediate.docx` pour une version intermédiaire
+4. `unpack.py` à nouveau sur intermediate.docx
+5. `tracked_replace.py --author "{{current_user}}"` pour le changement de formulation
+6. `pack.py unpacked/ output.docx` + `validate.py`
+7. `soffice.py --headless --convert-to pdf` pour l'export final
+8. Le tout dans **un seul bloc** `execute_code`
 
 **Validation utilisateur** : le PDF contient les bonnes informations, le DOCX intermédiaire montre les tracked changes.
 
-**Validation technique** : vérifier la chaîne complète unpack → edit → pack → tracked_replace → pack → soffice.
+**Validation technique** : vérifier la chaîne complète dans un seul code block, avec lxml (pas string replace), tracked_replace avec `{{current_user}}`, et soffice.py (pas soffice direct).
 
 ---
 
@@ -252,12 +296,33 @@ Ce document décrit les tests métier pour valider le bon fonctionnement de chaq
 > Crée un pitch deck de 8 slides pour une startup FinTech appelée "PayFlow". Slides : (1) Titre + tagline, (2) Problème, (3) Solution, (4) Marché (TAM/SAM/SOM avec chiffres), (5) Business model, (6) Traction (métriques clés), (7) Équipe (3 fondateurs), (8) Ask (levée de 2M€). Design moderne, palette bleu/blanc/gris foncé.
 
 **Méthodologie attendue** :
-1. PptxGenJS via Node.js (meilleur rendu visuel pour création from scratch)
-2. Utilisation de formes, couleurs, layout maîtrisé
+1. PptxGenJS via Node.js avec `NODE_PATH=/usr/lib/node_modules` (meilleur rendu visuel pour création from scratch)
+2. Utilisation de formes, couleurs, layout varié (JAMAIS la même mise en page répétée)
+3. Couleurs hex sans "#" (`"2F5597"` pas `"#2F5597"`)
+4. `bullet: true` pour les listes (JAMAIS de "•" unicode)
+5. Chaque slide doit avoir un élément visuel (forme, chart, icône)
 
-**Validation utilisateur** : la présentation est visuellement professionnelle, les slides sont cohérents.
+**Validation utilisateur** : la présentation est visuellement professionnelle, les slides sont cohérents, layouts variés.
 
-**Validation technique** : vérifier que `pptxgenjs` est utilisé (require('pptxgenjs') dans le code JS), pas `python-pptx`.
+**Validation technique** : vérifier que `pptxgenjs` est utilisé (require('pptxgenjs')), pas `python-pptx`. Vérifier qu'aucun "#" n'apparaît devant les couleurs hex.
+
+---
+
+### P01b — Création d'une présentation avec template OBA
+
+**Prérequis** : aucun fichier uploadé
+
+**Prompt** :
+> Crée une présentation de 5 slides sur l'IA générative pour une réunion interne.
+
+**Méthodologie attendue** :
+1. PptxGenJS via Node.js avec la palette OBA (navy `1C244B`, blue `2F5597`, orange `FB840D`)
+2. Logo OBA intégré depuis `$SKILLS_ROOT/pptx/templates/onbehalfai/logo-onbehalfai.png`
+3. Slide de titre sur fond navy, slides de contenu sur fond blanc, slide de closing sur fond navy
+
+**Validation utilisateur** : la charte OBA est respectée (couleurs navy/bleu/orange, logo, police Arial).
+
+**Validation technique** : vérifier la palette OBA dans le code JS et l'inclusion du logo.
 
 ---
 
@@ -860,6 +925,24 @@ Ce document décrit les tests métier pour valider le bon fonctionnement de chaq
 
 ---
 
+### F13 — Création d'un PDF professionnel via template DOCX OBA
+
+**Prérequis** : aucun fichier uploadé
+
+**Prompt** :
+> Crée un PDF professionnel "Proposition commerciale" avec une page de garde, 3 sections (Contexte, Offre de service, Conditions), et des listes à puces.
+
+**Méthodologie attendue** :
+1. `fill_template.py` avec le template OBA DOCX `template-base.docx` pour créer un DOCX intermédiaire
+2. `soffice.py --headless --convert-to pdf` pour convertir en PDF
+3. Le tout dans un seul `execute_code`
+
+**Validation utilisateur** : le PDF a la charte OBA (page de garde, titres numérotés, polices Arial).
+
+**Validation technique** : vérifier que `fill_template.py` + `soffice.py` sont utilisés (pas `reportlab` from scratch).
+
+---
+
 ## Agent 5 — Quick Edits (FFmpeg)
 
 ### M01 — Conversion vidéo MP4
@@ -1086,14 +1169,14 @@ Ce document décrit les tests métier pour valider le bon fonctionnement de chaq
 
 **Méthodologie attendue** :
 1. `pandas` pour les agrégations
-2. `matplotlib` avec `plt.subplots(2, 2, figsize=(14, 10))`
-3. `seaborn` pour les graphiques élégants
+2. `matplotlib` avec `plt.subplots(2, 2, figsize=(14, 10))` et palette OBA (`#2F5597`, `#5B9AD4`, `#FB840D`, `#FCA810`, `#1C244B`, `#DAE5EF`)
+3. `seaborn` avec `sns.set_palette()` OBA
 4. `scipy.stats.linregress` pour la ligne de tendance
 5. `plt.savefig("/mnt/data/dashboard.png", dpi=150, bbox_inches="tight")`
 
-**Validation utilisateur** : les 4 graphiques sont dans une seule image, lisibles et esthétiques.
+**Validation utilisateur** : les 4 graphiques sont dans une seule image, lisibles, esthétiques, aux couleurs OBA.
 
-**Validation technique** : vérifier `subplots(2,2)`, backend `Agg`, et `savefig`.
+**Validation technique** : vérifier `subplots(2,2)`, backend `Agg`, palette OBA, et `savefig`.
 
 ---
 
