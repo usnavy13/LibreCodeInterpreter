@@ -16,7 +16,8 @@ subprocess.run(["python3", "/opt/skills/docx/scripts/office/validate.py", "outpu
 
 | Tâche | Outil | Langage |
 |-------|-------|---------|
-| **Créer** un nouveau document | `docx` (npm) | JavaScript |
+| **Créer** un nouveau document | **Ouvrir le template OBA** → remplir avec python-docx ou unpack/XML/pack | Python |
+| **Créer** sans template (cas rare) | `docx` (npm) — seulement si aucun template n'est applicable | JavaScript |
 | **Éditer** un document existant | unpack → modifier XML → pack | Python + XML |
 | **Tracked changes** (redlines) | `tracked_replace.py` ou édition XML manuelle | Python |
 | **Lire/extraire** du contenu | `pandoc` | Bash |
@@ -24,6 +25,8 @@ subprocess.run(["python3", "/opt/skills/docx/scripts/office/validate.py", "outpu
 | **Convertir** .doc→.docx | `soffice.py --convert-to docx` | Python |
 | **Accepter** tracked changes | `accept_changes.py` | Python |
 | **Ajouter** des commentaires | `comment.py` + édition XML | Python |
+
+**IMPORTANT : Pour créer un document, TOUJOURS partir d'un template OBA** (pas de docx-js from scratch). Les templates contiennent les styles, thème, numérotation, logo et page de garde pré-formatés. Créer de zéro avec docx-js perd tout cela.
 
 # Scripts disponibles (chemin absolu $SKILLS_ROOT)
 
@@ -56,41 +59,92 @@ python3 $SKILLS_ROOT/docx/scripts/office/soffice.py --headless --convert-to docx
 - `pdftoppm -jpeg -r 150 document.pdf page` — DOCX→images (via PDF intermédiaire)
 - `node` — avec package `docx` global pour création programmatique
 
-# Templates On Behalf AI
+# Création de documents : TOUJOURS partir du template OBA
 
-Quand l'utilisateur demande de CRÉER un document sans fournir de template ou de document de référence, utilise les templates On Behalf AI :
+Quand l'utilisateur demande de CRÉER un document sans fournir de template ou de document de référence, tu DOIS partir d'un template On Behalf AI. Ne JAMAIS créer un document de zéro avec docx-js.
+
+## Templates disponibles
 
 ```
 $SKILLS_ROOT/docx/templates/onbehalfai/
-├── template-base.docx              # Template générique (styles OBA, headings, logo)
-├── template-compte-rendu.docx      # Template compte-rendu (header, métadonnées, participants)
-├── reference-pandoc.docx           # Reference doc pour pandoc
-├── reference-pandoc-v2.docx        # Reference doc pandoc (variante)
-├── heading-unnumbered-v4.lua       # Filtre Lua pour titres non-numérotés
+├── template-base.docx              # Guides, docs techniques, rapports (cover page + version table + logo)
+├── template-compte-rendu.docx      # Comptes-rendus de réunion (header + métadonnées + participants)
+├── reference-pandoc.docx           # Reference doc pour conversion pandoc markdown→DOCX
+├── heading-unnumbered-v4.lua       # Filtre Lua pour titres non-numérotés (pandoc)
 ├── logo-onbehalfai.png             # Logo On Behalf AI (PNG)
 └── logo-onbehalfai.svg             # Logo On Behalf AI (SVG)
 ```
 
-**Charte graphique On Behalf AI :**
+## Workflow de création (dans UN SEUL code block)
+
+```python
+import subprocess, shutil, os
+os.chdir('/mnt/data')
+
+# 1. Copier le template comme base
+shutil.copy('$SKILLS_ROOT/docx/templates/onbehalfai/template-base.docx', 'output.docx')
+
+# 2. Décompresser pour éditer le XML
+subprocess.run(["python3", "$SKILLS_ROOT/docx/scripts/office/unpack.py", "output.docx", "unpacked/"], check=True)
+
+# 3. Lire le document.xml
+with open("unpacked/word/document.xml", "r") as f:
+    content = f.read()
+
+# 4. Remplacer les placeholders et ajouter du contenu
+#    - Modifier les tables de la cover page (titre, sous-titre, version, auteur, date)
+#    - Ajouter les sections avec les bons styles :
+#      Titre1 = <w:pStyle w:val="Titre1"/>              (chapitres numérotés)
+#      Titre2 = <w:pStyle w:val="Titre2"/>              (sous-chapitres numérotés)
+#      Titre1sansnumrotation = titres non numérotés
+#      ListParagraph + numId=7 = listes à tirets
+#      PrformatHTML = blocs de code (Courier New)
+#      Normal = texte courant
+
+with open("unpacked/word/document.xml", "w") as f:
+    f.write(content)
+
+# 5. Repack et valider
+subprocess.run(["python3", "$SKILLS_ROOT/docx/scripts/office/pack.py", "unpacked/", "-o", "output.docx"], check=True)
+subprocess.run(["python3", "$SKILLS_ROOT/docx/scripts/office/validate.py", "output.docx"], check=True)
+```
+
+## Choix du template
+
+- **Compte-rendu de réunion** → `template-compte-rendu.docx` (tables header/metadata/participants pré-formatées)
+- **Guide d'installation, doc technique, rapport, proposition** → `template-base.docx` (cover page + version table)
+- **Conversion depuis markdown** → pandoc avec reference-pandoc.docx :
+  ```bash
+  pandoc input.md -o output.docx --reference-doc=$SKILLS_ROOT/docx/templates/onbehalfai/reference-pandoc.docx --shift-heading-level-by=-1 --lua-filter=$SKILLS_ROOT/docx/templates/onbehalfai/heading-unnumbered-v4.lua
+  ```
+
+## IDs des styles à utiliser dans le XML (IDs francisés)
+
+| Usage | Style ID dans le XML | Rendu |
+|-------|---------------------|-------|
+| Chapitre numéroté | `Titre1` | 1. Titre (14pt, bold, navy) |
+| Sous-chapitre numéroté | `Titre2` | 1.1 Sous-titre (13pt, navy) |
+| Titre non numéroté | `Titre1sansnumrotation` | Titre (14pt, bold, navy, sans numéro) |
+| Texte courant | `Normal` | Arial 10pt |
+| Liste à tirets | `ListParagraph` + `<w:numPr><w:ilvl w:val="0"/><w:numId w:val="7"/></w:numPr>` | - item |
+| Bloc de code | `PrformatHTML` | Courier New, fond gris |
+| Sous-titre page de garde | `Stylesubheader` | Arial 10pt bold |
+
+**ATTENTION** : ne PAS utiliser `Heading1`/`Heading2` (IDs anglais) — utiliser `Titre1`/`Titre2` (IDs du template).
+
+## Charte graphique On Behalf AI (référence)
+
 - Police : Arial (tout le document)
-- Normal : 10pt
 - Heading 1 : 14pt, bold, #233F70 (navy)
 - Heading 2 : 13pt, #233F70
 - Heading 3 : 12pt, #233F70
-- Title : 28pt
-- Subtitle : 14pt, #4255B2
 - Couleurs accent : #2F5597 (bleu), #DAE5EF (bleu clair), #FB840D (orange), #FCA810 (ambre)
 - Page : A4, marges ~1.6cm (top) / ~2.3cm (sides/bottom)
 - Footer : pagination "X / Y"
 
-**Utilisation pandoc avec template OBA :**
-```bash
-pandoc input.md -o output.docx --reference-doc=$SKILLS_ROOT/docx/templates/onbehalfai/reference-pandoc.docx --shift-heading-level-by=-1 --lua-filter=$SKILLS_ROOT/docx/templates/onbehalfai/heading-unnumbered-v4.lua
-```
+# Création avancée avec docx-js (JavaScript — cas rare)
 
-# Création de documents (JavaScript — docx npm)
-
-Quand tu crées un nouveau document de zéro, utilise le package `docx` de Node.js :
+Utiliser docx-js UNIQUEMENT si aucun template ne convient (ex: document avec une structure très spécifique non couverte par les templates). Dans la grande majorité des cas, utiliser le workflow template ci-dessus.
 
 ```javascript
 const fs = require('fs');
