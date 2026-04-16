@@ -66,7 +66,7 @@ HEADING_STYLES = {
 }
 STYLE_NORMAL = "Normal"
 STYLE_LIST = "Paragraphedeliste"
-STYLE_CODE = "PrformatHTML"
+STYLE_CODE = "Code"
 BULLET_NUM_ID = "7"
 
 SCRIPTS_DIR = Path(__file__).parent
