@@ -113,14 +113,14 @@ config = {
     ]
 }
 
-with open("config.json", "w") as f:
+with open("/tmp/config.json", "w") as f:
     json.dump(config, f, ensure_ascii=False)
 
 subprocess.run([
     "python3", "/opt/skills/docx/scripts/fill_template.py",
     "/opt/skills/docx/templates/onbehalfai/template-base.docx",
     "output.docx",
-    "config.json"
+    "/tmp/config.json"
 ], check=True)
 ```
 
