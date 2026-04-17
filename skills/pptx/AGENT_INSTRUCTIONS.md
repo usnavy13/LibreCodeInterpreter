@@ -97,45 +97,89 @@ subprocess.run(["python3", "/opt/skills/pptx/scripts/office/pack.py",
     "unpacked/", "presentation.pptx"], check=True)
 ```
 
-## Choix du layout par usage
+## Les 12 layouts essentiels
 
-| Besoin | Layout | Fichier XML |
-|--------|--------|-------------|
-| Slide de titre | Title | slideLayout1.xml |
-| Titre + description | Title + text | slideLayout2.xml |
-| Titre + image | Title + image | slideLayout3.xml |
-| Section (navy) | Section title - dark blue | slideLayout38.xml |
-| Section (bleu clair) | Section title - light blue | slideLayout39.xml |
-| Section (orange) | Section title - orange | slideLayout41.xml |
-| Contenu bullets | Title + Content #1 | slideLayout7.xml |
-| Contenu + sous-titre | Title + Subtitle + Content #1 | slideLayout6.xml |
-| 2 colonnes | Title + 2 Content #1 | slideLayout21.xml |
-| 3 colonnes | Title + 3 Content #1 | slideLayout27.xml |
-| Contenu + image | Title + Content + Image #1 | slideLayout19.xml |
-| Contenu + tableau | Title + Content + Table #1 | slideLayout23.xml |
-| Graphique plein | Title + Chart #1 | slideLayout13.xml |
-| Tableau plein | Title + Table #1 | slideLayout15.xml |
-| Agenda | Agenda | slideLayout5.xml |
-| Citation | Quote | slideLayout43.xml |
-| Équipe 4 pers. | Team | slideLayout44.xml |
-| Équipe 8 pers. | Whole team | slideLayout47.xml |
-| Fond bleu + contenu | Title + Content Blue bg #6 | slideLayout36.xml |
-| Slide de fin | End - Thank you #2 | slideLayout49.xml |
+Parmi les 50 layouts du template, utilise ces 12 qui couvrent tous les besoins :
 
-## Placeholder IDs par layout
+### 1. COUVERTURE — `slideLayout1.xml` (Title)
+- **Visuel** : Logo OBA centré en haut, vagues bleues décoratives en bas
+- **Placeholders** : `ctrTitle` (titre centré), `subTitle[1]` (sous-titre)
+- **Usage** : Première slide d'un deck. Titre de la présentation + nom/date
 
-Les placeholders ont des `idx` fixes. Pour remplir un placeholder, chercher `<p:ph type="..." idx="..."/>` dans le XML du slide.
+### 2. COUVERTURE DESCRIPTIVE — `slideLayout2.xml` (Title + text)
+- **Visuel** : Titre à gauche, bandeau bleu vertical à droite
+- **Placeholders** : `ctrTitle` (titre), `subTitle[1]` (description dans le bandeau droit)
+- **Usage** : Couverture avec description longue ou contexte à droite
 
-| Type | idx typique | Contenu |
-|------|-------------|---------|
-| `ctrTitle` ou `title` | (sans idx) | Titre principal |
-| `subTitle` | 1 ou 13 | Sous-titre |
-| `body` | 1, 14, 15, 20, 21 | Zone de contenu texte |
-| `pic` | 13, 14, 15 | Image |
-| `chart` | 14 | Graphique |
-| `tbl` | 14, 15 | Tableau |
-| `dt` | 10, 14, 16, 17 | Date |
-| `sldNum` | 12, 16, 19 | Numéro de slide |
+### 3. AGENDA — `slideLayout5.xml` (Agenda)
+- **Visuel** : Losanges orange à gauche, 6 lignes d'agenda à droite
+- **Placeholders** : `body[1]` à `body[17]` (6 items d'agenda)
+- **Usage** : Sommaire, ordre du jour, plan de la présentation
+
+### 4. CONTENU — `slideLayout7.xml` (Title + Content #1) ⭐ LE PLUS UTILISÉ
+- **Visuel** : Triangle décoratif bleu en bas-gauche, logo OBA en haut-droite, fond blanc
+- **Placeholders** : `title` (titre haut), `body[14]` (zone contenu pleine largeur 11.1×4.9")
+- **Usage** : Bullets, texte, tout contenu standard. C'est le layout polyvalent par excellence.
+- **Variante avec sous-titre** : `slideLayout6.xml` ajoute `subTitle[13]` sous le titre
+
+### 5. CONTENU + IMAGE — `slideLayout19.xml` (Title + Content + Image #1)
+- **Visuel** : Triangle bleu déco, contenu à gauche (7.3"), image à droite (3.7")
+- **Placeholders** : `title`, `body[14]` (gauche), `pic[15]` (image droite)
+- **Usage** : Slide avec une illustration, schéma, capture d'écran à droite
+
+### 6. DEUX COLONNES — `slideLayout21.xml` (Title + 2 Content #1)
+- **Visuel** : Triangle bleu déco, 2 colonnes de 5.4" séparées
+- **Placeholders** : `title`, `body[14]` (titre col. gauche), `body[1]` (contenu gauche), `body[15]` (titre col. droite), `body[20]` (contenu droite)
+- **Usage** : Comparaison, avant/après, 2 thèmes côte à côte
+
+### 7. TROIS COLONNES — `slideLayout27.xml` (Title + 3 Content #1)
+- **Visuel** : Triangle bleu déco, 3 colonnes de 3.5" chacune
+- **Placeholders** : `title`, `body[14]`/`body[1]` (col.1), `body[15]`/`body[20]` (col.2), `body[16]`/`body[21]` (col.3)
+- **Usage** : 3 pilliers, 3 offres, 3 avantages
+
+### 8. CONTENU FOND BLEU — `slideLayout36.xml` (Title + Content Blue bg #6)
+- **Visuel** : Fond bleu foncé avec triangle orange décoratif, texte blanc
+- **Placeholders** : `title`, `body[13]` (contenu sur fond bleu)
+- **Usage** : Slide de mise en valeur, chiffres clés, citation impactante
+
+### 9. SECTION BLEU FONCÉ — `slideLayout38.xml` (Section title - dark blue)
+- **Visuel** : Fond bleu foncé uni (#1C244B), logo OBA visible
+- **Placeholders** : `ctrTitle` (titre section), `subTitle[1]` (description)
+- **Usage** : Séparateur de section principal (sérieux, corporate)
+
+### 10. SECTION ORANGE — `slideLayout41.xml` (Section title - orange)
+- **Visuel** : Fond orange vif (#FB840D) avec chevrons bleus et logo OBA
+- **Placeholders** : `ctrTitle` (titre section), `subTitle[1]` (description)
+- **Usage** : Séparateur de section (dynamique, énergie, action)
+
+### 11. CITATION — `slideLayout43.xml` (Quote)
+- **Visuel** : Fond ambre/jaune avec chevrons décoratifs et guillemets
+- **Placeholders** : `subTitle[1]` (texte citation), `body[13]` (guillemet gauche), `body[15]` (guillemet droit)
+- **Usage** : Citation, témoignage client, message clé à retenir
+
+### 12. SLIDE DE FIN — `slideLayout49.xml` (End - Thank you)
+- **Visuel** : Fond blanc, chevrons orange en bas-droite
+- **Placeholders** : `subTitle[1]` (coordonnées, remerciements)
+- **Usage** : Dernière slide du deck (merci, contact, prochaines étapes)
+
+## Règle de sélection des layouts
+
+Pour un deck standard de N slides, composer ainsi :
+1. **Slide 1** : Layout 1 ou 2 (couverture)
+2. **Slide 2** : Layout 3 (agenda) — si >5 slides dans le deck
+3. **Slides de section** : Layout 9 (bleu) ou 10 (orange) — alterner les couleurs
+4. **Slides de contenu** : Layout 4 (le plus courant), varier avec 5 (contenu+image), 6 (2 col.), 7 (3 col.)
+5. **Slide d'impact** : Layout 8 (fond bleu) ou 11 (citation)
+6. **Dernière slide** : Layout 12 (fin)
+
+**IMPORTANT** : ne PAS répéter le même layout plus de 3 fois consécutives. Varier entre 4, 5, 6, 7, 8 pour le contenu.
+
+## Référence complète
+
+Pour les 50 layouts (cas avancés, team, SmartArt...) :
+```bash
+cat $SKILLS_ROOT/pptx/templates/onbehalfai/TEMPLATE_REFERENCE.md
+```
 
 ## Template simple (fallback)
 
