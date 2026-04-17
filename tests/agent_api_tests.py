@@ -42,8 +42,11 @@ except ImportError:
 
 API_BASE = os.environ.get("LIBRECHAT_URL", "http://127.0.0.1:3080")
 API_KEY = os.environ.get("AGENT_API_KEY", "")
+CI_BASE = os.environ.get("CODE_INTERPRETER_URL", "http://127.0.0.1:8010")
+CI_KEY = os.environ.get("CODE_INTERPRETER_KEY", "facac6914bfccdddd47595b6bf24d476e38bd42516d99bb5aff8da48df649a4c")
 RESPONSES_ENDPOINT = f"{API_BASE}/api/agents/v1/responses"
 RESULTS_DIR = Path("tests/results")
+FILES_DIR = Path("tests/results/files")
 TIMEOUT = 600  # 10 minutes max per test (agents with code execution can be slow)
 
 # Force unbuffered output
@@ -80,6 +83,96 @@ class TestCase:
 
 
 # === API Client ===
+
+def exec_code(code: str, lang: str = "py") -> dict:
+    """Execute code directly in the code-interpreter sandbox."""
+    headers = {"x-api-key": CI_KEY, "Content-Type": "application/json"}
+    resp = requests.post(f"{CI_BASE}/exec", headers=headers,
+                         json={"code": code, "lang": lang}, timeout=TIMEOUT)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def download_file(session_id: str, file_id: str, output_path: Path) -> bool:
+    """Download a file from the code-interpreter."""
+    headers = {"x-api-key": CI_KEY}
+    resp = requests.get(f"{CI_BASE}/download/{session_id}/{file_id}",
+                        headers=headers, timeout=60)
+    if resp.status_code == 200 and len(resp.content) > 0:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(resp.content)
+        return True
+    return False
+
+
+# === File generation scripts (run directly in code-interpreter, bypass LLM) ===
+
+FILE_GENERATION_SCRIPTS = {
+    "D01b": '''
+import subprocess, json, os
+os.chdir('/mnt/data')
+config = {"meeting":{"title":"CR Test","subtitle":"Test","date":"17/04/2026","location":"Test","organizer":"Test"},"participants":[{"name":"A","role":"R","company":"C"}],"sections":[{"title":"Test","level":1,"content":[{"type":"text","text":"Contenu test."}]}]}
+with open("/tmp/config.json","w") as f: json.dump(config,f,ensure_ascii=False)
+subprocess.run(["python3","/opt/skills/docx/scripts/fill_cr_template.py","/opt/skills/docx/templates/onbehalfai/template-compte-rendu.docx","cr_test.docx","/tmp/config.json"],check=True)
+print("OK")
+''',
+    "D01c": '''
+import subprocess, json, os
+os.chdir('/mnt/data')
+config = {"placeholders":{"[TITRE DU DOCUMENT]":"Guide Test","[Sous-titre du document]":"Test","[Auteur]":"Test","[Date]":"17/04/2026"},"sections":[{"title":"Section 1","level":1,"content":[{"type":"text","text":"Contenu."},{"type":"bullets","items":["A","B"]},{"type":"code","text":"echo hello"},{"type":"table","headers":["Col1","Col2"],"rows":[["a","b"]]}]}]}
+with open("/tmp/config.json","w") as f: json.dump(config,f,ensure_ascii=False)
+subprocess.run(["python3","/opt/skills/docx/scripts/fill_template.py","/opt/skills/docx/templates/onbehalfai/template-base.docx","guide_test.docx","/tmp/config.json"],check=True)
+print("OK")
+''',
+    "P01b": '''
+const pptxgen = require("pptxgenjs");
+const pptx = new pptxgen();
+pptx.layout = "LAYOUT_16x9";
+const s = pptx.addSlide();
+s.background = { fill: "1C244B" };
+s.addText("Test Slide", {x:0.5,y:2,w:9,h:1.5,fontSize:36,fontFace:"Arial",bold:true,color:"FFFFFF"});
+pptx.writeFile({fileName:"/mnt/data/test_pptx.pptx"}).then(()=>console.log("OK"));
+''',
+    "X01": '''
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill
+wb = Workbook()
+ws = wb.active
+ws.title = "Budget"
+hdr = PatternFill(start_color="2F5597",end_color="2F5597",fill_type="solid")
+hfont = Font(name="Arial",size=11,bold=True,color="FFFFFF")
+for col,h in enumerate(["Poste","Montant"],1):
+    c = ws.cell(row=1,column=col,value=h)
+    c.fill = hdr
+    c.font = hfont
+ws.cell(row=2,column=1,value="Salaires")
+ws.cell(row=2,column=2,value=45000)
+wb.save("/mnt/data/budget_test.xlsx")
+print("OK")
+''',
+    "A02": '''
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
+fig, axes = plt.subplots(2,2,figsize=(10,8))
+colors = ["#2F5597","#5B9AD4","#FB840D","#FCA810"]
+axes[0,0].plot([1,2,3,4],[10,20,15,25],color=colors[0])
+axes[0,0].set_title("CA Mensuel")
+axes[0,1].pie([40,30,20,10],labels=["A","B","C","D"],colors=colors)
+axes[0,1].set_title("Répartition")
+axes[1,0].barh(["C1","C2","C3"],[100,80,60],color=colors[1])
+axes[1,0].set_title("Top Clients")
+axes[1,1].scatter(np.random.rand(20),np.random.rand(20),color=colors[2])
+axes[1,1].set_title("Scatter")
+plt.suptitle("Dashboard OBA",fontweight="bold")
+plt.tight_layout()
+plt.savefig("/mnt/data/dashboard_test.png",dpi=150,bbox_inches="tight")
+plt.close()
+print("OK")
+''',
+}
+
 
 def call_agent(agent_id: str, prompt: str, previous_response_id: str = None) -> dict:
     """Call an agent via the Open Responses API."""
@@ -451,12 +544,78 @@ def print_result(result: TestResult):
                 print(f"    {value}: {check}")
 
 
+def generate_sample_files():
+    """Generate sample files by executing code directly in the code-interpreter.
+    Downloads produced files to tests/results/files/."""
+    FILES_DIR.mkdir(parents=True, exist_ok=True)
+    print(f"\n{'='*60}")
+    print(f"Generating sample files via code-interpreter")
+    print(f"Output: {FILES_DIR}/")
+    print(f"{'='*60}\n")
+
+    results = []
+    for test_id, code in FILE_GENERATION_SCRIPTS.items():
+        lang = "js" if "require(" in code else "py"
+        print(f"  Generating {test_id} ({lang})...", end=" ")
+        try:
+            resp = exec_code(code.strip(), lang)
+            stdout = resp.get("stdout", "")
+            stderr = resp.get("stderr", "")
+            files = resp.get("files", [])
+            session_id = resp.get("session_id", "")
+
+            if stderr and "Error" in stderr:
+                print(f"ERROR: {stderr[:100]}")
+                results.append((test_id, "ERROR", stderr[:100]))
+                continue
+
+            if not files:
+                print(f"NO FILES (stdout: {stdout.strip()[:60]})")
+                results.append((test_id, "NO_FILES", stdout.strip()[:60]))
+                continue
+
+            # Download each file
+            downloaded = []
+            for f in files:
+                file_id = f.get("id", "")
+                file_name = f.get("name", "unknown")
+                out_path = FILES_DIR / f"{test_id}_{file_name}"
+                ok = download_file(session_id, file_id, out_path)
+                if ok:
+                    size = out_path.stat().st_size
+                    downloaded.append(f"{file_name} ({size:,} bytes)")
+                else:
+                    downloaded.append(f"{file_name} (DOWNLOAD FAILED)")
+
+            print(f"OK: {', '.join(downloaded)}")
+            results.append((test_id, "OK", downloaded))
+
+        except Exception as e:
+            print(f"EXCEPTION: {e}")
+            results.append((test_id, "EXCEPTION", str(e)))
+
+    # Summary
+    ok_count = sum(1 for _, s, _ in results if s == "OK")
+    print(f"\n{'='*60}")
+    print(f"Generated: {ok_count}/{len(results)} files")
+    print(f"Files saved in: {FILES_DIR.absolute()}/")
+    print(f"{'='*60}")
+
+    # List generated files
+    if FILES_DIR.exists():
+        for f in sorted(FILES_DIR.iterdir()):
+            if f.is_file():
+                print(f"  {f.name} ({f.stat().st_size:,} bytes)")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Run agent API tests")
     parser.add_argument("tests", nargs="*", help="Specific test IDs to run (e.g., D01b D01c P01b)")
     parser.add_argument("--agent", help="Run all tests for an agent (docx, pptx, xlsx, pdf, ffmpeg, dataviz)")
     parser.add_argument("--list", action="store_true", help="List all available tests")
     parser.add_argument("--key", help="Agent API key (overrides AGENT_API_KEY env var)")
+    parser.add_argument("--generate-files", action="store_true",
+                        help="Generate sample files via code-interpreter (bypasses LLM, tests pipelines)")
     args = parser.parse_args()
 
     global API_KEY
@@ -475,7 +634,13 @@ def main():
     if args.list:
         print(f"Available tests ({len(TESTS)}):\n")
         for t in TESTS:
-            print(f"  {t.test_id:6s} [{t.agent_name:8s}] {t.description}")
+            has_gen = " [GEN]" if t.test_id in FILE_GENERATION_SCRIPTS else ""
+            print(f"  {t.test_id:6s} [{t.agent_name:8s}] {t.description}{has_gen}")
+        print(f"\n[GEN] = has file generation script (usable with --generate-files)")
+        return
+
+    if args.generate_files:
+        generate_sample_files()
         return
 
     # Filter tests
