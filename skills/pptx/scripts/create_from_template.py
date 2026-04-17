@@ -127,16 +127,76 @@ def add_slide_and_register(unpacked_dir, layout_file):
     return slide_match.group(1) if slide_match else None
 
 
+def _find_layout_for_slide(unpacked_dir, slide_filename):
+    """Find which layout a slide references via its .rels file."""
+    rels_path = os.path.join(unpacked_dir, "ppt", "slides", "_rels", slide_filename + ".rels")
+    if not os.path.exists(rels_path):
+        return None
+    tree = etree.parse(rels_path)
+    for rel in tree.getroot():
+        target = rel.get("Target", "")
+        if "slideLayout" in target:
+            # Target is like "../slideLayouts/slideLayout7.xml"
+            return os.path.basename(target)
+    return None
+
+
+def _copy_placeholders_from_layout(unpacked_dir, slide_filename, layout_filename):
+    """Copy placeholder shapes from layout into the slide's spTree.
+
+    Slides created by add_slide.py are empty skeletons — they inherit
+    the layout visually but have no shapes. To write text, we must
+    copy the placeholder shapes from the layout into the slide.
+    Only copies shapes that have a <p:ph> (placeholder marker).
+    """
+    layout_path = os.path.join(unpacked_dir, "ppt", "slideLayouts", layout_filename)
+    slide_path = os.path.join(unpacked_dir, "ppt", "slides", slide_filename)
+
+    if not os.path.exists(layout_path):
+        return 0
+
+    layout_tree = etree.parse(layout_path)
+    slide_tree = etree.parse(slide_path)
+
+    slide_spTree = slide_tree.find(f".//{_p('spTree')}")
+    if slide_spTree is None:
+        return 0
+
+    count = 0
+    for sp in layout_tree.findall(f".//{_p('sp')}"):
+        ph = sp.find(f".//{_p('ph')}")
+        if ph is None:
+            continue
+        ph_type = ph.get("type", "body")
+        # Skip date and slide number placeholders
+        if ph_type in ("dt", "sldNum", "ftr"):
+            continue
+        from copy import deepcopy
+        slide_spTree.append(deepcopy(sp))
+        count += 1
+
+    slide_tree.write(slide_path, xml_declaration=True, encoding="UTF-8", standalone=True)
+    return count
+
+
 def fill_slide_content(unpacked_dir, slide_filename, content):
-    """Fill placeholder text in a slide XML file."""
+    """Copy placeholders from layout into slide, then fill text."""
     slide_path = os.path.join(unpacked_dir, "ppt", "slides", slide_filename)
     if not os.path.exists(slide_path):
         print(f"  WARNING: {slide_path} not found", file=sys.stderr)
         return
 
+    # First, copy placeholder shapes from the layout
+    layout_file = _find_layout_for_slide(unpacked_dir, slide_filename)
+    if layout_file:
+        n = _copy_placeholders_from_layout(unpacked_dir, slide_filename, layout_file)
+        print(f"  Copied {n} placeholders from {layout_file}")
+
+    # Now fill the content
     tree = etree.parse(slide_path)
     root = tree.getroot()
 
+    filled = 0
     for sp in root.findall(f".//{_p('sp')}"):
         ph = sp.find(f".//{_p('ph')}")
         if ph is None:
@@ -152,7 +212,6 @@ def fill_slide_content(unpacked_dir, slide_filename, content):
         elif ph_type == "subTitle":
             text = content.get("subTitle") or content.get("subtitle")
         elif ph_type == "body":
-            # Try specific key first (body14, body15...), then generic "body"
             text = content.get(f"body{ph_idx}") or content.get("body")
         elif ph_type == "dt":
             text = content.get("date")
@@ -160,10 +219,12 @@ def fill_slide_content(unpacked_dir, slide_filename, content):
         if text is None:
             continue
 
-        # Clear existing text and replace
         _set_placeholder_text(sp, text)
+        filled += 1
 
     tree.write(slide_path, xml_declaration=True, encoding="UTF-8", standalone=True)
+    if filled == 0 and content:
+        print(f"  WARNING: no placeholders filled (content keys: {list(content.keys())})")
 
 
 def _set_placeholder_text(sp, text):
