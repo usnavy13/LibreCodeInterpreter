@@ -165,12 +165,14 @@ Parmi les 50 layouts du template, utilise ces 12 qui couvrent tous les besoins :
 ## Règle de sélection des layouts
 
 Pour un deck standard de N slides, composer ainsi :
-1. **Slide 1** : Layout 1 ou 2 (couverture)
+1. **Slide 1** : **TOUJOURS Layout 1** (`slideLayout1.xml`) — c'est la page de garde avec le logo OBA centré et les vagues
 2. **Slide 2** : Layout 3 (agenda) — si >5 slides dans le deck
 3. **Slides de section** : Layout 9 (bleu) ou 10 (orange) — alterner les couleurs
 4. **Slides de contenu** : Layout 4 (le plus courant), varier avec 5 (contenu+image), 6 (2 col.), 7 (3 col.)
 5. **Slide d'impact** : Layout 8 (fond bleu) ou 11 (citation)
 6. **Dernière slide** : Layout 12 (fin)
+
+Le Layout 2 (Title + text) peut servir comme slide d'introduction juste après la couverture, mais JAMAIS comme page de garde.
 
 **IMPORTANT** : ne PAS répéter le même layout plus de 3 fois consécutives. Varier entre 4, 5, 6, 7, 8 pour le contenu.
 
