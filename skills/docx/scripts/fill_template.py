@@ -81,12 +81,32 @@ SCRIPTS_DIR = Path(__file__).parent
 OFFICE_DIR = SCRIPTS_DIR / "office"
 
 
+# === Smart quotes ===
+
+def _smart_quotes(text: str) -> str:
+    """Convert ASCII apostrophes and quotes to smart (typographic) equivalents."""
+    if not text:
+        return text
+    # Apostrophe: ' → ' (right single quote U+2019)
+    text = text.replace("\u0027", "\u2019")
+    # Double quotes: simplistic approach — alternate left/right
+    result = []
+    open_dq = True
+    for ch in text:
+        if ch == '"':
+            result.append("\u201C" if open_dq else "\u201D")
+            open_dq = not open_dq
+        else:
+            result.append(ch)
+    return "".join(result)
+
+
 # === Element builders ===
 
 def _make_text(text: str) -> etree._Element:
     """Create a <w:t> element with xml:space=preserve."""
     t = etree.Element(_w("t"))
-    t.text = text or ""
+    t.text = _smart_quotes(text or "")
     t.set(f"{{{XML_NS}}}space", "preserve")
     return t
 
@@ -194,12 +214,24 @@ def _make_table(headers: list, rows: list) -> etree._Element:
         gridCol = etree.SubElement(tblGrid, _w("gridCol"))
         gridCol.set(_w("w"), str(col_width))
 
+    def _make_border_el(parent, name, color=TABLE_BORDER_COLOR):
+        """Add a single border element (top/bottom/left/right)."""
+        b = etree.SubElement(parent, _w(name))
+        b.set(_w("val"), "single")
+        b.set(_w("sz"), "4")
+        b.set(_w("space"), "0")
+        b.set(_w("color"), color)
+
     def _make_cell(text: str, bold: bool = False, shading: str = None) -> etree._Element:
         tc = etree.Element(_w("tc"))
         tcPr = etree.SubElement(tc, _w("tcPr"))
         tcW = etree.SubElement(tcPr, _w("tcW"))
         tcW.set(_w("w"), str(col_width))
         tcW.set(_w("type"), "dxa")
+        # Borders (light gray)
+        tcBorders = etree.SubElement(tcPr, _w("tcBorders"))
+        for side in ("top", "left", "bottom", "right"):
+            _make_border_el(tcBorders, side)
         if shading:
             shd = etree.SubElement(tcPr, _w("shd"))
             shd.set(_w("val"), "clear")
