@@ -13,11 +13,14 @@ Les fichiers temporaires ne persistent PAS entre les appels execute_code. Tu DOI
 
 | Tâche | Outil | Langage |
 |-------|-------|---------|
-| **Créer** une présentation | pptxgenjs | JavaScript (Node.js) |
+| **Créer** sans template utilisateur | **Template OBA corporate** → unpack → add_slide → edit → pack | Python + XML |
+| **Créer** from scratch (cas rare) | pptxgenjs | JavaScript (Node.js) |
 | **Éditer** un PPTX existant | unpack → modifier XML → clean → pack | Python + XML |
 | **Analyser** un template | thumbnail.py + markitdown | Python |
 | **Convertir** PPTX→PDF | soffice.py --convert-to pdf | Python |
 | **Extraire** du texte | `python -m markitdown file.pptx` | Python |
+
+**IMPORTANT** : Pour créer une présentation, TOUJOURS partir du template OBA corporate (50 layouts professionnels) sauf si l'utilisateur fournit son propre template. Ne JAMAIS utiliser pptxgenjs from scratch quand le template OBA peut être utilisé.
 
 # Scripts disponibles ($SKILLS_ROOT = /opt/skills)
 
@@ -56,18 +59,88 @@ const OBA = {
 };
 ```
 
-**Règle** : quand l'utilisateur ne fournit pas de template, utiliser cette palette. JAMAIS de slide blanche avec bullets noirs par défaut.
+**Règle** : quand l'utilisateur ne fournit pas de template, utiliser le template OBA corporate. JAMAIS de slide blanche avec bullets noirs par défaut.
 
-# Template OBA PPTX
+# Template OBA Corporate (RECOMMANDÉ)
 
-Un template OBA est disponible à `$SKILLS_ROOT/pptx/templates/onbehalfai/template-oba.pptx` avec 5 slides types :
-- Slide 1 : Titre (fond navy, logo OBA, placeholders titre/sous-titre/date/auteur)
-- Slide 2 : Section divider (fond bleu, titre blanc, barre orange)
-- Slide 3 : Contenu avec bullets (fond blanc, titre heading, barre orange)
-- Slide 4 : Deux colonnes (fond blanc, cartes grises)
-- Slide 5 : Closing (fond navy, logo, "Merci")
+**Fichier** : `$SKILLS_ROOT/pptx/templates/onbehalfai/template-oba-corporate.pptx`
+**Référence** : `$SKILLS_ROOT/pptx/templates/onbehalfai/TEMPLATE_REFERENCE.md`
 
-Tu peux l'utiliser comme base pour le mode unpack/edit/pack, ou t'en inspirer pour la création pptxgenjs.
+Template professionnel avec **50 layouts**, thème OBA, polices Poppins, slide master avec éléments décoratifs.
+
+## Workflow de création (dans UN SEUL code block)
+
+```python
+import subprocess, shutil, os
+from lxml import etree
+os.chdir('/mnt/data')
+
+# 1. Copier le template
+shutil.copy('/opt/skills/pptx/templates/onbehalfai/template-oba-corporate.pptx', 'presentation.pptx')
+
+# 2. Unpack
+subprocess.run(["python3", "/opt/skills/pptx/scripts/office/unpack.py", 
+    "presentation.pptx", "unpacked/"], check=True)
+
+# 3. Ajouter des slides depuis les layouts
+# Chaque appel retourne un <p:sldId> à ajouter dans presentation.xml
+subprocess.run(["python3", "/opt/skills/pptx/scripts/add_slide.py",
+    "unpacked/", "slideLayout7.xml"], check=True)  # Title + Content
+
+# 4. Éditer le XML des slides avec lxml
+tree = etree.parse("unpacked/ppt/slides/slide2.xml")
+# Remplir les placeholders...
+
+# 5. Clean + Pack
+subprocess.run(["python3", "/opt/skills/pptx/scripts/clean.py", "unpacked/"], check=True)
+subprocess.run(["python3", "/opt/skills/pptx/scripts/office/pack.py",
+    "unpacked/", "presentation.pptx"], check=True)
+```
+
+## Choix du layout par usage
+
+| Besoin | Layout | Fichier XML |
+|--------|--------|-------------|
+| Slide de titre | Title | slideLayout1.xml |
+| Titre + description | Title + text | slideLayout2.xml |
+| Titre + image | Title + image | slideLayout3.xml |
+| Section (navy) | Section title - dark blue | slideLayout38.xml |
+| Section (bleu clair) | Section title - light blue | slideLayout39.xml |
+| Section (orange) | Section title - orange | slideLayout41.xml |
+| Contenu bullets | Title + Content #1 | slideLayout7.xml |
+| Contenu + sous-titre | Title + Subtitle + Content #1 | slideLayout6.xml |
+| 2 colonnes | Title + 2 Content #1 | slideLayout21.xml |
+| 3 colonnes | Title + 3 Content #1 | slideLayout27.xml |
+| Contenu + image | Title + Content + Image #1 | slideLayout19.xml |
+| Contenu + tableau | Title + Content + Table #1 | slideLayout23.xml |
+| Graphique plein | Title + Chart #1 | slideLayout13.xml |
+| Tableau plein | Title + Table #1 | slideLayout15.xml |
+| Agenda | Agenda | slideLayout5.xml |
+| Citation | Quote | slideLayout43.xml |
+| Équipe 4 pers. | Team | slideLayout44.xml |
+| Équipe 8 pers. | Whole team | slideLayout47.xml |
+| Fond bleu + contenu | Title + Content Blue bg #6 | slideLayout36.xml |
+| Slide de fin | End - Thank you #2 | slideLayout49.xml |
+
+## Placeholder IDs par layout
+
+Les placeholders ont des `idx` fixes. Pour remplir un placeholder, chercher `<p:ph type="..." idx="..."/>` dans le XML du slide.
+
+| Type | idx typique | Contenu |
+|------|-------------|---------|
+| `ctrTitle` ou `title` | (sans idx) | Titre principal |
+| `subTitle` | 1 ou 13 | Sous-titre |
+| `body` | 1, 14, 15, 20, 21 | Zone de contenu texte |
+| `pic` | 13, 14, 15 | Image |
+| `chart` | 14 | Graphique |
+| `tbl` | 14, 15 | Tableau |
+| `dt` | 10, 14, 16, 17 | Date |
+| `sldNum` | 12, 16, 19 | Numéro de slide |
+
+## Template simple (fallback)
+
+Si le template corporate est trop complexe pour un cas spécifique, un template simple pptxgenjs est aussi disponible :
+`$SKILLS_ROOT/pptx/templates/onbehalfai/template-oba.pptx` (5 slides basiques).
 
 Logo OBA : `$SKILLS_ROOT/pptx/templates/onbehalfai/logo-onbehalfai.png`
 
