@@ -462,6 +462,375 @@ test("A02", "agent_data_viz", "DataViz",
      expect_file=True, file_ext=".png")
 
 
+# ==========================================
+# DOCX — Tests nécessitant un fichier source
+# (marqués NEEDS_FILE — skippés si pas de fichier)
+# ==========================================
+
+test("D01", "agent_docx_complete", "DOCX",
+     "[NEEDS_FILE:docx_cr_template] Voici un exemple de CR. Analyse sa structure puis produis un nouveau CR : "
+     "Réunion produit du 14 avril 2026. Participants : Marie, Jean, Sophie. "
+     "Décision : lancement V2 le 15 juin. Action : Jean prépare le plan média avant le 1er mai.",
+     patterns=[r"unpack|lxml|template|analyse"],
+     description="[NEEDS_FILE] Reproduire un CR depuis template utilisateur")
+
+test("D03", "agent_docx_complete", "DOCX",
+     "Accepte tous les tracked changes de ce document et produis la version finale propre.",
+     patterns=[r"accept_changes|accept|tracked"],
+     description="[NEEDS_FILE:docx_tracked] Accepter tracked changes → version propre")
+
+test("D04", "agent_docx_complete", "DOCX",
+     "Relis ce document et ajoute un commentaire Word sur le paragraphe 'Délais de livraison' : "
+     "'À vérifier avec la logistique'.",
+     patterns=[r"comment|commentaire|unpack"],
+     description="[NEEDS_FILE:docx_proposal] Ajouter commentaires de relecture")
+
+test("D06", "agent_docx_complete", "DOCX",
+     "Fusionne ces deux documents Word en un seul, avec un saut de page entre eux.",
+     patterns=[r"fusionne|merge|docxcompose|page_break"],
+     description="[NEEDS_FILE:2x_docx] Fusion de deux DOCX")
+
+test("D07", "agent_docx_complete", "DOCX",
+     "Analyse ce document Word : liste des sections, nombre de tableaux, nombre d'images, "
+     "et les 3 premiers paragraphes.",
+     patterns=[r"unpack|pandoc|python-docx|analyse|section"],
+     description="[NEEDS_FILE:docx_complex] Extraction contenu structuré")
+
+test("D09", "agent_docx_complete", "DOCX",
+     "Ce fichier est dans l'ancien format Word .doc. Convertis-le en .docx moderne.",
+     patterns=[r"soffice|convert.*docx"],
+     description="[NEEDS_FILE:doc_legacy] Conversion .doc → .docx")
+
+test("D11", "agent_docx_complete", "DOCX",
+     "Dans ce document, seule la première occurrence de 'Directeur' doit être remplacée par 'Directrice' "
+     "en tracked changes.",
+     patterns=[r"tracked.replace|--first|first"],
+     description="[NEEDS_FILE:docx_directeur] Remplacement ciblé --first")
+
+test("D12", "agent_docx_complete", "DOCX",
+     "Remplis ce template de lettre avec : consultant=Marie Dupont, client=Société ABC, "
+     "date=1er mai 2026, durée=6 mois, tarif=850€ HT. Puis remplace 'les conditions définies' par "
+     "'les conditions révisées du contrat-cadre' en tracked changes. Exporte en PDF.",
+     patterns=[r"unpack|tracked|soffice|pdf"],
+     description="[NEEDS_FILE:docx_lettre] Pipeline complet template→tracked→PDF")
+
+
+# ==========================================
+# PPTX — Tests supplémentaires
+# ==========================================
+
+test("P02", "agent_pptx_complete", "PPTX",
+     "Remplace le titre du slide 1 par 'Bilan annuel 2025' et le sous-titre par 'Direction Commerciale'.",
+     patterns=[r"unpack|xml|edit|slide"],
+     description="[NEEDS_FILE:pptx_corporate] Édition template PPTX")
+
+test("P03", "agent_pptx_complete", "PPTX",
+     "Analyse ce template PowerPoint : montre-moi un aperçu visuel de tous les layouts.",
+     patterns=[r"thumbnail|layout|aperçu|analyse"],
+     description="[NEEDS_FILE:pptx_template] Analyse template avec thumbnails")
+
+test("P04", "agent_pptx_complete", "PPTX",
+     "Duplique le slide 3 de cette présentation 3 fois pour avoir 4 copies au total.",
+     patterns=[r"add_slide|dupli|copie"],
+     description="[NEEDS_FILE:pptx_casestudy] Duplication de slides")
+
+test("P05", "agent_pptx_complete", "PPTX",
+     "Nettoie ce fichier PowerPoint : supprime les slides masqués et les médias non référencés.",
+     patterns=[r"clean|nettoie|orphan"],
+     description="[NEEDS_FILE:pptx_heavy] Nettoyage PPTX volumineux")
+
+test("P06", "agent_pptx_complete", "PPTX",
+     "Convertis cette présentation en PDF.",
+     patterns=[r"soffice|pdf|convert"],
+     description="[NEEDS_FILE:pptx_any] Conversion PPTX → PDF")
+
+test("P07", "agent_pptx_complete", "PPTX",
+     "Extrais le contenu textuel de cette présentation slide par slide en markdown.",
+     patterns=[r"markitdown|markdown|extract"],
+     description="[NEEDS_FILE:pptx_formation] Extraction contenu en markdown")
+
+test("P09", "agent_pptx_complete", "PPTX",
+     "Ajoute un nouveau slide à la fin en utilisant le 2ème layout disponible. "
+     "Titre : 'Prochaines étapes', contenu : 'Valider le budget', 'Recruter 2 devs', 'Lancer V2'.",
+     patterns=[r"add_slide|layout|unpack"],
+     description="[NEEDS_FILE:pptx_layouts] Ajout slide depuis layout")
+
+test("P10", "agent_pptx_complete", "PPTX",
+     "Remplace toutes les occurrences de 'Acme Corp' par 'GlobalTech SA' dans tous les slides.",
+     patterns=[r"replace|remplac|unpack|xml"],
+     description="[NEEDS_FILE:pptx_acme] Remplacement texte dans toute la présentation")
+
+test("P11", "agent_pptx_complete", "PPTX",
+     "Crée une mini-présentation de 3 slides : (1) Titre 'Résultats T1', "
+     "(2) Barres ventes par région, (3) Camembert répartition charges.",
+     patterns=[r"pptxgenjs|pptxgen|chart|addChart"],
+     description="Création PPTX avec graphiques",
+     expect_file=True, file_ext=".pptx")
+
+test("P12", "agent_pptx_complete", "PPTX",
+     "Analyse ce template corporate puis crée 3 slides dans le même style : "
+     "'Objectifs 2026' avec bullets, 'Budget' avec un tableau, 'Calendrier'. Exporte en PDF.",
+     patterns=[r"thumbnail|analyse|add_slide|soffice|pdf"],
+     description="[NEEDS_FILE:pptx_corporate2] Pipeline analyse→création→export")
+
+
+# ==========================================
+# XLSX — Tests supplémentaires
+# ==========================================
+
+test("X02", "agent_xlsx_complete", "XLSX",
+     "Analyse ce fichier Excel : nombre de lignes/colonnes, types de données, valeurs manquantes, "
+     "top 5 clients par CA.",
+     patterns=[r"pandas|read_excel|describe|info|groupby"],
+     description="[NEEDS_FILE:xlsx_commercial] Analyse Excel existant")
+
+test("X04", "agent_xlsx_complete", "XLSX",
+     "Ajoute un graphique en barres montrant l'évolution des ventes mensuelles dans un nouvel onglet Dashboard.",
+     patterns=[r"openpyxl|BarChart|chart|Dashboard"],
+     description="[NEEDS_FILE:xlsx_ventes] Graphique dans Excel")
+
+test("X05", "agent_xlsx_complete", "XLSX",
+     "Convertis ce fichier .xls en .xlsx moderne sans perdre les données.",
+     patterns=[r"soffice|convert.*xlsx"],
+     description="[NEEDS_FILE:xls_legacy] Conversion XLS → XLSX")
+
+test("X06", "agent_xlsx_complete", "XLSX",
+     "Crée un tableau croisé dynamique montrant le CA par catégorie et par mois.",
+     patterns=[r"pivot|crois|pandas"],
+     description="[NEEDS_FILE:xlsx_transactions] Tableau croisé dynamique")
+
+test("X07", "agent_xlsx_complete", "XLSX",
+     "Crée un fichier Excel de suivi des objectifs avec 10 vendeurs : vert si résultat >= objectif, "
+     "orange entre 80-100%, rouge si < 80%.",
+     patterns=[r"openpyxl|Conditional|mise.en.forme|couleur"],
+     description="Mise en forme conditionnelle",
+     expect_file=True, file_ext=".xlsx")
+
+test("X08", "agent_xlsx_complete", "XLSX",
+     "Exporte ce fichier Excel en PDF en paysage.",
+     patterns=[r"soffice|pdf|convert|paysage"],
+     description="[NEEDS_FILE:xlsx_any] Export Excel → PDF")
+
+test("X09", "agent_xlsx_complete", "XLSX",
+     "Fusionne ces 3 fichiers Excel en un seul avec un onglet par fichier et un onglet Consolidé.",
+     patterns=[r"pandas|openpyxl|fusionne|merge|consolid"],
+     description="[NEEDS_FILE:3x_xlsx] Fusion de plusieurs Excel")
+
+test("X10", "agent_xlsx_complete", "XLSX",
+     "Nettoie ce fichier : supprime les doublons, normalise les noms, corrige les dates.",
+     patterns=[r"pandas|drop_duplicates|nettoie|clean"],
+     description="[NEEDS_FILE:xlsx_dirty] Nettoyage et dédoublonnage")
+
+test("X11", "agent_xlsx_complete", "XLSX",
+     "Crée un modèle de prévision de trésorerie sur 12 mois : solde initial 50k€, "
+     "encaissements croissants +5%/mois depuis 20k€, décaissements fixes 18k€. "
+     "Formules Excel natives, négatifs en rouge.",
+     patterns=[r"openpyxl|formul|=SUM|trésorerie|prévision"],
+     description="Modèle financier avec formules complexes",
+     expect_file=True, file_ext=".xlsx")
+
+test("X12", "agent_xlsx_complete", "XLSX",
+     "Analyse ce fichier RH : effectif et masse salariale par département, "
+     "salaire moyen/médian, graphiques barres + camembert dans un onglet Dashboard.",
+     patterns=[r"pandas|openpyxl|chart|Dashboard|analyse"],
+     description="[NEEDS_FILE:xlsx_rh] Analyse + viz + export complet")
+
+
+# ==========================================
+# PDF — Tests supplémentaires
+# ==========================================
+
+test("F01", "agent_pdf_complete", "PDF",
+     "Extrais le texte de ce contrat et identifie les clauses : durée, montant, résiliation, pénalités.",
+     patterns=[r"pdfplumber|extract|clause|texte"],
+     description="[NEEDS_FILE:pdf_contrat] Extraction texte contrat")
+
+test("F02", "agent_pdf_complete", "PDF",
+     "Extrais les tableaux de ce PDF et convertis-les en Excel.",
+     patterns=[r"pdfplumber|extract_table|pandas|Excel"],
+     description="[NEEDS_FILE:pdf_tableaux] Extraction tableaux → Excel")
+
+test("F03", "agent_pdf_complete", "PDF",
+     "Ce PDF est un scan. Extrais le texte par OCR.",
+     patterns=[r"pdf2image|pytesseract|OCR|image_to_string"],
+     description="[NEEDS_FILE:pdf_scan] OCR PDF scanné")
+
+test("F05", "agent_pdf_complete", "PDF",
+     "Extrais les pages 3 à 7 de ce PDF dans un fichier séparé.",
+     patterns=[r"pypdf|PdfReader|PdfWriter|qpdf|pages"],
+     description="[NEEDS_FILE:pdf_10pages] Split PDF par pages")
+
+test("F06", "agent_pdf_complete", "PDF",
+     "Vérifie l'intégrité de ce PDF et répare-le si nécessaire.",
+     patterns=[r"qpdf|check|repair|intégrité"],
+     description="[NEEDS_FILE:pdf_corrupt] Vérification et réparation")
+
+test("F07", "agent_pdf_complete", "PDF",
+     "Convertis chaque page de ce PDF en image PNG haute résolution (300 DPI).",
+     patterns=[r"pdf2image|pdftoppm|convert.*image|300|dpi"],
+     description="[NEEDS_FILE:pdf_any] Conversion PDF → images HR")
+
+test("F08", "agent_pdf_complete", "PDF",
+     "Donne-moi toutes les métadonnées de ce PDF : auteur, date, nombre de pages, chiffrement.",
+     patterns=[r"pypdf|PdfReader|metadata|qpdf"],
+     description="[NEEDS_FILE:pdf_any2] Extraction métadonnées")
+
+test("F09", "agent_pdf_complete", "PDF",
+     "Les pages 2 et 5 de ce PDF sont à l'envers. Corrige-les.",
+     patterns=[r"pypdf|rotate|rotation"],
+     description="[NEEDS_FILE:pdf_rotated] Rotation de pages")
+
+test("F10", "agent_pdf_complete", "PDF",
+     "Ajoute un watermark 'BROUILLON' en diagonale sur toutes les pages de ce PDF.",
+     patterns=[r"reportlab|watermark|merge|Canvas"],
+     description="[NEEDS_FILE:pdf_any3] Ajout watermark")
+
+test("F11", "agent_pdf_complete", "PDF",
+     "Optimise ce PDF de 25 Mo pour réduire sa taille.",
+     patterns=[r"qpdf|compress|optimis|linearize"],
+     description="[NEEDS_FILE:pdf_heavy] Compression PDF")
+
+test("F12", "agent_pdf_complete", "PDF",
+     "Ce relevé bancaire est un scan. Extrais les transactions (date, libellé, débit, crédit) en Excel.",
+     patterns=[r"pdf2image|pytesseract|pandas|OCR|Excel"],
+     description="[NEEDS_FILE:pdf_scan_table] Pipeline OCR → tableaux → Excel")
+
+
+# ==========================================
+# FFmpeg — Tests supplémentaires
+# ==========================================
+
+test("M01", "agent_quick_edits", "FFmpeg",
+     "Convertis cette vidéo en MP4 H.264+AAC, résolution 720p max.",
+     patterns=[r"ffmpeg|ffprobe|libx264|aac|720"],
+     description="[NEEDS_FILE:video_mov] Conversion vidéo MP4")
+
+test("M02", "agent_quick_edits", "FFmpeg",
+     "Extrais uniquement la piste audio de cette vidéo en MP3 192 kbps.",
+     patterns=[r"ffmpeg|-vn|mp3lame|audio"],
+     description="[NEEDS_FILE:video_any] Extraction audio")
+
+test("M03", "agent_quick_edits", "FFmpeg",
+     "Découpe cette vidéo pour garder uniquement la partie de 0:45 à 2:30.",
+     patterns=[r"ffmpeg|-ss|-to|cut|découpe"],
+     description="[NEEDS_FILE:video_any2] Découpe vidéo")
+
+test("M04", "agent_quick_edits", "FFmpeg",
+     "Crée un GIF animé à partir des 5 premières secondes de cette vidéo, 320px, 10fps.",
+     patterns=[r"ffmpeg|gif|fps|scale"],
+     description="[NEEDS_FILE:video_short] Création GIF animé")
+
+test("M07", "agent_quick_edits", "FFmpeg",
+     "Ajoute un bandeau noir en bas de cette image avec le texte '© onbehalf.ai 2026' en blanc.",
+     patterns=[r"PIL|Pillow|ImageDraw|texte|bandeau"],
+     description="[NEEDS_FILE:image_any] Ajout texte sur image")
+
+test("M08", "agent_quick_edits", "FFmpeg",
+     "Assemble ces vidéos bout à bout dans l'ordre.",
+     patterns=[r"ffmpeg|concat|assemble|fusion"],
+     description="[NEEDS_FILE:2x_video] Concaténation vidéos")
+
+test("M09", "agent_quick_edits", "FFmpeg",
+     "Ajoute cette musique en fond sonore à la vidéo, volume musique à 20%.",
+     patterns=[r"ffmpeg|amix|amerge|volume|audio"],
+     description="[NEEDS_FILE:video+audio] Ajout musique de fond")
+
+test("M10", "agent_quick_edits", "FFmpeg",
+     "Crée une mosaïque 2x2 à partir de ces 4 images.",
+     patterns=[r"PIL|Pillow|paste|mosaïque|xstack"],
+     description="[NEEDS_FILE:4x_image] Mosaïque d'images")
+
+test("M11", "agent_quick_edits", "FFmpeg",
+     "Extrais une capture d'écran de cette vidéo à 1 minute 23 secondes, en PNG pleine résolution.",
+     patterns=[r"ffmpeg|-ss|frames|capture|screenshot"],
+     description="[NEEDS_FILE:video_any3] Extraction frame spécifique")
+
+test("M12", "agent_quick_edits", "FFmpeg",
+     "Convertis toutes ces images en JPEG 1024px max, qualité 90%, nommées photo_01.jpg etc.",
+     patterns=[r"PIL|Pillow|thumbnail|JPEG|convert|batch"],
+     description="[NEEDS_FILE:multi_image] Conversion batch d'images")
+
+
+# ==========================================
+# DataViz — Tests supplémentaires
+# ==========================================
+
+test("A03", "agent_data_viz", "DataViz",
+     "Génère des données de satisfaction client par canal (boutique, web, téléphone, 50 par canal). "
+     "Fais un test ANOVA pour savoir si la satisfaction diffère entre canaux. "
+     "Donne F-stat, p-value et un boxplot.",
+     patterns=[r"ANOVA|f_oneway|scipy|boxplot|satisfaction"],
+     description="Test statistique ANOVA",
+     expect_file=True, file_ext=".png")
+
+test("A04", "agent_data_viz", "DataViz",
+     "Génère un dataset avec 5 variables numériques corrélées (200 lignes). "
+     "Calcule la matrice de corrélation et affiche-la en heatmap annotée. "
+     "Identifie les corrélations > 0.7.",
+     patterns=[r"corr|heatmap|corrélation|seaborn"],
+     description="Corrélation et heatmap",
+     expect_file=True, file_ext=".png")
+
+test("A05", "agent_data_viz", "DataViz",
+     "Génère 200 points avec relation linéaire bruitée surface_m2 (30-150) vs prix (3.5k€/m²). "
+     "Entraîne une régression linéaire, affiche R², équation, droite + intervalle de confiance.",
+     patterns=[r"LinearRegression|regression|sklearn|R2|scatter"],
+     description="Régression linéaire avec prédiction",
+     expect_file=True, file_ext=".png")
+
+test("A06", "agent_data_viz", "DataViz",
+     "Génère des données clients (âge, revenu, dépenses, 300 lignes). "
+     "Segmente avec K-Means, méthode du coude, visualise en 2D avec PCA.",
+     patterns=[r"KMeans|cluster|PCA|coude|elbow"],
+     description="Clustering K-Means",
+     expect_file=True, file_ext=".png")
+
+test("A07", "agent_data_viz", "DataViz",
+     "Génère une série temporelle de CA quotidien sur 1 an (tendance haussière + saisonnalité). "
+     "Fais une décomposition et une prévision naïve sur 30 jours.",
+     patterns=[r"seasonal_decompose|statsmodels|série.temporelle|prévision"],
+     description="Analyse séries temporelles",
+     expect_file=True, file_ext=".png")
+
+test("A08", "agent_data_viz", "DataViz",
+     "Génère un dataset de ventes (100 lignes, colonnes: date, produit, région, montant). "
+     "Exporte dans un Excel 3 onglets : données brutes, statistiques par catégorie, tableau croisé.",
+     patterns=[r"ExcelWriter|openpyxl|onglet|sheet|pivot"],
+     description="Export multi-onglets vers Excel",
+     expect_file=True, file_ext=".xlsx")
+
+test("A09", "agent_data_viz", "DataViz",
+     "Génère 200 transactions avec 5% d'anomalies (montants aberrants). "
+     "Détecte les outliers avec IQR et Z-score. Visualise sur un boxplot.",
+     patterns=[r"zscore|IQR|outlier|anomalie|boxplot"],
+     description="Détection d'anomalies",
+     expect_file=True, file_ext=".png")
+
+test("A10", "agent_data_viz", "DataViz",
+     "Génère deux échantillons : 'avant' (n=50, μ=72, σ=12) et 'après' (n=50, μ=78, σ=11). "
+     "Fais un test t de Student apparié, donne la conclusion, visualise les distributions.",
+     patterns=[r"ttest|Student|scipy|distribution|avant.*après"],
+     description="Comparaison avant/après avec test t",
+     expect_file=True, file_ext=".png")
+
+test("A11", "agent_data_viz", "DataViz",
+     "Génère un nuage de mots à partir de ce texte : "
+     "'L intelligence artificielle transforme les entreprises. Le machine learning et le deep learning "
+     "permettent d automatiser des tâches complexes. Les données sont le carburant de l IA. "
+     "Les algorithmes apprennent des patterns dans les données pour prédire et classifier.' "
+     "Exclue les mots vides français, palette bleue.",
+     patterns=[r"wordcloud|WordCloud|nuage|cloud"],
+     description="Word cloud",
+     expect_file=True, file_ext=".png")
+
+test("A12", "agent_data_viz", "DataViz",
+     "Génère un CSV de données sales (100 lignes, doublons, valeurs manquantes, types incohérents). "
+     "Pipeline complet : charge, nettoie, analyse, 3 visualisations, export Excel avec images intégrées.",
+     patterns=[r"pandas|matplotlib|openpyxl|pipeline|nettoie|clean"],
+     description="Pipeline complet données → analyse → viz → export",
+     expect_file=True, file_ext=".xlsx")
+
+
 # === Test Runner ===
 
 def run_test(test_case: TestCase) -> TestResult:
