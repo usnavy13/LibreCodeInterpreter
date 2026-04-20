@@ -51,6 +51,9 @@ python3 $SKILLS_ROOT/docx/scripts/fill_template.py <template.docx> <output.docx>
 # CRÉATION de compte-rendu depuis template CR
 python3 $SKILLS_ROOT/docx/scripts/fill_cr_template.py <template-cr.docx> <output.docx> <config.json>
 
+# CRÉATION de courrier / lettre depuis template
+python3 $SKILLS_ROOT/docx/scripts/fill_courrier_template.py <template-courrier.docx> <output.docx> <config.json>
+
 # POST-PROCESSING : injecter cover page OBA dans un DOCX pandoc
 python3 $SKILLS_ROOT/docx/scripts/inject_cover.py <input.docx> <output.docx> --title "..." [--subtitle "..."] [--author "..."] [--date "..."]
 
@@ -92,6 +95,7 @@ Quand l'utilisateur demande de CRÉER un document sans fournir de template ou de
 $SKILLS_ROOT/docx/templates/onbehalfai/
 ├── template-base.docx              # Guides, docs techniques, rapports (cover page + version table + logo)
 ├── template-compte-rendu.docx      # Comptes-rendus de réunion (header + métadonnées + participants)
+├── template-courrier.docx          # Courriers / lettres (en-tête OBA, destinataire, corps, signature)
 ├── reference-pandoc.docx           # Reference doc pandoc (styles/polices seulement — PAS de cover page ni logo)
 ├── heading-unnumbered-v4.lua       # Filtre Lua pour titres non-numérotés (pandoc)
 ├── logo-onbehalfai.png             # Logo On Behalf AI (PNG)
@@ -300,6 +304,50 @@ Quand tu construis le JSON pour fill_template.py ou fill_cr_template.py, tu DOIS
 
 Le script parse `**texte**` → run bold dans Word. Ne JAMAIS nettoyer/strip les `**` avant de passer le texte au JSON.
 
+### Workflow de création : Courrier / Lettre
+
+Pour un courrier, utiliser `fill_courrier_template.py` :
+
+```python
+import subprocess, json, os
+os.chdir('/mnt/data')
+
+config = {
+    "date": "20 avril 2026",
+    "recipient": {
+        "name": "M. Jean Dupont",
+        "address_line1": "Société XYZ",
+        "address_line2": "75001 Paris"
+    },
+    "subject": "Proposition de mission",
+    "salutation": "Monsieur",
+    "body": [
+        "Premier paragraphe avec **mots en gras** si besoin.",
+        "Deuxième paragraphe.",
+        "Troisième paragraphe."
+    ],
+    "closing": "Je vous prie d'agréer, Monsieur, l'expression de mes salutations distinguées.",
+    "sender": {
+        "name": "{{current_user}}",
+        "title": "Consultant IA",
+        "email": "contact@onbehalf.ai",
+        "phone": "+33 6 XX XX XX XX"
+    }
+}
+
+with open("/tmp/config.json", "w") as f:
+    json.dump(config, f, ensure_ascii=False)
+
+subprocess.run([
+    "python3", "/opt/skills/docx/scripts/fill_courrier_template.py",
+    "/opt/skills/docx/templates/onbehalfai/template-courrier.docx",
+    "courrier.docx",
+    "/tmp/config.json"
+], check=True)
+```
+
+Le champ `body` est une liste de paragraphes (strings). Chaque string supporte `**gras**` inline.
+
 ### Workflow alternatif (unpack/edit/pack manuel)
 
 Si `fill_template.py` ne couvre pas un besoin spécifique (ex: insertion de tableaux, images), utiliser le pipeline manuel avec lxml (jamais de string replace sur le XML) :
@@ -322,12 +370,13 @@ subprocess.run(["python3", "/opt/skills/docx/scripts/office/validate.py", "outpu
 
 ## Choix du template et de la méthode
 
-### Distinction CR vs Guide/Rapport
+### Distinction par type de document
 
 | Type de document | Template | Méthode de création |
 |------------------|----------|---------------------|
 | **Compte-rendu de réunion** | `template-compte-rendu.docx` | `fill_cr_template.py` uniquement |
 | **Guide, doc technique, rapport, proposition** | `template-base.docx` | pandoc + inject_cover (si markdown) OU fill_template.py (si généré) |
+| **Courrier / lettre** | `template-courrier.docx` | `fill_courrier_template.py` |
 
 **IMPORTANT** : pandoc + inject_cover.py ne produit QUE des documents de type guide/rapport (cover page + table version). Il ne produit PAS de comptes-rendus. Pour un CR, même si l'input est un markdown décrivant une réunion, utiliser `fill_cr_template.py` car seul ce script gère :
 - Le header spécifique CR (titre + client/objet)
