@@ -284,6 +284,22 @@ Tu DOIS les convertir en format `subitems`, PAS en items flat :
 
 Analyse toujours l'indentation du markdown source pour détecter les sous-listes (lignes commençant par `   -` ou `     -` sous un item numéroté).
 
+#### IMPORTANT : conserver le formatage markdown inline dans le texte JSON
+
+Quand tu construis le JSON pour fill_template.py ou fill_cr_template.py, tu DOIS conserver les marqueurs markdown `**gras**` dans les valeurs de texte. Le script les interprète automatiquement et les rend en gras Word.
+
+**CORRECT** (gras rendu dans Word) :
+```json
+{"text": "**Keynote (1-2h) :** État de l'art du marché"}
+```
+
+**INCORRECT** (gras perdu) :
+```json
+{"text": "Keynote (1-2h) : État de l'art du marché"}
+```
+
+Le script parse `**texte**` → run bold dans Word. Ne JAMAIS nettoyer/strip les `**` avant de passer le texte au JSON.
+
 ### Workflow alternatif (unpack/edit/pack manuel)
 
 Si `fill_template.py` ne couvre pas un besoin spécifique (ex: insertion de tableaux, images), utiliser le pipeline manuel avec lxml (jamais de string replace sur le XML) :

@@ -167,8 +167,10 @@ def _make_run(text: str, bold: bool = False, font: str = None) -> etree._Element
     if bold or font:
         rPr = etree.SubElement(r, _w("rPr"))
         if bold:
-            etree.SubElement(rPr, _w("b"))
-            etree.SubElement(rPr, _w("bCs"))
+            b_el = etree.SubElement(rPr, _w("b"))
+            b_el.set(_w("val"), "true")
+            bCs_el = etree.SubElement(rPr, _w("bCs"))
+            bCs_el.set(_w("val"), "true")
         if font:
             rFonts = etree.SubElement(rPr, _w("rFonts"))
             rFonts.set(_w("ascii"), font)
