@@ -87,11 +87,21 @@ Dans un DOCX, un logo peut être référencé avec deux formats simultanément :
    xfrm_height = int(target_height_emu * 1.032)
    ```
 
-3. **Valeurs de référence pour le template CR On Behalf AI** :
-   - Cellule logo : 5040 DXA = 3.50 pouces
-   - Logo OBA horizontal : 943×217 px (ratio 4.35:1)
-   - wp:extent : **1647542 × 378745** EMU (1.80 × 0.41 pouces)
-   - a:xfrm : **1699459 × 390680** EMU (1.86 × 0.43 pouces)
+3. **Valeurs de référence pour les templates On Behalf AI** :
+
+   **Logo OBA horizontal transparent** : 943×217 px (ratio 4.35:1)
+
+   Les deux templates utilisent les mêmes dimensions :
+
+   | Template | Cellule logo | wp:extent | a:xfrm |
+   |----------|-------------|-----------|--------|
+   | `template-base.docx` | Table cover, row 0, cell 1 | **1647542 × 378745** EMU | **1699459 × 390680** EMU |
+   | `template-compte-rendu.docx` | Table header, row 0, cell droite | **1647542 × 378745** EMU | **1699459 × 390680** EMU |
+
+   - wp:extent : 1.80 × 0.41 pouces (taille d'affichage)
+   - a:xfrm : 1.86 × 0.43 pouces (extent × 1.032)
+
+   **ATTENTION** : ne jamais mettre des dimensions carrées (1:1) sur un logo horizontal — le logo sera écrasé/compressé. Toujours vérifier que le ratio extent correspond au ratio réel de l'image.
 
 ## Ajout d'un logo tiers (client)
 

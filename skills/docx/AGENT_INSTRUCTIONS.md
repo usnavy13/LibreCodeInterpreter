@@ -39,11 +39,14 @@ subprocess.run(["python3", "/opt/skills/docx/scripts/office/validate.py", "outpu
 # Scripts disponibles (chemin absolu $SKILLS_ROOT)
 
 ```
-# CRÉATION de document depuis template (RECOMMANDÉ)
+# CRÉATION de document depuis template
 python3 $SKILLS_ROOT/docx/scripts/fill_template.py <template.docx> <output.docx> <config.json>
 
 # CRÉATION de compte-rendu depuis template CR
 python3 $SKILLS_ROOT/docx/scripts/fill_cr_template.py <template-cr.docx> <output.docx> <config.json>
+
+# POST-PROCESSING : injecter cover page OBA dans un DOCX pandoc
+python3 $SKILLS_ROOT/docx/scripts/inject_cover.py <input.docx> <output.docx> --title "..." [--subtitle "..."] [--author "..."] [--date "..."]
 
 $SKILLS_ROOT = /opt/skills
 
@@ -83,7 +86,7 @@ Quand l'utilisateur demande de CRÉER un document sans fournir de template ou de
 $SKILLS_ROOT/docx/templates/onbehalfai/
 ├── template-base.docx              # Guides, docs techniques, rapports (cover page + version table + logo)
 ├── template-compte-rendu.docx      # Comptes-rendus de réunion (header + métadonnées + participants)
-├── reference-pandoc.docx           # Reference doc pour conversion pandoc markdown→DOCX
+├── reference-pandoc.docx           # Reference doc pandoc (styles/polices seulement — PAS de cover page ni logo)
 ├── heading-unnumbered-v4.lua       # Filtre Lua pour titres non-numérotés (pandoc)
 ├── logo-onbehalfai.png             # Logo On Behalf AI (PNG)
 └── logo-onbehalfai.svg             # Logo On Behalf AI (SVG)
@@ -217,7 +220,91 @@ subprocess.run(["python3", "/opt/skills/docx/scripts/office/validate.py", "outpu
 
 - **Compte-rendu de réunion** → `template-compte-rendu.docx` (tables header/metadata/participants pré-formatées)
 - **Guide d'installation, doc technique, rapport, proposition** → `template-base.docx` (cover page + version table)
-- **Conversion depuis markdown** → pandoc avec reference-pandoc.docx :
+- **Conversion depuis markdown** → voir section "Conversion Markdown" ci-dessous
+
+## Conversion depuis Markdown (.md → .docx)
+
+### Approche 1 : fill_template.py (quand l'agent génère le contenu)
+
+Utiliser cette approche quand l'agent **structure lui-même** le contenu (pas de fichier .md en entrée, ou markdown très court/simple). Voir la section "Workflow de création" plus haut pour le détail du JSON config.
+
+### Approche 2 : RECOMMANDÉE pour markdown — Pandoc + inject_cover.py
+
+Pandoc est robuste pour parser le markdown (tables, code, listes imbriquées). Le script `inject_cover.py` ajoute ensuite la page de garde OBA complète. Le `reference-pandoc.docx` fournit les styles, la numérotation et le footer.
+
+```bash
+# 1. Pandoc convertit le contenu (parsing robuste du markdown)
+pandoc input.md -o temp.docx \
+  --reference-doc=$SKILLS_ROOT/docx/templates/onbehalfai/reference-pandoc.docx \
+  --shift-heading-level-by=-1 \
+  --lua-filter=$SKILLS_ROOT/docx/templates/onbehalfai/heading-unnumbered-v4.lua
+
+# 2. inject_cover.py ajoute la page de garde OBA (titre, logo, version)
+python3 $SKILLS_ROOT/docx/scripts/inject_cover.py temp.docx output.docx \
+  --title "Titre du Document" \
+  --subtitle "Sous-titre" \
+  --author "{{current_user}}" \
+  --date "20/04/2026"
+
+rm temp.docx
+```
+
+**Ce que fournit cette approche** :
+- ✓ Page de garde avec titre, sous-titre et logo OBA
+- ✓ Table de version avec auteur et date
+- ✓ Footer pagination "X / Y"
+- ✓ Styles OBA complets (polices, couleurs, tailles)
+- ✓ Numérotation hiérarchique des titres
+- ✓ Parsing markdown robuste (tables complexes, code imbriqué, listes)
+
+### Approche 3 : Pandoc seul (conversion rapide sans branding)
+
+Pour une conversion minimale sans page de garde (ex: brouillon rapide) :
+
+```bash
+pandoc input.md -o output.docx \
+  --reference-doc=$SKILLS_ROOT/docx/templates/onbehalfai/reference-pandoc.docx \
+  --shift-heading-level-by=-1 \
+  --lua-filter=$SKILLS_ROOT/docx/templates/onbehalfai/heading-unnumbered-v4.lua
+```
+
+Fournit styles + numérotation + footer pagination, mais **pas de page de garde ni logo**.
+
+### Règle de décision
+
+| L'utilisateur demande... | Approche |
+|--------------------------|----------|
+| "Fais-moi un guide/rapport/doc à partir de ce markdown" | **Approche 2** (pandoc + inject_cover) |
+| "Convertis ce markdown en Word" (branding implicite) | **Approche 2** (pandoc + inject_cover) |
+| "Convertis rapidement en DOCX" (pas de branding) | Approche 3 (pandoc seul) |
+| "Crée un document" (sans markdown en input) | Approche 1 (fill_template.py) |
+| Document très structuré, contenu généré par l'agent | Approche 1 (fill_template.py) |
+
+### Ce que fait inject_cover.py en interne
+
+Le script fait plus qu'injecter une cover page — il transforme un DOCX pandoc brut en document OBA complet :
+
+1. **Transplante 6 fichiers** de `template-base.docx` dans le DOCX pandoc :
+   - `word/styles.xml` (styles OBA complets, 57 KB)
+   - `word/numbering.xml` (numérotation hiérarchique, 24 KB)
+   - `word/settings.xml` (paramètres Word)
+   - `word/theme/theme1.xml` (thème couleurs OBA)
+   - `word/endnotes.xml` (nécessaire car settings.xml y fait référence)
+   - `word/footer1.xml` (pagination "X / Y")
+
+2. **Remappe les style IDs** de pandoc (anglais) vers OBA (français) :
+   - `Heading1` → `Titre1`, `Heading2` → `Titre2`, `Heading3` → `Titre3`
+   - `FirstParagraph`, `BodyText` → `Normal`
+   - `SourceCode` → `Code`, tokens syntax highlighting → `CodeCar`
+   - `Compact` → `Paragraphedeliste`
+
+3. **Supprime le paragraphe Title** redondant (pandoc mappe `# H1` en style "Title" avec `--shift-heading-level-by=-1`, qui double le titre de la cover page)
+
+4. **Injecte la cover page** (table titre/logo + espacement + table version) et un saut de page
+
+5. **Ajoute les relations** (images, footer, endnotes) et content types manquants
+
+**ATTENTION** : ne PAS utiliser `inject_cover.py` sans pandoc en amont — le script attend un DOCX avec la structure de body que pandoc génère.
 
 ## Placeholders dans template-base.docx (texte exact à remplacer)
 
@@ -246,9 +333,6 @@ subprocess.run(["python3", "/opt/skills/docx/scripts/office/validate.py", "outpu
 - Utiliser `content.replace(...)` sur ces placeholders EXACTS. Ne pas inventer d'autres noms de variables.
 - Ne JAMAIS insérer de commentaires XML (`<!-- ... -->`) dans le document — ils cassent la validation OOXML.
 - Le contenu ajouté doit être inséré AVANT le `</w:body>` (ou avant `<w:sectPr>`), pas après les tables.
-  ```bash
-  pandoc input.md -o output.docx --reference-doc=$SKILLS_ROOT/docx/templates/onbehalfai/reference-pandoc.docx --shift-heading-level-by=-1 --lua-filter=$SKILLS_ROOT/docx/templates/onbehalfai/heading-unnumbered-v4.lua
-  ```
 
 ## IDs des styles à utiliser dans le XML (IDs francisés)
 
