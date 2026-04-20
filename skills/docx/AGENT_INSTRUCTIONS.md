@@ -279,6 +279,33 @@ print(f"Heading levels: min={min_level}, shift={shift}")
 - Markdown commence par `###` (pas de `#` ni `##`) → `--shift-heading-level-by=-2` (### → H1)
 - Markdown n'a qu'un seul niveau → `--shift-heading-level-by=0` (pas de shift)
 
+#### Pré-check obligatoire : détecter la numérotation statique dans les titres
+
+**AVANT pandoc**, vérifier si les titres du markdown contiennent déjà des numéros (ex: `### 1. Récupérer`, `### 2. Configurer`). Si oui, il y a conflit avec la numérotation automatique Word (Titre1, Titre2 sont auto-numérotés 1., 2., etc.). Le résultat serait `1. 1. Récupérer`.
+
+```python
+import re
+
+# Détecter les titres avec numérotation statique
+numbered_headings = re.findall(r'^#{1,6}\s+\d+[\.\)]\s', content, re.MULTILINE)
+has_static_numbering = len(numbered_headings) > 0
+
+if has_static_numbering:
+    # OPTION A (préférée) : retirer les numéros statiques du markdown
+    # → Word appliquera sa propre numérotation propre (1., 1.1, etc.)
+    content = re.sub(r'^(#{1,6}\s+)\d+[\.\)]\s*', r'\1', content, flags=re.MULTILINE)
+    # Réécrire le fichier nettoyé
+    with open('/mnt/data/input.md', 'w') as f:
+        f.write(content)
+    print("Removed static numbering from headings (Word will auto-number)")
+
+    # OPTION B (alternative) : garder les numéros statiques et désactiver l'auto-numérotation
+    # → Ajouter {.unnumbered} à TOUS les titres qui ont un numéro statique
+    # content = re.sub(r'^(#{1,6}\s+\d+[\.\)].*?)$', r'\1 {.unnumbered}', content, flags=re.MULTILINE)
+```
+
+**Règle** : l'option A (retirer les numéros statiques) est préférée car elle produit une numérotation Word cohérente et dynamique. L'option B ne doit être utilisée QUE si l'utilisateur demande explicitement de conserver la numérotation d'origine.
+
 #### Titres numérotés vs non-numérotés ({.unnumbered})
 
 Le filtre Lua `heading-unnumbered-v4.lua` détecte la classe `{.unnumbered}` dans le markdown et applique les styles "Titre X sans numérotation" dans Word.

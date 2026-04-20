@@ -346,17 +346,48 @@ def inject_cover(input_docx, output_docx, title, subtitle="", author="", date=""
         body = doc_root.find(_w("body"))
 
         # 6a. Remap pandoc style IDs to OBA template style IDs
+        # For paragraph styles: straightforward mapping
         remap_count = 0
         for pStyle in body.iter(_w("pStyle")):
             val = pStyle.get(_w("val"), "")
             if val in PANDOC_STYLE_MAP:
                 pStyle.set(_w("val"), PANDOC_STYLE_MAP[val])
                 remap_count += 1
-        for rStyle in body.iter(_w("rStyle")):
-            val = rStyle.get(_w("val"), "")
-            if val in PANDOC_STYLE_MAP:
-                rStyle.set(_w("val"), PANDOC_STYLE_MAP[val])
-                remap_count += 1
+
+        # For run styles: only remap code token styles (NormalTok, KeywordTok, etc.)
+        # when they are INSIDE a paragraph with Code/SourceCode style.
+        # Outside code blocks, these token styles should be REMOVED (not remapped)
+        # to avoid applying CodeCar formatting to headings, tables, etc.
+        CODE_TOKEN_STYLES = {
+            "NormalTok", "KeywordTok", "DataTypeTok", "DecValTok",
+            "FunctionTok", "CharTok", "StringTok", "CommentTok",
+            "OperatorTok", "BuiltInTok", "ExtensionTok", "AttributeTok",
+            "VariableTok", "VerbatimChar",
+        }
+        for para in body.iter(_w("p")):
+            # Determine if this paragraph is a code block
+            para_pStyle = para.find(f"./{_w('pPr')}/{_w('pStyle')}")
+            para_style = para_pStyle.get(_w("val"), "") if para_pStyle is not None else ""
+            is_code_para = para_style in ("Code", "SourceCode", "PrformatHTML")
+
+            for rStyle in para.iter(_w("rStyle")):
+                val = rStyle.get(_w("val"), "")
+                if val in CODE_TOKEN_STYLES:
+                    if is_code_para:
+                        # Inside code block: remap to CodeCar
+                        rStyle.set(_w("val"), "CodeCar")
+                        remap_count += 1
+                    else:
+                        # Outside code block: remove the rStyle entirely
+                        # (don't apply code formatting to headings/tables/normal text)
+                        rPr = rStyle.getparent()
+                        if rPr is not None:
+                            rPr.remove(rStyle)
+                        remap_count += 1
+                elif val in PANDOC_STYLE_MAP:
+                    rStyle.set(_w("val"), PANDOC_STYLE_MAP[val])
+                    remap_count += 1
+
         if remap_count:
             print(f"Remapped {remap_count} style reference(s) from pandoc IDs to OBA IDs")
 
@@ -433,6 +464,20 @@ def inject_cover(input_docx, output_docx, title, subtitle="", author="", date=""
             tables_fixed += 1
         if tables_fixed:
             print(f"Added gray borders to {tables_fixed} content table(s)")
+
+        # 6c-bis. Remove left indent inside table cells (pandoc adds w:ind to cell paragraphs)
+        indent_removed = 0
+        for tbl in body.findall(_w("tbl")):
+            for tc in tbl.iter(_w("tc")):
+                for p in tc.findall(_w("p")):
+                    pPr = p.find(_w("pPr"))
+                    if pPr is not None:
+                        ind = pPr.find(_w("ind"))
+                        if ind is not None:
+                            pPr.remove(ind)
+                            indent_removed += 1
+        if indent_removed:
+            print(f"Removed {indent_removed} left indent(s) from table cells")
 
         # 6d. Replace placeholders in cover elements and rebuild version table
         for elem in cover_elements:
