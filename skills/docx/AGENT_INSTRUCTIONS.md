@@ -506,27 +506,38 @@ Fournit styles + numérotation + footer pagination, mais **pas de page de garde 
 
 ### Ce que fait inject_cover.py en interne
 
-Le script fait plus qu'injecter une cover page — il transforme un DOCX pandoc brut en document OBA complet :
+Le script fait plus qu'injecter une cover page — il transforme un DOCX pandoc brut en document OBA complet (10 étapes) :
 
-1. **Transplante 6 fichiers** de `template-base.docx` dans le DOCX pandoc :
-   - `word/styles.xml` (styles OBA complets, 57 KB)
-   - `word/numbering.xml` (numérotation hiérarchique, 24 KB)
-   - `word/settings.xml` (paramètres Word)
+1. **Transplante 6 fichiers** de `template-base.docx` :
+   - `word/styles.xml` (styles OBA complets)
+   - `word/numbering.xml` (numérotation hiérarchique)
+   - `word/settings.xml` + `word/endnotes.xml` (doivent être transplantés ensemble)
    - `word/theme/theme1.xml` (thème couleurs OBA)
-   - `word/endnotes.xml` (nécessaire car settings.xml y fait référence)
    - `word/footer1.xml` (pagination "X / Y")
 
-2. **Remappe les style IDs** de pandoc (anglais) vers OBA (français) :
+2. **Remappe les style IDs** (pandoc → OBA) :
    - `Heading1` → `Titre1`, `Heading2` → `Titre2`, `Heading3` → `Titre3`
    - `FirstParagraph`, `BodyText` → `Normal`
-   - `SourceCode` → `Code`, tokens syntax highlighting → `CodeCar`
-   - `Compact` → `Paragraphedeliste`
+   - `SourceCode` → `Code`
+   - `Compact` + numPr → `Paragraphedeliste` (items de liste)
+   - `Compact` sans numPr → `Normal` (cellules de tableau — évite le retrait gauche)
+   - Tokens code (`NormalTok`, `KeywordTok`...) → **supprimés** hors blocs code (pas de CodeCar sur les titres/tableaux)
 
-3. **Supprime le paragraphe Title** redondant (pandoc mappe `# H1` en style "Title" avec `--shift-heading-level-by=-1`, qui double le titre de la cover page)
+3. **Supprime les séparateurs HR** (paragraphes vides entre chapitres, issus de `---` dans le markdown)
 
-4. **Injecte la cover page** (table titre/logo + espacement + table version) et un saut de page
+4. **Ajoute des bordures gris clair** (#CCCCCC) à toutes les tables de contenu (pas les tables cover)
 
-5. **Ajoute les relations** (images, footer, endnotes) et content types manquants
+5. **Supprime les retraits gauche** (`w:ind`) à l'intérieur des cellules de tableau
+
+6. **Supprime le paragraphe Title** redondant (pandoc mappe `# H1` en "Title" qui double la cover)
+
+7. **Reconstruit la table de version** en 4 colonnes (Date | Objet | Auteur | Version) avec en-tête navy
+
+8. **Injecte la cover page** (table titre/logo + espacement + table version + saut de page)
+
+9. **Ajoute les relations** (images, footer, endnotes) et content types manquants
+
+10. **Pack et validation** OOXML
 
 **ATTENTION** : ne PAS utiliser `inject_cover.py` sans pandoc en amont — le script attend un DOCX avec la structure de body que pandoc génère.
 
