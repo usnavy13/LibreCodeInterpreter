@@ -272,13 +272,17 @@ Fournit styles + numérotation + footer pagination, mais **pas de page de garde 
 
 ### Règle de décision
 
-| L'utilisateur demande... | Approche |
-|--------------------------|----------|
-| "Fais-moi un guide/rapport/doc à partir de ce markdown" | **Approche 2** (pandoc + inject_cover) |
-| "Convertis ce markdown en Word" (branding implicite) | **Approche 2** (pandoc + inject_cover) |
+**Principe directeur** : si un fichier .md (ou texte markdown) est fourni en input → **toujours utiliser pandoc + inject_cover** (Approche 2). C'est la méthode la plus fiable car pandoc parse le markdown nativement sans risque de perte de contenu, contrairement à un parser ad-hoc écrit par l'agent.
+
+| Situation | Approche |
+|-----------|----------|
+| Fichier .md fourni en input (peu importe le wording utilisateur) | **Approche 2** (pandoc + inject_cover) |
+| Texte markdown collé dans le prompt | **Approche 2** (pandoc + inject_cover) |
 | "Convertis rapidement en DOCX" (pas de branding) | Approche 3 (pandoc seul) |
-| "Crée un document" (sans markdown en input) | Approche 1 (fill_template.py) |
-| Document très structuré, contenu généré par l'agent | Approche 1 (fill_template.py) |
+| Pas de markdown en input — l'agent génère le contenu | Approche 1 (fill_template.py) |
+| L'utilisateur donne des instructions textuelles (pas du markdown) | Approche 1 (fill_template.py) |
+
+**ATTENTION** : ne JAMAIS écrire un parser markdown ad-hoc pour convertir en JSON fill_template.py quand un fichier .md existe. Pandoc est 100× plus robuste pour cette tâche.
 
 ### Ce que fait inject_cover.py en interne
 
