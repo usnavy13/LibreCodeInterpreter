@@ -209,7 +209,21 @@ config = {
     ],
     "sections": [
         {"title": "Contexte", "level": 1, "content": [{"type": "text", "text": "..."}]},
-        {"title": "Actions", "level": 1, "content": [{"type": "numbered", "items": ["Action 1", "Action 2"]}]}
+        {"title": "Prestations", "level": 1, "content": [
+            {"type": "numbered", "items": [
+                {"text": "Keynote (1-2h) : vision IA", "subitems": [
+                    "Cible : 30 Directeurs",
+                    "Format : Présentation + démo"
+                ]},
+                {"text": "Formation (2h) : exercices pratiques", "subitems": [
+                    "Cible : 30 Managers",
+                    "Outil : Copilot Premium"
+                ]}
+            ]}
+        ]},
+        {"title": "Actions", "level": 1, "content": [
+            {"type": "bullets", "items": ["Action 1", "Action 2"]}
+        ]}
     ]
 }
 
@@ -223,6 +237,34 @@ subprocess.run([
     "/tmp/config.json"
 ], check=True)
 ```
+
+#### IMPORTANT : convertir les listes markdown en JSON structuré avec subitems
+
+Quand le markdown source contient des listes imbriquées comme :
+```markdown
+1. **Item principal**
+   - Sous-item A
+   - Sous-item B
+2. **Autre item**
+   - Sous-item C
+```
+
+Tu DOIS les convertir en format `subitems`, PAS en items flat :
+
+**CORRECT** :
+```json
+{"type": "numbered", "items": [
+  {"text": "Item principal", "subitems": ["Sous-item A", "Sous-item B"]},
+  {"text": "Autre item", "subitems": ["Sous-item C"]}
+]}
+```
+
+**INCORRECT** (produit une numérotation 1-5 aplatie) :
+```json
+{"type": "numbered", "items": ["Item principal", "Sous-item A", "Sous-item B", "Autre item", "Sous-item C"]}
+```
+
+Analyse toujours l'indentation du markdown source pour détecter les sous-listes (lignes commençant par `   -` ou `     -` sous un item numéroté).
 
 ### Workflow alternatif (unpack/edit/pack manuel)
 

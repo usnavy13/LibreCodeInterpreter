@@ -346,11 +346,23 @@ def inject_cover(input_docx, output_docx, title, subtitle="", author="", date=""
         body = doc_root.find(_w("body"))
 
         # 6a. Remap pandoc style IDs to OBA template style IDs
-        # For paragraph styles: straightforward mapping
+        # For paragraph styles: context-aware mapping
         remap_count = 0
-        for pStyle in body.iter(_w("pStyle")):
+        for para in body.iter(_w("p")):
+            pPr = para.find(_w("pPr"))
+            if pPr is None:
+                continue
+            pStyle = pPr.find(_w("pStyle"))
+            if pStyle is None:
+                continue
             val = pStyle.get(_w("val"), "")
-            if val in PANDOC_STYLE_MAP:
+            if val == "Compact":
+                # Compact + numPr = list item → Paragraphedeliste
+                # Compact without numPr = table cell → Normal
+                has_numPr = pPr.find(_w("numPr")) is not None
+                pStyle.set(_w("val"), "Paragraphedeliste" if has_numPr else "Normal")
+                remap_count += 1
+            elif val in PANDOC_STYLE_MAP:
                 pStyle.set(_w("val"), PANDOC_STYLE_MAP[val])
                 remap_count += 1
 
