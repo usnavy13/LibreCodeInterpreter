@@ -216,30 +216,117 @@ subprocess.run(["python3", "/opt/skills/docx/scripts/office/pack.py", "unpacked/
 subprocess.run(["python3", "/opt/skills/docx/scripts/office/validate.py", "output.docx"], check=True)
 ```
 
-## Choix du template
+## Choix du template et de la méthode
 
-- **Compte-rendu de réunion** → `template-compte-rendu.docx` (tables header/metadata/participants pré-formatées)
-- **Guide d'installation, doc technique, rapport, proposition** → `template-base.docx` (cover page + version table)
-- **Conversion depuis markdown** → voir section "Conversion Markdown" ci-dessous
+### Distinction CR vs Guide/Rapport
+
+| Type de document | Template | Méthode de création |
+|------------------|----------|---------------------|
+| **Compte-rendu de réunion** | `template-compte-rendu.docx` | `fill_cr_template.py` uniquement |
+| **Guide, doc technique, rapport, proposition** | `template-base.docx` | pandoc + inject_cover (si markdown) OU fill_template.py (si généré) |
+
+**IMPORTANT** : pandoc + inject_cover.py ne produit QUE des documents de type guide/rapport (cover page + table version). Il ne produit PAS de comptes-rendus. Pour un CR, même si l'input est un markdown décrivant une réunion, utiliser `fill_cr_template.py` car seul ce script gère :
+- Le header spécifique CR (titre + client/objet)
+- La table de métadonnées (date, lieu, organisateur)
+- La table de participants (nom, fonction, entreprise)
+- L'ajout de logo tiers si le CR concerne une réunion avec un client identifiable
+
+Le résultat visuel d'un CR créé via fill_cr_template.py doit être visuellement cohérent avec un guide créé via pandoc + inject_cover — même charte graphique OBA, mêmes polices, mêmes couleurs.
 
 ## Conversion depuis Markdown (.md → .docx)
 
 ### Approche 1 : fill_template.py (quand l'agent génère le contenu)
 
-Utiliser cette approche quand l'agent **structure lui-même** le contenu (pas de fichier .md en entrée, ou markdown très court/simple). Voir la section "Workflow de création" plus haut pour le détail du JSON config.
+Utiliser quand l'agent **structure lui-même** le contenu (pas de fichier .md en entrée). Voir la section "Workflow de création" plus haut pour le JSON config.
 
 ### Approche 2 : RECOMMANDÉE pour markdown — Pandoc + inject_cover.py
 
-Pandoc est robuste pour parser le markdown (tables, code, listes imbriquées). Le script `inject_cover.py` ajoute ensuite la page de garde OBA complète. Le `reference-pandoc.docx` fournit les styles, la numérotation et le footer.
+Pandoc est robuste pour parser le markdown (tables, code, listes imbriquées). Le script `inject_cover.py` ajoute la page de garde OBA, transplante les styles, et corrige les bordures de tableaux.
+
+#### Pré-check obligatoire : analyser les niveaux de titres
+
+**AVANT de lancer pandoc**, inspecter le markdown pour déterminer le bon `--shift-heading-level-by` :
+
+```python
+import re
+
+with open('/mnt/data/input.md', 'r') as f:
+    content = f.read()
+
+# Trouver le heading level minimum utilisé dans le fichier
+headings = re.findall(r'^(#{1,6})\s', content, re.MULTILINE)
+if headings:
+    min_level = min(len(h) for h in headings)
+else:
+    min_level = 1
+
+# Calculer le shift pour que le top-level devienne Heading 1 (= Titre1)
+# Le titre principal (#) sera capté comme "Title" et supprimé par inject_cover
+# Les chapitres (##) doivent devenir Heading 1
+# Donc shift = -(min_level) si min_level == 1 (car # → Title, ## → H1)
+# Ou shift = -(min_level - 1) si le doc commence directement à ## ou ###
+if min_level == 1:
+    shift = -1  # # = Title (supprimé), ## = H1, ### = H2
+else:
+    shift = -(min_level - 1)  # ## au minimum → shift -1; ### au minimum → shift -2
+
+print(f"Heading levels: min={min_level}, shift={shift}")
+```
+
+**Règles de shift** :
+- Markdown commence par `#` (suivi de `##`, `###`) → `--shift-heading-level-by=-1` (cas standard)
+- Markdown commence par `##` (pas de `#`) → `--shift-heading-level-by=-1` (## → H1 directement)
+- Markdown commence par `###` (pas de `#` ni `##`) → `--shift-heading-level-by=-2` (### → H1)
+- Markdown n'a qu'un seul niveau → `--shift-heading-level-by=0` (pas de shift)
+
+#### Titres numérotés vs non-numérotés ({.unnumbered})
+
+Le filtre Lua `heading-unnumbered-v4.lua` détecte la classe `{.unnumbered}` dans le markdown et applique les styles "Titre X sans numérotation" dans Word.
+
+**Mapping** :
+- `## Introduction {.unnumbered}` → Style "Titre 1 sans numérotation" (pas de numéro)
+- `## Installation` → Style "Titre1" (numéroté 1., 2., 3.)
+- `### Prérequis {.unnumbered}` → Style "Titre 2 sans numérotation"
+- `### Étape 1` → Style "Titre2" (numéroté 1.1, 1.2)
+
+**Quand utiliser `{.unnumbered}`** : pour les titres de sections contextuelles qui ne font pas partie de la numérotation logique du document (Introduction, Conclusion, Annexes, Note préliminaire, etc.).
+
+**Quand l'agent génère le markdown** (avant de le passer à pandoc) : l'agent DOIT annoter les titres appropriés avec `{.unnumbered}`. Règle : sections introductives/conclusives = unnumbered ; sections techniques/procédurales = numbered.
+
+Exemple de markdown bien structuré pour pandoc :
+```markdown
+# Guide d'Installation n8n
+
+## Introduction {.unnumbered}
+
+Ce guide fournit une procédure pas-à-pas...
+
+## Installation n8n
+
+### 1. Récupérer le template
+
+...
+
+### 2. Configurer l'environnement
+
+...
+
+## Vérification {.unnumbered}
+
+...
+```
+
+#### Commande pandoc complète
 
 ```bash
-# 1. Pandoc convertit le contenu (parsing robuste du markdown)
+# shift calculé dynamiquement (voir pré-check ci-dessus)
+SHIFT=-1
+
 pandoc input.md -o temp.docx \
   --reference-doc=$SKILLS_ROOT/docx/templates/onbehalfai/reference-pandoc.docx \
-  --shift-heading-level-by=-1 \
+  --shift-heading-level-by=$SHIFT \
   --lua-filter=$SKILLS_ROOT/docx/templates/onbehalfai/heading-unnumbered-v4.lua
 
-# 2. inject_cover.py ajoute la page de garde OBA (titre, logo, version)
 python3 $SKILLS_ROOT/docx/scripts/inject_cover.py temp.docx output.docx \
   --title "Titre du Document" \
   --subtitle "Sous-titre" \
@@ -251,10 +338,11 @@ rm temp.docx
 
 **Ce que fournit cette approche** :
 - ✓ Page de garde avec titre, sous-titre et logo OBA
-- ✓ Table de version avec auteur et date
+- ✓ Table de version 4 colonnes (Date, Objet, Auteur, Version)
 - ✓ Footer pagination "X / Y"
 - ✓ Styles OBA complets (polices, couleurs, tailles)
-- ✓ Numérotation hiérarchique des titres
+- ✓ Numérotation hiérarchique des titres (avec support {.unnumbered})
+- ✓ Bordures gris clair sur les tableaux de contenu
 - ✓ Parsing markdown robuste (tables complexes, code imbriqué, listes)
 
 ### Approche 3 : Pandoc seul (conversion rapide sans branding)
@@ -272,15 +360,16 @@ Fournit styles + numérotation + footer pagination, mais **pas de page de garde 
 
 ### Règle de décision
 
-**Principe directeur** : si un fichier .md (ou texte markdown) est fourni en input → **toujours utiliser pandoc + inject_cover** (Approche 2). C'est la méthode la plus fiable car pandoc parse le markdown nativement sans risque de perte de contenu, contrairement à un parser ad-hoc écrit par l'agent.
+**Principe directeur** : si un fichier .md (ou texte markdown) est fourni en input → **toujours utiliser pandoc + inject_cover** (Approche 2). C'est la méthode la plus fiable car pandoc parse le markdown nativement sans risque de perte de contenu.
 
 | Situation | Approche |
 |-----------|----------|
-| Fichier .md fourni en input (peu importe le wording utilisateur) | **Approche 2** (pandoc + inject_cover) |
-| Texte markdown collé dans le prompt | **Approche 2** (pandoc + inject_cover) |
+| Fichier .md fourni en input (type guide/rapport/doc) | **Approche 2** (pandoc + inject_cover) |
+| Texte markdown collé dans le prompt (type guide/rapport) | **Approche 2** (pandoc + inject_cover) |
+| Markdown décrivant une réunion / CR | **fill_cr_template.py** (PAS pandoc) |
 | "Convertis rapidement en DOCX" (pas de branding) | Approche 3 (pandoc seul) |
-| Pas de markdown en input — l'agent génère le contenu | Approche 1 (fill_template.py) |
-| L'utilisateur donne des instructions textuelles (pas du markdown) | Approche 1 (fill_template.py) |
+| Pas de markdown — l'agent génère un guide/rapport | Approche 1 (fill_template.py) |
+| Pas de markdown — l'agent génère un CR | fill_cr_template.py |
 
 **ATTENTION** : ne JAMAIS écrire un parser markdown ad-hoc pour convertir en JSON fill_template.py quand un fichier .md existe. Pandoc est 100× plus robuste pour cette tâche.
 
