@@ -177,16 +177,40 @@ def _make_run(text: str, bold: bool = False, font: str = None) -> etree._Element
     return r
 
 
+def _make_runs_from_text(text: str) -> list:
+    """Parse inline markdown bold (**text**) and return a list of <w:r> elements.
+
+    Handles mixed text like: 'Normal **bold part** more normal'
+    Returns multiple runs with appropriate bold formatting.
+    """
+    import re
+    parts = re.split(r'(\*\*[^*]+\*\*)', text)
+    runs = []
+    for part in parts:
+        if not part:
+            continue
+        if part.startswith("**") and part.endswith("**"):
+            # Bold text — strip the ** markers
+            runs.append(_make_run(part[2:-2], bold=True))
+        else:
+            runs.append(_make_run(part))
+    return runs if runs else [_make_run(text)]
+
+
 def _make_empty_para() -> etree._Element:
     """Create an empty <w:p/> spacer."""
     return etree.Element(_w("p"))
 
 
 def _make_paragraph(text: str, bold: bool = False) -> etree._Element:
-    """Create a Normal paragraph."""
+    """Create a Normal paragraph. Parses **bold** markers in text."""
     p = etree.Element(_w("p"))
     if text:
-        p.append(_make_run(text, bold=bold))
+        if bold:
+            p.append(_make_run(text, bold=True))
+        else:
+            for run in _make_runs_from_text(text):
+                p.append(run)
     return p
 
 
@@ -201,7 +225,8 @@ def _make_heading(text: str, level: int) -> etree._Element:
 
 
 def _make_bullet(text: str, level: int = 0, num_id: str = None) -> etree._Element:
-    """Create a bullet list paragraph (dash style) at given indentation level."""
+    """Create a bullet list paragraph (dash style) at given indentation level.
+    Parses **bold** markers in text."""
     p = etree.Element(_w("p"))
     pPr = etree.SubElement(p, _w("pPr"))
     pStyle = etree.SubElement(pPr, _w("pStyle"))
@@ -211,7 +236,8 @@ def _make_bullet(text: str, level: int = 0, num_id: str = None) -> etree._Elemen
     ilvl.set(_w("val"), str(level))
     numId_el = etree.SubElement(numPr, _w("numId"))
     numId_el.set(_w("val"), num_id or BULLET_NUM_ID)
-    p.append(_make_run(text))
+    for run in _make_runs_from_text(text):
+        p.append(run)
     return p
 
 
@@ -226,7 +252,8 @@ def _make_code_line(text: str) -> etree._Element:
 
 
 def _make_numbered(text: str, level: int = 0, num_id: str = None) -> etree._Element:
-    """Create a numbered list paragraph (1., 2., 3.) at given indentation level."""
+    """Create a numbered list paragraph (1., 2., 3.) at given indentation level.
+    Parses **bold** markers in text."""
     p = etree.Element(_w("p"))
     pPr = etree.SubElement(p, _w("pPr"))
     pStyle = etree.SubElement(pPr, _w("pStyle"))
@@ -236,7 +263,8 @@ def _make_numbered(text: str, level: int = 0, num_id: str = None) -> etree._Elem
     ilvl.set(_w("val"), str(level))
     numId_el = etree.SubElement(numPr, _w("numId"))
     numId_el.set(_w("val"), num_id or NUMBERED_NUM_ID)
-    p.append(_make_run(text))
+    for run in _make_runs_from_text(text):
+        p.append(run)
     return p
 
 
