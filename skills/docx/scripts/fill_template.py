@@ -150,15 +150,15 @@ def _make_heading(text: str, level: int) -> etree._Element:
     return p
 
 
-def _make_bullet(text: str) -> etree._Element:
-    """Create a bullet list paragraph (dash style)."""
+def _make_bullet(text: str, level: int = 0) -> etree._Element:
+    """Create a bullet list paragraph (dash style) at given indentation level."""
     p = etree.Element(_w("p"))
     pPr = etree.SubElement(p, _w("pPr"))
     pStyle = etree.SubElement(pPr, _w("pStyle"))
     pStyle.set(_w("val"), STYLE_LIST)
     numPr = etree.SubElement(pPr, _w("numPr"))
     ilvl = etree.SubElement(numPr, _w("ilvl"))
-    ilvl.set(_w("val"), "0")
+    ilvl.set(_w("val"), str(level))
     numId = etree.SubElement(numPr, _w("numId"))
     numId.set(_w("val"), BULLET_NUM_ID)
     p.append(_make_run(text))
@@ -175,15 +175,15 @@ def _make_code_line(text: str) -> etree._Element:
     return p
 
 
-def _make_numbered(text: str) -> etree._Element:
-    """Create a numbered list paragraph (1., 2., 3.)."""
+def _make_numbered(text: str, level: int = 0) -> etree._Element:
+    """Create a numbered list paragraph (1., 2., 3.) at given indentation level."""
     p = etree.Element(_w("p"))
     pPr = etree.SubElement(p, _w("pPr"))
     pStyle = etree.SubElement(pPr, _w("pStyle"))
     pStyle.set(_w("val"), STYLE_LIST)
     numPr = etree.SubElement(pPr, _w("numPr"))
     ilvl = etree.SubElement(numPr, _w("ilvl"))
-    ilvl.set(_w("val"), "0")
+    ilvl.set(_w("val"), str(level))
     numId = etree.SubElement(numPr, _w("numId"))
     numId.set(_w("val"), NUMBERED_NUM_ID)
     p.append(_make_run(text))
@@ -304,6 +304,29 @@ def remove_placeholder_body(body: etree._Element) -> int:
     return len(to_remove)
 
 
+def _expand_list_items(items: list, make_func, level: int = 0) -> list:
+    """Expand list items supporting nested sub-items.
+
+    Items can be:
+      - A string: "Simple item"
+      - A dict with subitems: {"text": "Item", "subitems": ["Sub A", "Sub B"]}
+      - A dict with deeper nesting: {"text": "Item", "subitems": [{"text": ..., "subitems": [...]}]}
+
+    Returns a flat list of paragraph elements with correct indentation levels.
+    """
+    elements = []
+    for item in items:
+        if isinstance(item, str):
+            elements.append(make_func(item, level=level))
+        elif isinstance(item, dict):
+            text = item.get("text", "")
+            elements.append(make_func(text, level=level))
+            subitems = item.get("subitems", [])
+            if subitems:
+                elements.extend(_expand_list_items(subitems, _make_bullet, level=level + 1))
+    return elements
+
+
 def insert_sections(body: etree._Element, sections: list) -> int:
     """Insert structured content sections before <w:sectPr>."""
     sect_pr = body.find(_w("sectPr"))
@@ -336,13 +359,11 @@ def insert_sections(body: etree._Element, sections: list) -> int:
 
             elif block_type == "bullets":
                 items = block.get("items", [])
-                for item in items:
-                    elements.append(_make_bullet(item))
+                elements.extend(_expand_list_items(items, _make_bullet))
 
             elif block_type == "numbered":
                 items = block.get("items", [])
-                for item in items:
-                    elements.append(_make_numbered(item))
+                elements.extend(_expand_list_items(items, _make_numbered))
 
             elif block_type == "code":
                 code_text = block.get("text", "")

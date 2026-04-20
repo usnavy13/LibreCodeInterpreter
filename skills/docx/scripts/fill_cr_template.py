@@ -163,6 +163,30 @@ def remove_cr_placeholder_body(body: etree._Element) -> int:
     return len(to_remove)
 
 
+def _expand_list_items(items: list, make_func, level: int = 0) -> list:
+    """Expand list items supporting nested sub-items.
+
+    Items can be:
+      - A string: "Simple item"
+      - A dict with subitems: {"text": "Item", "subitems": ["Sub A", "Sub B"]}
+      - A dict with deeper nesting: {"text": "Item", "subitems": [{"text": "Sub", "subitems": [...]}]}
+
+    Returns a flat list of paragraph elements with correct indentation levels.
+    """
+    elements = []
+    for item in items:
+        if isinstance(item, str):
+            elements.append(make_func(item, level=level))
+        elif isinstance(item, dict):
+            text = item.get("text", "")
+            elements.append(make_func(text, level=level))
+            # Process subitems as bullets one level deeper
+            subitems = item.get("subitems", [])
+            if subitems:
+                elements.extend(_expand_list_items(subitems, _make_bullet, level=level + 1))
+    return elements
+
+
 def insert_cr_sections(body: etree._Element, sections: list) -> int:
     """Insert content sections before <w:sectPr>."""
     sect_pr = body.find(_w("sectPr"))
@@ -187,11 +211,11 @@ def insert_cr_sections(body: etree._Element, sections: list) -> int:
             if block_type == "text":
                 elements.append(_make_paragraph(block.get("text", ""), bold=block.get("bold", False)))
             elif block_type == "bullets":
-                for item in block.get("items", []):
-                    elements.append(_make_bullet(item))
+                items = block.get("items", [])
+                elements.extend(_expand_list_items(items, _make_bullet, level=0))
             elif block_type == "numbered":
-                for item in block.get("items", []):
-                    elements.append(_make_numbered(item))
+                items = block.get("items", [])
+                elements.extend(_expand_list_items(items, _make_numbered, level=0))
             elif block_type == "code":
                 for line in block.get("text", "").split("\n"):
                     elements.append(_make_code_line(line))

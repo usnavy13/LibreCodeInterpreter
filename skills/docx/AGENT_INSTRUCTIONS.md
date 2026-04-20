@@ -150,6 +150,34 @@ subprocess.run([
 | Tableau | `{"type": "table", "headers": ["A","B"], "rows": [["a1","b1"]]}` | Tableau avec en-têtes bleus |
 | Espace vide | `{"type": "empty"}` | Paragraphe vide |
 
+#### Listes imbriquées (sous-items)
+
+Les items de `bullets` et `numbered` peuvent être des strings simples OU des dicts avec `subitems` :
+
+```json
+{"type": "numbered", "items": [
+  "Item simple (string)",
+  {"text": "Item avec sous-liste", "subitems": [
+    "Sous-item A (bullet, indenté)",
+    "Sous-item B",
+    {"text": "Sous-item avec sub-sub", "subitems": ["Sub-sub 1", "Sub-sub 2"]}
+  ]}
+]}
+```
+
+Résultat Word :
+```
+1. Item simple
+2. Item avec sous-liste
+   - Sous-item A
+   - Sous-item B
+   - Sous-item avec sub-sub
+     - Sub-sub 1
+     - Sub-sub 2
+```
+
+Les subitems sont TOUJOURS des bullets (tirets) quel que soit le type parent. La numérotation ne s'applique qu'au niveau 0.
+
 ### Niveaux de titres (paramètre `level`)
 
 | Level | Style | Rendu |
