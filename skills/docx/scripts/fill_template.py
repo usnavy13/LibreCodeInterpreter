@@ -69,7 +69,9 @@ HEADING_STYLES = {
 STYLE_NORMAL = "Normal"
 STYLE_LIST = "Paragraphedeliste"
 STYLE_CODE = "Code"
-BULLET_NUM_ID = "7"
+# Default numIds (for template-base.docx). These may be overridden at runtime
+# by detect_num_ids() if the template has different mappings.
+BULLET_NUM_ID = "4"
 NUMBERED_NUM_ID = "5"
 
 # Table styling constants
@@ -79,6 +81,54 @@ TABLE_WIDTH_DXA = 9360  # Full width for A4 with ~2cm margins
 
 SCRIPTS_DIR = Path(__file__).parent
 OFFICE_DIR = SCRIPTS_DIR / "office"
+
+
+def detect_num_ids(numbering_xml_path: str) -> tuple:
+    """Detect the correct bullet and numbered numIds from a template's numbering.xml.
+
+    Scans all numId→abstractNum mappings and returns (bullet_num_id, numbered_num_id)
+    where bullet uses fmt=bullet and numbered uses fmt=decimal.
+    Falls back to module defaults if detection fails.
+    """
+    try:
+        tree = etree.parse(numbering_xml_path)
+        root = tree.getroot()
+
+        bullet_id = None
+        numbered_id = None
+
+        for num in root.findall(_w("num")):
+            nid = num.get(_w("numId"), "")
+            abs_ref = num.find(_w("abstractNumId"))
+            if abs_ref is None:
+                continue
+            aid = abs_ref.get(_w("val"), "")
+
+            for abs_num in root.findall(_w("abstractNum")):
+                if abs_num.get(_w("abstractNumId")) != aid:
+                    continue
+                lvl0 = abs_num.find(f"{_w('lvl')}[@{_w('ilvl')}='0']")
+                if lvl0 is None:
+                    break
+                num_fmt = lvl0.find(_w("numFmt"))
+                fmt = num_fmt.get(_w("val"), "") if num_fmt is not None else ""
+
+                if fmt == "bullet" and bullet_id is None:
+                    bullet_id = nid
+                elif fmt == "decimal" and numbered_id is None:
+                    # Check it's a simple 1., 2., 3. (not a heading numbering)
+                    lvl_text = lvl0.find(_w("lvlText"))
+                    text = lvl_text.get(_w("val"), "") if lvl_text is not None else ""
+                    if text == "%1.":
+                        numbered_id = nid
+
+                if bullet_id and numbered_id:
+                    break
+                break
+
+        return (bullet_id or BULLET_NUM_ID, numbered_id or NUMBERED_NUM_ID)
+    except Exception:
+        return (BULLET_NUM_ID, NUMBERED_NUM_ID)
 
 
 # === Smart quotes ===
@@ -150,7 +200,7 @@ def _make_heading(text: str, level: int) -> etree._Element:
     return p
 
 
-def _make_bullet(text: str, level: int = 0) -> etree._Element:
+def _make_bullet(text: str, level: int = 0, num_id: str = None) -> etree._Element:
     """Create a bullet list paragraph (dash style) at given indentation level."""
     p = etree.Element(_w("p"))
     pPr = etree.SubElement(p, _w("pPr"))
@@ -159,8 +209,8 @@ def _make_bullet(text: str, level: int = 0) -> etree._Element:
     numPr = etree.SubElement(pPr, _w("numPr"))
     ilvl = etree.SubElement(numPr, _w("ilvl"))
     ilvl.set(_w("val"), str(level))
-    numId = etree.SubElement(numPr, _w("numId"))
-    numId.set(_w("val"), BULLET_NUM_ID)
+    numId_el = etree.SubElement(numPr, _w("numId"))
+    numId_el.set(_w("val"), num_id or BULLET_NUM_ID)
     p.append(_make_run(text))
     return p
 
@@ -175,7 +225,7 @@ def _make_code_line(text: str) -> etree._Element:
     return p
 
 
-def _make_numbered(text: str, level: int = 0) -> etree._Element:
+def _make_numbered(text: str, level: int = 0, num_id: str = None) -> etree._Element:
     """Create a numbered list paragraph (1., 2., 3.) at given indentation level."""
     p = etree.Element(_w("p"))
     pPr = etree.SubElement(p, _w("pPr"))
@@ -184,8 +234,8 @@ def _make_numbered(text: str, level: int = 0) -> etree._Element:
     numPr = etree.SubElement(pPr, _w("numPr"))
     ilvl = etree.SubElement(numPr, _w("ilvl"))
     ilvl.set(_w("val"), str(level))
-    numId = etree.SubElement(numPr, _w("numId"))
-    numId.set(_w("val"), NUMBERED_NUM_ID)
+    numId_el = etree.SubElement(numPr, _w("numId"))
+    numId_el.set(_w("val"), num_id or NUMBERED_NUM_ID)
     p.append(_make_run(text))
     return p
 
@@ -304,7 +354,8 @@ def remove_placeholder_body(body: etree._Element) -> int:
     return len(to_remove)
 
 
-def _expand_list_items(items: list, make_func, level: int = 0) -> list:
+def _expand_list_items(items: list, make_func, level: int = 0,
+                       bullet_id: str = None, numbered_id: str = None) -> list:
     """Expand list items supporting nested sub-items.
 
     Items can be:
@@ -313,17 +364,21 @@ def _expand_list_items(items: list, make_func, level: int = 0) -> list:
       - A dict with deeper nesting: {"text": "Item", "subitems": [{"text": ..., "subitems": [...]}]}
 
     Returns a flat list of paragraph elements with correct indentation levels.
+    Sub-items are always bullets (never numbered).
     """
     elements = []
     for item in items:
         if isinstance(item, str):
-            elements.append(make_func(item, level=level))
+            elements.append(make_func(item, level=level, num_id=numbered_id if make_func == _make_numbered else bullet_id))
         elif isinstance(item, dict):
             text = item.get("text", "")
-            elements.append(make_func(text, level=level))
+            elements.append(make_func(text, level=level, num_id=numbered_id if make_func == _make_numbered else bullet_id))
             subitems = item.get("subitems", [])
             if subitems:
-                elements.extend(_expand_list_items(subitems, _make_bullet, level=level + 1))
+                elements.extend(_expand_list_items(
+                    subitems, _make_bullet, level=level + 1,
+                    bullet_id=bullet_id, numbered_id=numbered_id,
+                ))
     return elements
 
 

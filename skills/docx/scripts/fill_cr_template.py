@@ -52,8 +52,8 @@ from fill_template import (
     _make_run, _make_text, _make_empty_para, _make_paragraph,
     _make_heading, _make_bullet, _make_numbered, _make_code_line,
     _make_table, _make_page_break,
-    replace_placeholders,
-    HEADING_STYLES, STYLE_LIST, STYLE_CODE, BULLET_NUM_ID,
+    replace_placeholders, detect_num_ids, _expand_list_items,
+    HEADING_STYLES, STYLE_LIST, STYLE_CODE, BULLET_NUM_ID, NUMBERED_NUM_ID,
 )
 
 SCRIPTS_DIR = Path(__file__).parent
@@ -163,31 +163,8 @@ def remove_cr_placeholder_body(body: etree._Element) -> int:
     return len(to_remove)
 
 
-def _expand_list_items(items: list, make_func, level: int = 0) -> list:
-    """Expand list items supporting nested sub-items.
-
-    Items can be:
-      - A string: "Simple item"
-      - A dict with subitems: {"text": "Item", "subitems": ["Sub A", "Sub B"]}
-      - A dict with deeper nesting: {"text": "Item", "subitems": [{"text": "Sub", "subitems": [...]}]}
-
-    Returns a flat list of paragraph elements with correct indentation levels.
-    """
-    elements = []
-    for item in items:
-        if isinstance(item, str):
-            elements.append(make_func(item, level=level))
-        elif isinstance(item, dict):
-            text = item.get("text", "")
-            elements.append(make_func(text, level=level))
-            # Process subitems as bullets one level deeper
-            subitems = item.get("subitems", [])
-            if subitems:
-                elements.extend(_expand_list_items(subitems, _make_bullet, level=level + 1))
-    return elements
-
-
-def insert_cr_sections(body: etree._Element, sections: list) -> int:
+def insert_cr_sections(body: etree._Element, sections: list,
+                       bullet_id: str = None, numbered_id: str = None) -> int:
     """Insert content sections before <w:sectPr>."""
     sect_pr = body.find(_w("sectPr"))
     if sect_pr is None:
@@ -212,10 +189,12 @@ def insert_cr_sections(body: etree._Element, sections: list) -> int:
                 elements.append(_make_paragraph(block.get("text", ""), bold=block.get("bold", False)))
             elif block_type == "bullets":
                 items = block.get("items", [])
-                elements.extend(_expand_list_items(items, _make_bullet, level=0))
+                elements.extend(_expand_list_items(items, _make_bullet, level=0,
+                                                   bullet_id=bullet_id, numbered_id=numbered_id))
             elif block_type == "numbered":
                 items = block.get("items", [])
-                elements.extend(_expand_list_items(items, _make_numbered, level=0))
+                elements.extend(_expand_list_items(items, _make_numbered, level=0,
+                                                   bullet_id=bullet_id, numbered_id=numbered_id))
             elif block_type == "code":
                 for line in block.get("text", "").split("\n"):
                     elements.append(_make_code_line(line))
@@ -267,8 +246,14 @@ def fill_cr_template(template_path: str, output_path: str, config: dict) -> str:
         n_removed = remove_cr_placeholder_body(body)
         print(f"Removed {n_removed} placeholder paragraph(s)")
 
+        # Detect correct numIds from this template's numbering.xml
+        numbering_path = os.path.join(unpack_dir, "word", "numbering.xml")
+        bullet_id, numbered_id = detect_num_ids(numbering_path)
+        print(f"Detected numIds: bullet={bullet_id}, numbered={numbered_id}")
+
         # Step 4: Insert sections
-        n_inserted = insert_cr_sections(body, sections)
+        n_inserted = insert_cr_sections(body, sections,
+                                        bullet_id=bullet_id, numbered_id=numbered_id)
         print(f"Inserted {n_inserted} element(s)")
 
         tree.write(doc_path, xml_declaration=True, encoding="UTF-8", standalone=True)
