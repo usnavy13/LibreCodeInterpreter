@@ -87,6 +87,91 @@ def _w(tag):
     return f"{{{W_NS}}}{tag}"
 
 
+def _build_version_table(date, author):
+    """Build a proper 4-column version table for the cover page.
+
+    Columns: Date | Objet | Auteur | Version
+    Row 1 (header): blue background, white bold text
+    Row 2 (data): date, "Création", author, "1.0"
+    """
+    HEADER_FILL = "233F70"  # OBA navy
+    HEADER_TEXT_COLOR = "FFFFFF"
+    BORDER_COLOR = "CCCCCC"
+    TABLE_WIDTH = 9350  # Full width A4 with margins (DXA)
+    COL_WIDTHS = [1800, 3750, 2200, 1600]  # Date, Objet, Auteur, Version
+
+    tbl = etree.Element(_w("tbl"))
+
+    # Table properties (OOXML order: tblW → tblBorders → tblLook)
+    tblPr = etree.SubElement(tbl, _w("tblPr"))
+    tblW = etree.SubElement(tblPr, _w("tblW"))
+    tblW.set(_w("w"), str(TABLE_WIDTH))
+    tblW.set(_w("type"), "dxa")
+    # Borders (must come before tblLook in OOXML schema)
+    tblBorders = etree.SubElement(tblPr, _w("tblBorders"))
+    for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        b = etree.SubElement(tblBorders, _w(side))
+        b.set(_w("val"), "single")
+        b.set(_w("sz"), "4")
+        b.set(_w("space"), "0")
+        b.set(_w("color"), BORDER_COLOR)
+    tblLook = etree.SubElement(tblPr, _w("tblLook"))
+    tblLook.set(_w("val"), "04A0")
+    tblLook.set(_w("firstRow"), "1")
+
+    # Grid
+    tblGrid = etree.SubElement(tbl, _w("tblGrid"))
+    for w in COL_WIDTHS:
+        gridCol = etree.SubElement(tblGrid, _w("gridCol"))
+        gridCol.set(_w("w"), str(w))
+
+    def _make_cell(text, width, bold=False, shading=None, text_color=None):
+        tc = etree.Element(_w("tc"))
+        tcPr = etree.SubElement(tc, _w("tcPr"))
+        tcW = etree.SubElement(tcPr, _w("tcW"))
+        tcW.set(_w("w"), str(width))
+        tcW.set(_w("type"), "dxa")
+        if shading:
+            shd = etree.SubElement(tcPr, _w("shd"))
+            shd.set(_w("val"), "clear")
+            shd.set(_w("color"), "auto")
+            shd.set(_w("fill"), shading)
+        p = etree.SubElement(tc, _w("p"))
+        r = etree.SubElement(p, _w("r"))
+        rPr = etree.SubElement(r, _w("rPr"))
+        rFonts = etree.SubElement(rPr, _w("rFonts"))
+        rFonts.set(_w("ascii"), "Arial")
+        rFonts.set(_w("hAnsi"), "Arial")
+        sz = etree.SubElement(rPr, _w("sz"))
+        sz.set(_w("val"), "18")  # 9pt
+        szCs = etree.SubElement(rPr, _w("szCs"))
+        szCs.set(_w("val"), "18")
+        if bold:
+            etree.SubElement(rPr, _w("b"))
+            etree.SubElement(rPr, _w("bCs"))
+        if text_color:
+            color = etree.SubElement(rPr, _w("color"))
+            color.set(_w("val"), text_color)
+        t = etree.SubElement(r, _w("t"))
+        t.text = text
+        t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+        return tc
+
+    # Header row
+    headers = ["Date", "Objet", "Auteur", "Version"]
+    header_tr = etree.SubElement(tbl, _w("tr"))
+    for hi, h in enumerate(headers):
+        header_tr.append(_make_cell(h, COL_WIDTHS[hi], bold=True, shading=HEADER_FILL, text_color=HEADER_TEXT_COLOR))
+
+    # Data row
+    data_tr = etree.SubElement(tbl, _w("tr"))
+    data_row = [date or "", "Création", author or "", "1.0"]
+    for di, d in enumerate(data_row):
+        data_tr.append(_make_cell(d, COL_WIDTHS[di]))
+
+    return tbl
+
+
 def extract_cover_elements(template_path):
     """Extract cover page elements (2 tables + spacing) from template-base.docx.
 
@@ -275,7 +360,81 @@ def inject_cover(input_docx, output_docx, title, subtitle="", author="", date=""
         if remap_count:
             print(f"Remapped {remap_count} style reference(s) from pandoc IDs to OBA IDs")
 
-        # 6b. Replace placeholders in cover elements
+        # 6b. Remove horizontal rule separators (empty paragraphs between headings)
+        # Pandoc renders markdown --- as empty paragraphs; also remove pBdr-based HRs
+        hr_removed = 0
+        children_list = list(body)
+        for i, child in enumerate(children_list):
+            if child.tag != _w("p"):
+                continue
+            # Check if this is an empty paragraph (no text) between two headings
+            texts = [t.text for t in child.iter(_w("t")) if t.text and t.text.strip()]
+            if texts:
+                continue
+            pPr = child.find(_w("pPr"))
+            # Remove paragraphs with borders (explicit HR)
+            if pPr is not None and pPr.find(_w("pBdr")) is not None:
+                body.remove(child)
+                hr_removed += 1
+                continue
+            # Remove empty paragraphs with no style that sit between headings
+            pStyle = pPr.find(_w("pStyle")) if pPr is not None else None
+            if pStyle is not None:
+                continue  # Has a style — not an HR separator
+            # Check neighbors: if previous or next sibling is a heading, this is likely an HR
+            if i > 0 and i < len(children_list) - 1:
+                prev_style = children_list[i - 1].find(f".//{_w('pStyle')}")
+                next_el = children_list[i + 1] if i + 1 < len(children_list) else None
+                next_style = next_el.find(f".//{_w('pStyle')}") if next_el is not None else None
+                prev_is_heading = prev_style is not None and "Titre" in prev_style.get(_w("val"), "")
+                next_is_heading = next_style is not None and "Titre" in next_style.get(_w("val"), "")
+                # Also check bookmarkStart/End (pandoc inserts these before headings)
+                next_is_bookmark = next_el is not None and "bookmark" in (next_el.tag.split("}")[-1] if "}" in next_el.tag else next_el.tag)
+                if prev_is_heading or next_is_heading or next_is_bookmark:
+                    body.remove(child)
+                    hr_removed += 1
+        if hr_removed:
+            print(f"Removed {hr_removed} horizontal rule separator(s)")
+
+        # 6c. Add light gray borders to content tables (not cover page tables)
+        TABLE_BORDER_COLOR = "CCCCCC"
+        tables_fixed = 0
+        for tbl in body.findall(_w("tbl")):
+            # Skip tables that are part of the cover page (they have tblBorders=none intentionally)
+            first_cell_texts = [t.text for t in tbl.iter(_w("t")) if t.text][:3]
+            # Cover tables contain title/version — skip them
+            if any(k in " ".join(first_cell_texts) for k in [title, "VERSION", subtitle]):
+                continue
+            # Add or replace tblBorders with light gray
+            tblPr = tbl.find(_w("tblPr"))
+            if tblPr is None:
+                tblPr = etree.SubElement(tbl, _w("tblPr"))
+                tbl.insert(0, tblPr)
+            # Remove existing tblBorders
+            existing_borders = tblPr.find(_w("tblBorders"))
+            if existing_borders is not None:
+                tblPr.remove(existing_borders)
+            # Build new borders element
+            tblBorders = etree.Element(_w("tblBorders"))
+            for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
+                border = etree.SubElement(tblBorders, _w(side))
+                border.set(_w("val"), "single")
+                border.set(_w("sz"), "4")
+                border.set(_w("space"), "0")
+                border.set(_w("color"), TABLE_BORDER_COLOR)
+            # Insert tblBorders in correct OOXML order (after tblW/jc/tblInd, before tblLook/tblCaption)
+            insert_pos = len(list(tblPr))  # default: end
+            for pi, pchild in enumerate(list(tblPr)):
+                ptag = pchild.tag.split("}")[-1] if "}" in pchild.tag else pchild.tag
+                if ptag in ("tblLook", "tblCaption", "tblDescription", "shd", "tblLayout", "tblCellMar"):
+                    insert_pos = pi
+                    break
+            tblPr.insert(insert_pos, tblBorders)
+            tables_fixed += 1
+        if tables_fixed:
+            print(f"Added gray borders to {tables_fixed} content table(s)")
+
+        # 6d. Replace placeholders in cover elements and rebuild version table
         for elem in cover_elements:
             for t_elem in elem.iter(_w("t")):
                 if t_elem.text is None:
@@ -288,7 +447,17 @@ def inject_cover(input_docx, output_docx, title, subtitle="", author="", date=""
                     .replace("[Date]", date)
                 )
 
-        # 6b. Remove redundant Title/Subtitle paragraphs from pandoc body
+        # Rebuild version table (replace the simple 1-col table with a proper 4-col one)
+        # Find the version table in cover_elements (the one containing "VERSION")
+        for i, elem in enumerate(cover_elements):
+            if elem.tag == _w("tbl"):
+                texts = [t.text for t in elem.iter(_w("t")) if t.text]
+                if "VERSION" in " ".join(texts):
+                    new_tbl = _build_version_table(date, author)
+                    cover_elements[i] = new_tbl
+                    break
+
+        # 6e. Remove redundant Title/Subtitle paragraphs from pandoc body
         # (pandoc maps # H1 with --shift-heading-level-by=-1 to Title style)
         to_remove = []
         for child in list(body):
@@ -308,7 +477,7 @@ def inject_cover(input_docx, output_docx, title, subtitle="", author="", date=""
         if to_remove:
             print(f"Removed {len(to_remove)} redundant Title/Subtitle paragraph(s) from body")
 
-        # 6c. Insert cover + page break at the start
+        # 6f. Insert cover + page break at the start
         page_break = etree.Element(_w("p"))
         r = etree.SubElement(page_break, _w("r"))
         br = etree.SubElement(r, _w("br"))
@@ -320,7 +489,7 @@ def inject_cover(input_docx, output_docx, title, subtitle="", author="", date=""
             insert_idx += 1
         body.insert(insert_idx, page_break)
 
-        # 6d. Add footerReference to sectPr if needed
+        # 6g. Add footerReference to sectPr if needed
         # OOXML requires footerReference early in sectPr (before endnotePr, pgSz, etc.)
         if footer_rid_for_sectpr:
             for sectPr in doc_root.findall(f".//{_w('sectPr')}"):
