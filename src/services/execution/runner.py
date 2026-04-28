@@ -706,6 +706,10 @@ class CodeExecutionRunner:
         Uses streaming (MinIO fget_object) to transfer files directly to the
         sandbox data directory without loading entire files into memory. This
         avoids blocking the asyncio event loop during large file transfers.
+
+        Filenames may include subdirectories (e.g. `skills/foo/SKILL.md` from
+        LibreChat skill bundles). Parent directories are created and chowned
+        to match the sandbox uid before the file is written.
         """
         try:
             from ..file import FileService
@@ -713,6 +717,23 @@ class CodeExecutionRunner:
 
             file_service = FileService()
             user_id = get_user_id_for_language(language)
+            data_dir = sandbox_info.data_dir
+
+            def _ensure_parent_dirs(dest: Path, uid: int) -> None:
+                parent = dest.parent
+                if parent == data_dir or not parent.is_relative_to(data_dir):
+                    return
+                parent.mkdir(parents=True, exist_ok=True)
+                # Chown each newly-created ancestor so the sandbox uid can
+                # traverse and write inside it.
+                for ancestor in [parent, *parent.parents]:
+                    if ancestor == data_dir:
+                        break
+                    try:
+                        os.chown(ancestor, uid, uid)
+                        os.chmod(ancestor, 0o755)
+                    except (PermissionError, FileNotFoundError):
+                        pass
 
             def _set_file_perms(path, uid):
                 os.chown(path, uid, uid)
@@ -729,8 +750,12 @@ class CodeExecutionRunner:
                     continue
 
                 try:
-                    normalized_filename = OutputProcessor.sanitize_filename(filename)
-                    dest_path = str(sandbox_info.data_dir / normalized_filename)
+                    normalized_filename = OutputProcessor.sanitize_relative_path(
+                        filename
+                    )
+                    dest = data_dir / normalized_filename
+                    await asyncio.to_thread(_ensure_parent_dirs, dest, user_id)
+                    dest_path = str(dest)
 
                     file_size = file_info.get("size", 0)
                     if file_size > 10 * 1024 * 1024:
@@ -768,9 +793,13 @@ class CodeExecutionRunner:
     async def _create_placeholder_file(
         self, sandbox_info: SandboxInfo, filename: str
     ) -> None:
-        """Create a placeholder file when content cannot be retrieved."""
+        """Create a placeholder file when content cannot be retrieved.
+
+        Preserves any subdirectory structure in the filename so the placeholder
+        lands at the path the caller expects (e.g. `/mnt/data/skills/foo/SKILL.md`).
+        """
         try:
-            normalized_filename = OutputProcessor.sanitize_filename(filename)
+            normalized_filename = OutputProcessor.sanitize_relative_path(filename)
             placeholder = f"# File: {filename}\n# This is a placeholder - original file could not be retrieved\n"
             self.sandbox_manager.copy_content_to_sandbox(
                 sandbox_info,
@@ -784,35 +813,56 @@ class CodeExecutionRunner:
     async def _detect_generated_files(
         self, sandbox_info: SandboxInfo
     ) -> List[Dict[str, Any]]:
-        """Detect files generated during execution."""
-        try:
-            generated_files = []
-            data_dir = sandbox_info.data_dir
+        """Detect files generated during execution.
 
+        Walks the sandbox data directory recursively so artifacts written to
+        subdirectories (e.g. `/mnt/data/charts/foo.png`) are discoverable.
+        Hidden segments are skipped, and the per-execution output budget is
+        enforced after sorting for deterministic test results.
+        """
+        try:
+            data_dir = sandbox_info.data_dir
             if not data_dir.exists():
                 return []
 
-            for name in os.listdir(data_dir):
-                # Skip code files
-                if name.startswith("code") or name.startswith("Code."):
-                    continue
+            max_size_bytes = settings.max_file_size_mb * 1024 * 1024
+            candidates: List[Dict[str, Any]] = []
 
-                filepath = data_dir / name
-                if filepath.is_file():
-                    size = filepath.stat().st_size
-                    if size <= settings.max_file_size_mb * 1024 * 1024:
-                        generated_files.append(
-                            {
-                                "path": f"/mnt/data/{name}",
-                                "size": size,
-                                "mime_type": OutputProcessor.guess_mime_type(name),
-                            }
-                        )
+            for root, dirs, files in os.walk(data_dir):
+                # Filter hidden directories in-place so os.walk doesn't descend.
+                dirs[:] = [d for d in dirs if not d.startswith(".")]
 
-                        if len(generated_files) >= settings.max_output_files:
-                            break
+                for name in files:
+                    # Skip hidden files and the source code we wrote in.
+                    if name.startswith("."):
+                        continue
+                    if name.startswith("code") or name.startswith("Code."):
+                        continue
 
-            return generated_files
+                    filepath = Path(root) / name
+                    if not filepath.is_file():
+                        continue
+
+                    try:
+                        size = filepath.stat().st_size
+                    except OSError:
+                        continue
+                    if size > max_size_bytes:
+                        continue
+
+                    rel = filepath.relative_to(data_dir).as_posix()
+                    candidates.append(
+                        {
+                            "path": f"/mnt/data/{rel}",
+                            "size": size,
+                            "mime_type": OutputProcessor.guess_mime_type(rel),
+                        }
+                    )
+
+            # Stable ordering before applying the output budget keeps tests
+            # deterministic when many files exist.
+            candidates.sort(key=lambda f: f["path"])
+            return candidates[: settings.max_output_files]
 
         except Exception as e:
             logger.error(f"Failed to detect generated files: {e}")

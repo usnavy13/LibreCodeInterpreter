@@ -124,6 +124,7 @@ def file_service(mock_minio, mock_redis):
         service = FileService()
         yield service
 
+
 @pytest.fixture
 def mock_settings():
     """Mock settings for testing."""
@@ -151,6 +152,8 @@ def mock_settings():
         )
 
         yield mock_settings
+
+
 # ============================================================================
 # Integration Test Fixtures
 # ============================================================================
@@ -170,6 +173,7 @@ def auth_headers():
     """Provide authentication headers for integration tests."""
     return {"x-api-key": "test-api-key-for-testing-12345"}
 
+
 def pytest_collection_modifyitems(config, items):
     """Apply shared markers based on the suite layer."""
     contract_only_files = (
@@ -185,9 +189,7 @@ def pytest_collection_modifyitems(config, items):
         "tests/functional/test_mounted_file_edits.py",
         "tests/functional/test_timing.py",
     )
-    client_replay_files = (
-        "tests/functional/test_client_replay.py",
-    )
+    client_replay_files = ("tests/functional/test_client_replay.py",)
 
     for item in items:
         path = Path(str(item.fspath)).as_posix()

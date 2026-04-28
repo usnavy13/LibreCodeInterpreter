@@ -762,7 +762,13 @@ class ExecutionOrchestrator:
         return execution
 
     async def _handle_generated_files(self, ctx: ExecutionContext) -> List[FileRef]:
-        """Handle files generated during execution."""
+        """Handle files generated during execution.
+
+        Preserves any subdirectory structure under `/mnt/data/` so files
+        like `/mnt/data/charts/foo.png` come back as `name="charts/foo.png"`
+        in the response. LibreChat (PR #12848) preserves these paths in its
+        own rendering — collapsing them here would break that.
+        """
         generated = []
 
         for output in ctx.execution.outputs:
@@ -770,9 +776,21 @@ class ExecutionOrchestrator:
                 continue
 
             file_path = output.content
-            filename = file_path.split("/")[-1] if "/" in file_path else file_path
+            relative = (
+                file_path[len("/mnt/data/") :]
+                if file_path.startswith("/mnt/data/")
+                else file_path
+            )
 
-            if not filename or filename.startswith("."):
+            # Skip hidden files (any segment starting with `.`). Done on the
+            # raw path because sanitize_filename rewrites `.foo` to `_.foo`,
+            # which would defeat the check.
+            raw_segments = [s for s in relative.replace("\\", "/").split("/") if s]
+            if not raw_segments or any(s.startswith(".") for s in raw_segments):
+                continue
+
+            filename = OutputProcessor.sanitize_relative_path(relative)
+            if not filename or filename == "_":
                 continue
 
             try:

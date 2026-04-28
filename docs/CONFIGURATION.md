@@ -119,16 +119,31 @@ If you terminate TLS at an external reverse proxy instead, keep the API on HTTP 
 
 Manages API key authentication and security.
 
-| Variable            | Default        | Description                            |
-| ------------------- | -------------- | -------------------------------------- |
-| `API_KEY`           | `test-api-key` | Primary API key (CHANGE IN PRODUCTION) |
-| `API_KEYS`          | -              | Additional API keys (comma-separated)  |
+| Variable         | Default        | Description                                                      |
+| ---------------- | -------------- | ---------------------------------------------------------------- |
+| `API_KEY`        | `test-api-key` | Primary API key (CHANGE IN PRODUCTION)                           |
+| `API_KEYS`       | -              | Additional API keys (comma-separated)                            |
+| `MASTER_API_KEY` | -              | Required for `/api/v1/admin/*` endpoints                         |
+| `AUTH_ENABLED`   | `true`         | When `false`, skip x-api-key/Basic checks on user endpoints      |
+
+**How clients authenticate** (any one of):
+
+1. **`x-api-key` header** — `x-api-key: <key>`. The traditional way. Reverse proxies that inject this header continue to work.
+2. **HTTP Basic in URL credentials** — `Authorization: Basic base64("<key>:")`. Current LibreChat versions use this when `LIBRECHAT_CODE_BASEURL=https://<key>@your-api/v1` — `axios` and `node-fetch` automatically convert URL credentials into the Basic header. Single-token convention (Stripe / DigitalOcean / GitHub PAT style): the API key goes in the username slot, password is empty.
+3. **`AUTH_ENABLED=false`** — no client-side auth. Use only when running on a trusted private network or behind another auth layer (mTLS, reverse-proxy auth, etc.).
+
+When both `x-api-key` and a Basic header are present, `x-api-key` wins. This is deterministic for proxy-injection setups.
+
+`/api/v1/admin/*` and the admin dashboard's API calls **always** require `MASTER_API_KEY`, regardless of `AUTH_ENABLED`.
+
+**Rate limiting:** per-key rate limits and the IP-based auth-failure limiter both run inside the auth path. When `AUTH_ENABLED=false`, both are bypassed — your network boundary is responsible for any abuse protection.
 
 **Security Notes:**
 
 - API keys should be at least 16 characters long
 - Use cryptographically secure random keys in production
 - Consider rotating API keys regularly
+- Setting `AUTH_ENABLED=false` opens user endpoints to anyone who can reach the URL — do not expose to the public internet without a proxy/VPN/mTLS in front
 
 ### Redis Configuration
 

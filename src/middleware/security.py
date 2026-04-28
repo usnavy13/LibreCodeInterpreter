@@ -94,7 +94,7 @@ class SecurityMiddleware:
             await self._validate_request(request)
 
             # Handle authentication (skip for excluded paths and OPTIONS)
-            if not self._should_skip_auth(request):
+            if not self._should_skip_auth(request, scope):
                 await self._authenticate_request(request, scope)
 
         except HTTPException as e:
@@ -138,17 +138,57 @@ class SecurityMiddleware:
                     status_code=415, detail=f"Unsupported content type: {content_type}"
                 )
 
-    def _should_skip_auth(self, request: Request) -> bool:
-        """Check if authentication should be skipped."""
+    def _should_skip_auth(self, request: Request, scope: dict) -> bool:
+        """Check if authentication should be skipped.
+
+        Returns True for:
+          1. Excluded paths (/health, /docs, /redoc, /openapi.json) or OPTIONS
+             requests — pure passthrough, no state seeding needed.
+          2. /admin-dashboard HTML/static assets — UI loads without auth, but
+             API calls from the dashboard still require the master key.
+          3. AUTH_ENABLED=false on non-admin paths — operator opted to trust
+             the network boundary. Master-key admin paths still authenticate.
+
+        For (2) and (3), seed scope["state"] with anonymous access markers so
+        downstream code that reads request.state.api_key_hash etc. doesn't
+        crash.
+        """
         path = request.url.path
         if path in self.excluded_paths or request.method == "OPTIONS":
             return True
-        # Allow the admin dashboard UI (HTML/static assets) to load without auth.
-        # The dashboard itself has a login form where users enter the master key,
-        # which is then sent as a header with API requests.
+
+        is_admin_path = path.startswith("/api/v1/admin") or path.startswith(
+            "/admin-dashboard"
+        )
+
+        # Dashboard UI loads without auth (its API calls below /api/v1/admin
+        # still authenticate via master key).
         if path.startswith("/admin-dashboard"):
+            self._grant_anonymous_access(scope)
             return True
+
+        # Operator-controlled bypass for trusted-network deployments. Admin
+        # paths are deliberately excluded so MASTER_API_KEY remains required.
+        if not is_admin_path and not settings.auth_enabled:
+            self._grant_anonymous_access(scope)
+            return True
+
         return False
+
+    @staticmethod
+    def _grant_anonymous_access(scope: dict) -> None:
+        """Seed scope state for bypassed-auth requests.
+
+        Downstream code (exec endpoint, orchestrator metrics) reads
+        request.state.api_key_hash and request.state.is_env_key. Without
+        seeding, attribute access falls back to None which works but the
+        "anonymous" sentinel keeps metrics dashboards readable.
+        """
+        scope["state"] = scope.get("state", {})
+        scope["state"]["authenticated"] = True
+        scope["state"]["api_key"] = ""
+        scope["state"]["api_key_hash"] = "anonymous"
+        scope["state"]["is_env_key"] = False
 
     async def _authenticate_request(self, request: Request, scope: dict):
         """Handle API key authentication with rate limiting."""

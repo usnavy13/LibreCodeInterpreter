@@ -92,6 +92,14 @@ class Settings(BaseSettings):
     rate_limit_enabled: bool = Field(
         default=True, description="Enable per-key rate limiting for Redis-managed keys"
     )
+    auth_enabled: bool = Field(
+        default=True,
+        description=(
+            "Require x-api-key (or equivalent Basic auth) on user endpoints. "
+            "Set false when running behind a trusted network boundary. "
+            "Admin endpoints always require MASTER_API_KEY regardless."
+        ),
+    )
 
     # Redis Configuration
     redis_host: str = Field(default="localhost")
@@ -476,6 +484,7 @@ class Settings(BaseSettings):
         return SecurityConfig(
             api_key=self.api_key,
             api_keys=self.api_keys if isinstance(self.api_keys, str) else None,
+            auth_enabled=self.auth_enabled,
             enable_network_isolation=self.enable_network_isolation,
             enable_filesystem_isolation=self.enable_filesystem_isolation,
             enable_security_logs=self.enable_security_logs,

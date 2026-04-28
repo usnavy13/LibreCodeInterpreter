@@ -102,3 +102,74 @@ class TestSanitizeFilename:
         assert result.endswith(".txt")
         # Should have a random suffix before extension
         assert "-" in result
+
+
+class TestSanitizeRelativePath:
+    """Tests for sanitize_relative_path — used wherever filenames may legitimately
+    contain subdirectories (LibreChat skill bundles, nested artifacts)."""
+
+    def test_simple_filename_unchanged(self):
+        assert OutputProcessor.sanitize_relative_path("foo.png") == "foo.png"
+
+    def test_subdirs_preserved(self):
+        assert (
+            OutputProcessor.sanitize_relative_path("charts/foo.png") == "charts/foo.png"
+        )
+
+    def test_deep_subdirs_preserved(self):
+        assert (
+            OutputProcessor.sanitize_relative_path("a/b/c/d/file.txt")
+            == "a/b/c/d/file.txt"
+        )
+
+    def test_each_segment_sanitized(self):
+        assert (
+            OutputProcessor.sanitize_relative_path("my charts/foo bar.png")
+            == "my_charts/foo_bar.png"
+        )
+
+    def test_traversal_segments_dropped(self):
+        # `..` is dropped per-segment; remaining segments survive.
+        assert OutputProcessor.sanitize_relative_path("a/../b/c.txt") == "a/b/c.txt"
+
+    def test_only_traversal_returns_underscore(self):
+        assert OutputProcessor.sanitize_relative_path("../../..") == "_"
+
+    def test_leading_slash_stripped(self):
+        assert (
+            OutputProcessor.sanitize_relative_path("/charts/foo.png")
+            == "charts/foo.png"
+        )
+
+    def test_trailing_slash_dropped(self):
+        assert OutputProcessor.sanitize_relative_path("charts/") == "charts"
+
+    def test_consecutive_slashes_collapsed(self):
+        assert (
+            OutputProcessor.sanitize_relative_path("charts//foo.png")
+            == "charts/foo.png"
+        )
+
+    def test_empty_string_returns_underscore(self):
+        assert OutputProcessor.sanitize_relative_path("") == "_"
+
+    def test_just_slash_returns_underscore(self):
+        assert OutputProcessor.sanitize_relative_path("/") == "_"
+
+    def test_backslashes_treated_as_separators(self):
+        assert (
+            OutputProcessor.sanitize_relative_path("charts\\foo.png")
+            == "charts/foo.png"
+        )
+
+    def test_librechat_skill_bundle_pattern(self):
+        # The exact shape LibreChat sends for skill priming uploads.
+        assert (
+            OutputProcessor.sanitize_relative_path("skills/foo/SKILL.md")
+            == "skills/foo/SKILL.md"
+        )
+
+    def test_sanitize_filename_unchanged_for_basename_callers(self):
+        """Regression: sanitize_filename still flattens (legacy upload behavior)."""
+        # Existing single-call sites rely on this.
+        assert OutputProcessor.sanitize_filename("path/to/file.txt") == "file.txt"

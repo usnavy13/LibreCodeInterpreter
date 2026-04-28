@@ -9,11 +9,21 @@ from urllib.parse import quote
 
 # Third-party imports
 import structlog
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Query
+from fastapi import (
+    APIRouter,
+    HTTPException,
+    Request,
+    UploadFile,
+    File,
+    Form,
+    Query,
+)
 from fastapi.responses import StreamingResponse
+from starlette.datastructures import UploadFile as StarletteUploadFile
 from unidecode import unidecode
 
 # Local application imports
+from ..config import settings
 from ..dependencies import FileServiceDep, SessionServiceDep
 from ..models import SessionCreate
 from ..services.execution.output import OutputProcessor
@@ -175,6 +185,149 @@ async def upload_file(
         raise HTTPException(status_code=500, detail="Failed to upload files")
 
 
+# TODO(librechat-compat): /upload/batch duplicates the per-file storage flow
+# from /upload above. Kept separate to avoid touching the stable single-file
+# endpoint while we prove out the batch path. If both endpoints stay in
+# production unchanged for a release cycle, factor a shared
+# `_store_files_to_session()` helper that both call.
+@router.post("/upload/batch")
+async def upload_files_batch(
+    request: Request,
+    file_service: FileServiceDep = None,
+    session_service: SessionServiceDep = None,
+):
+    """Batch file upload — LibreChat compatible.
+
+    LibreChat (`crud.js:118` in librechat) sends multi-file uploads here as
+    multipart with the field name `file` repeated once per file. Per-file
+    failures are reported individually in the response rather than failing
+    the whole batch — LibreChat's caller distinguishes `succeeded`/`failed`
+    counts and reads each `files[].status`.
+
+    Filenames may include subdirectories (e.g. `skills/foo/SKILL.md` from
+    skill priming). Subdirectory structure is preserved via
+    `OutputProcessor.sanitize_relative_path()`; LibreChat then echoes them
+    back to its agent code, which checks `f.filename.endsWith('/SKILL.md')`.
+    """
+    form = await request.form()
+    upload_files: List[UploadFile] = [
+        v
+        for k, v in form.multi_items()
+        if k == "file" and isinstance(v, StarletteUploadFile)
+    ]
+
+    if not upload_files:
+        # LibreChat guards with `if (filesToUpload.length === 0) return null`
+        # before calling, so reaching this branch means a misconfigured
+        # client. Match the existing /upload contract for missing files.
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "Request validation failed",
+                "error_type": "validation",
+                "details": [
+                    {
+                        "field": "body -> file",
+                        "message": "At least one file required",
+                        "code": "missing",
+                    }
+                ],
+            },
+        )
+
+    if len(upload_files) > settings.max_files_per_session:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"Too many files in batch. Maximum "
+                f"{settings.max_files_per_session} files allowed per upload."
+            ),
+        )
+
+    entity_id_raw = form.get("entity_id")
+    entity_id: Optional[str] = (
+        entity_id_raw if isinstance(entity_id_raw, str) and entity_id_raw else None
+    )
+    is_agent_file = entity_id is not None
+
+    metadata = {"entity_id": entity_id} if entity_id else {}
+    session = await session_service.create_session(SessionCreate(metadata=metadata))
+    session_id = session.session_id
+
+    max_size_bytes = settings.max_file_size_mb * 1024 * 1024
+    results: List[dict] = []
+    succeeded = 0
+    failed = 0
+
+    for upload in upload_files:
+        original_filename = upload.filename or "unknown"
+        try:
+            content = await upload.read()
+            size = len(content)
+            if size > max_size_bytes:
+                raise ValueError(f"File exceeds {settings.max_file_size_mb}MB limit")
+            if not settings.is_file_allowed(original_filename):
+                raise ValueError(f"File type not allowed: {original_filename}")
+
+            # Preserve subdirectory structure (LibreChat skill bundles ship
+            # `skills/<name>/SKILL.md` etc.) while sanitizing each segment.
+            stored_filename = OutputProcessor.sanitize_relative_path(original_filename)
+
+            file_id = await file_service.store_uploaded_file(
+                session_id=session_id,
+                filename=stored_filename,
+                content=content,
+                content_type=upload.content_type,
+                is_agent_file=is_agent_file,
+            )
+
+            results.append(
+                {
+                    "status": "success",
+                    "fileId": file_id,
+                    "filename": stored_filename,
+                }
+            )
+            succeeded += 1
+        except Exception as exc:
+            logger.warning(
+                "Batch upload entry failed",
+                filename=original_filename,
+                error=str(exc),
+            )
+            results.append(
+                {
+                    "status": "error",
+                    "filename": original_filename,
+                    "error": str(exc),
+                }
+            )
+            failed += 1
+
+    if failed == 0:
+        message = "success"
+    elif succeeded == 0:
+        message = "error"
+    else:
+        message = "partial"
+
+    logger.info(
+        "Batch upload completed",
+        session_id=session_id,
+        entity_id=entity_id,
+        succeeded=succeeded,
+        failed=failed,
+    )
+
+    return {
+        "message": message,
+        "session_id": session_id,
+        "files": results,
+        "succeeded": succeeded,
+        "failed": failed,
+    }
+
+
 @router.get("/files/{session_id}")
 async def list_files(
     session_id: str,
@@ -255,6 +408,47 @@ async def list_files(
         logger.error("Failed to list files", session_id=session_id, error=str(e))
         # Return 404 if session not found
         raise HTTPException(status_code=404, detail="Session not found")
+
+
+@router.get("/sessions/{session_id}/objects/{file_id}")
+async def get_session_object_metadata(
+    session_id: str,
+    file_id: str,
+    file_service: FileServiceDep = None,
+):
+    """Session-liveness probe used by LibreChat's `primeFiles()`.
+
+    LibreChat's `process.js:363` reads `lastModified` only — if the value
+    parses to >23h ago (or this endpoint 404s), it treats the session as
+    expired and re-uploads the file from its own storage. We return the
+    file's `created_at`, normalized to UTC + `Z`, matching the format used
+    by `GET /files/{session_id}?detail=summary`.
+    """
+    try:
+        file_info = await file_service.get_file_info(session_id, file_id)
+    except Exception as e:
+        logger.warning(
+            "Failed to look up session object metadata",
+            session_id=session_id,
+            file_id=file_id,
+            error=str(e),
+        )
+        raise HTTPException(status_code=404, detail="File not found")
+
+    if file_info is None:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    dt = file_info.created_at
+    if isinstance(dt, str):
+        try:
+            dt = datetime.fromisoformat(dt)
+        except ValueError:
+            dt = datetime.now(timezone.utc)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+
+    last_modified = dt.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    return {"lastModified": last_modified}
 
 
 @router.get("/download/{session_id}/{file_id}")

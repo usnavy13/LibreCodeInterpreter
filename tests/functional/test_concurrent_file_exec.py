@@ -13,11 +13,12 @@ import time
 import httpx
 import pytest
 
-
 # 50MB of CSV data — large enough to trigger measurable event loop blocking
 LARGE_FILE_SIZE_MB = 50
 LARGE_CSV_ROW = b"col1,col2,col3,col4,col5,col6,col7,col8\n"
-LARGE_CSV_DATA = LARGE_CSV_ROW * (LARGE_FILE_SIZE_MB * 1024 * 1024 // len(LARGE_CSV_ROW))
+LARGE_CSV_DATA = LARGE_CSV_ROW * (
+    LARGE_FILE_SIZE_MB * 1024 * 1024 // len(LARGE_CSV_ROW)
+)
 
 # Threshold: concurrent pings must complete within this time (seconds).
 # Without the fix, pings take 8-11s due to event loop blocking.
@@ -46,7 +47,10 @@ class TestConcurrentFileExecution:
         data = {"entity_id": unique_entity_id}
 
         upload_resp = await async_client.post(
-            "/upload", headers=upload_headers, files=files, data=data,
+            "/upload",
+            headers=upload_headers,
+            files=files,
+            data=data,
             timeout=120.0,
         )
         assert upload_resp.status_code == 200, f"Upload failed: {upload_resp.text}"

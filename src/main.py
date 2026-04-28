@@ -188,9 +188,26 @@ async def lifespan(app: FastAPI):
         logger.warning("Using default API key - CHANGE THIS IN PRODUCTION!")
     if settings.api_debug:
         logger.warning("Debug mode is enabled - disable in production")
+    if not settings.auth_enabled:
+        logger.warning(
+            "AUTHENTICATION DISABLED via AUTH_ENABLED=false; "
+            "trusting network boundary for x-api-key endpoints "
+            "(master-key admin endpoints still require MASTER_API_KEY)"
+        )
     if settings.master_api_key:
         logger.info("API key management enabled")
     logger.debug("Rate limiting", enabled=settings.rate_limit_enabled)
+
+    # Bash PTC requires `jq` inside the sandbox image. The Dockerfile installs
+    # it, but warn if running outside Docker so bash PTC failures aren't a
+    # surprise.
+    import shutil
+
+    if shutil.which("jq") is None:
+        logger.warning(
+            "jq not found on PATH; /exec/programmatic with lang='bash' will fail "
+            "(bash PTC tool wrappers depend on jq for JSON marshalling)"
+        )
 
     await _startup_monitoring(app)
     await _startup_cleanup_tasks()

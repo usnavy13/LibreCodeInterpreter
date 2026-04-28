@@ -631,3 +631,99 @@ class TestExplicitFileMounting:
         result = await orchestrator._mount_explicit_files(ctx)
 
         assert len(result) == 0
+
+
+class TestHandleGeneratedFilesNestedPaths:
+    """Tests that _handle_generated_files preserves subdirectory paths
+    (LibreChat PR #12848 expects e.g. name='charts/foo.png')."""
+
+    async def test_nested_path_preserved_in_fileref_name(
+        self, orchestrator, mock_file_service
+    ):
+        from src.models.exec import ExecRequest
+
+        # Mock the helper that pulls bytes out of the container.
+        orchestrator._get_file_from_container = AsyncMock(return_value=b"data")
+        mock_file_service.store_execution_output_file = AsyncMock(return_value="fid-1")
+
+        request = ExecRequest(code="print()", lang="py")
+
+        # Build a minimal execution stub with a single file output. Use a SimpleNamespace
+        # so we don't depend on the full CodeExecution constructor surface.
+        from types import SimpleNamespace
+        from src.models import OutputType
+
+        execution = SimpleNamespace(
+            outputs=[
+                SimpleNamespace(
+                    type=OutputType.FILE, content="/mnt/data/charts/foo.png"
+                )
+            ]
+        )
+        ctx = ExecutionContext(
+            request=request,
+            request_id="r1",
+            session_id="sess-abc",
+            execution=execution,
+            container=SimpleNamespace(),
+        )
+
+        refs = await orchestrator._handle_generated_files(ctx)
+
+        assert len(refs) == 1
+        assert refs[0].name == "charts/foo.png"
+        # Storage call uses the same nested path as the FileRef name.
+        mock_file_service.store_execution_output_file.assert_awaited_once()
+        args = mock_file_service.store_execution_output_file.call_args
+        assert args.args[1] == "charts/foo.png"
+
+    async def test_top_level_path_unchanged(self, orchestrator, mock_file_service):
+        from src.models.exec import ExecRequest
+        from types import SimpleNamespace
+        from src.models import OutputType
+
+        orchestrator._get_file_from_container = AsyncMock(return_value=b"data")
+        mock_file_service.store_execution_output_file = AsyncMock(return_value="fid")
+
+        execution = SimpleNamespace(
+            outputs=[SimpleNamespace(type=OutputType.FILE, content="/mnt/data/foo.png")]
+        )
+        ctx = ExecutionContext(
+            request=ExecRequest(code="print()", lang="py"),
+            request_id="r1",
+            session_id="s",
+            execution=execution,
+            container=SimpleNamespace(),
+        )
+
+        refs = await orchestrator._handle_generated_files(ctx)
+
+        assert len(refs) == 1
+        assert refs[0].name == "foo.png"
+
+    async def test_hidden_basename_skipped(self, orchestrator, mock_file_service):
+        from src.models.exec import ExecRequest
+        from types import SimpleNamespace
+        from src.models import OutputType
+
+        orchestrator._get_file_from_container = AsyncMock(return_value=b"data")
+        mock_file_service.store_execution_output_file = AsyncMock(return_value="fid")
+
+        # Subdirectory is fine, but file basename starts with `.` -> skip.
+        execution = SimpleNamespace(
+            outputs=[
+                SimpleNamespace(
+                    type=OutputType.FILE, content="/mnt/data/charts/.hidden.png"
+                )
+            ]
+        )
+        ctx = ExecutionContext(
+            request=ExecRequest(code="print()", lang="py"),
+            request_id="r1",
+            session_id="s",
+            execution=execution,
+            container=SimpleNamespace(),
+        )
+
+        refs = await orchestrator._handle_generated_files(ctx)
+        assert refs == []

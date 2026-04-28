@@ -1733,9 +1733,7 @@ class TestLibreChatProgrammaticToolCalling:
             session_id="ptc-tool-session",
             continuation_token="cont-token-xyz",
             tool_calls=[
-                PTCToolCall(
-                    id="call-abc", name="get_weather", input={"city": "NYC"}
-                ),
+                PTCToolCall(id="call-abc", name="get_weather", input={"city": "NYC"}),
             ],
             stdout="",
             stderr="",
@@ -1876,3 +1874,238 @@ class TestLibreChatProgrammaticToolCalling:
         # Response should be valid regardless of tool error
         assert data["status"] in ("completed", "error")
         mock_service.continue_execution.assert_called_once()
+
+
+# =============================================================================
+# /upload/batch — multi-file uploads (LibreChat skill priming flow)
+# =============================================================================
+
+
+class TestLibreChatUploadBatch:
+    """Tests for POST /upload/batch.
+
+    LibreChat's `crud.js:118` posts repeated `file` fields plus optional
+    `entity_id`. The response must include `succeeded`/`failed` counts and
+    per-file `status` so LibreChat's caller can distinguish hard failures
+    from partial successes (`crud.js:146-172`).
+
+    Filenames may include subdirectories — the agents library uploads skill
+    bundles like `skills/foo/SKILL.md` and verifies on the response with
+    `f.filename.endsWith('/SKILL.md')` (`packages/api/src/agents/skillFiles.ts:160`).
+    """
+
+    @pytest.fixture(autouse=True)
+    def setup_mocks(self):
+        # Track which filenames were stored to verify nested-path preservation
+        # without re-implementing storage in the mock.
+        stored_filenames = []
+
+        async def fake_store(
+            session_id, filename, content, content_type, is_agent_file
+        ):
+            stored_filenames.append(filename)
+            return f"fid-{len(stored_filenames)}"
+
+        mock_file_service = AsyncMock()
+        mock_file_service.store_uploaded_file = AsyncMock(side_effect=fake_store)
+
+        mock_session_service = AsyncMock()
+        mock_session_service.create_session.return_value = Session(
+            session_id="batch-session-456",
+            status=SessionStatus.ACTIVE,
+            created_at=datetime.now(timezone.utc),
+            last_activity=datetime.now(timezone.utc),
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
+            metadata={},
+        )
+
+        from src.dependencies.services import get_file_service, get_session_service
+
+        app.dependency_overrides[get_file_service] = lambda: mock_file_service
+        app.dependency_overrides[get_session_service] = lambda: mock_session_service
+
+        yield {"stored": stored_filenames, "file_service": mock_file_service}
+
+        app.dependency_overrides.clear()
+
+    def test_response_shape_matches_librechat_contract(self, client, auth_headers):
+        files = [
+            ("file", ("a.txt", io.BytesIO(b"alpha"), "text/plain")),
+            ("file", ("b.txt", io.BytesIO(b"bravo"), "text/plain")),
+        ]
+        response = client.post("/upload/batch", files=files, headers=auth_headers)
+
+        assert response.status_code == 200
+        result = response.json()
+        # All five top-level keys present (LibreChat reads each one)
+        for key in ("message", "session_id", "files", "succeeded", "failed"):
+            assert key in result, f"Missing required key: {key}"
+        assert result["message"] == "success"
+        assert result["succeeded"] == 2
+        assert result["failed"] == 0
+        for entry in result["files"]:
+            # Per-file shape: status, fileId (success only), filename
+            assert entry["status"] == "success"
+            assert "fileId" in entry
+            assert "filename" in entry
+
+    def test_partial_failure_reports_per_file_errors(
+        self, client, auth_headers, setup_mocks
+    ):
+        # `.exe` is not in allowed_file_extensions -> per-file error.
+        files = [
+            ("file", ("good.txt", io.BytesIO(b"ok"), "text/plain")),
+            ("file", ("bad.exe", io.BytesIO(b"\x00"), "application/octet-stream")),
+        ]
+        response = client.post("/upload/batch", files=files, headers=auth_headers)
+
+        assert response.status_code == 200
+        result = response.json()
+        assert result["message"] == "partial"
+        assert result["succeeded"] == 1
+        assert result["failed"] == 1
+
+        statuses = {f["filename"]: f for f in result["files"]}
+        assert statuses["good.txt"]["status"] == "success"
+        assert statuses["bad.exe"]["status"] == "error"
+        assert "error" in statuses["bad.exe"]
+
+    def test_all_failures_report_message_error(self, client, auth_headers):
+        # All files have disallowed extensions
+        files = [
+            ("file", ("bad1.exe", io.BytesIO(b"x"), "application/octet-stream")),
+            ("file", ("bad2.dll", io.BytesIO(b"y"), "application/octet-stream")),
+        ]
+        response = client.post("/upload/batch", files=files, headers=auth_headers)
+
+        assert response.status_code == 200
+        result = response.json()
+        # LibreChat throws if message=='error' (crud.js:158)
+        assert result["message"] == "error"
+        assert result["succeeded"] == 0
+        assert result["failed"] == 2
+
+    def test_empty_batch_returns_422(self, client, auth_headers):
+        response = client.post("/upload/batch", headers=auth_headers)
+        assert response.status_code == 422
+
+    def test_files_field_name_must_be_singular(self, client, auth_headers):
+        # The repeated 'files' (plural) field name is not what LibreChat uses;
+        # we should treat it as missing and 422.
+        files = [("files", ("a.txt", io.BytesIO(b"x"), "text/plain"))]
+        response = client.post("/upload/batch", files=files, headers=auth_headers)
+        assert response.status_code == 422
+
+    def test_entity_id_marks_files_as_agent(self, client, auth_headers, setup_mocks):
+        files = [("file", ("doc.txt", io.BytesIO(b"hi"), "text/plain"))]
+        data = {"entity_id": "asst_skill_123"}
+        response = client.post(
+            "/upload/batch", files=files, data=data, headers=auth_headers
+        )
+
+        assert response.status_code == 200
+        # Verify is_agent_file=True was passed through
+        store = setup_mocks["file_service"].store_uploaded_file
+        assert store.await_count == 1
+        kwargs = store.await_args.kwargs
+        assert kwargs["is_agent_file"] is True
+
+    def test_nested_filename_preserved_in_response(
+        self, client, auth_headers, setup_mocks
+    ):
+        # LibreChat skill priming sends `skills/<skill>/SKILL.md`.
+        files = [
+            (
+                "file",
+                (
+                    "skills/weather_lookup/SKILL.md",
+                    io.BytesIO(b"# Weather skill"),
+                    "text/markdown",
+                ),
+            )
+        ]
+        response = client.post("/upload/batch", files=files, headers=auth_headers)
+
+        assert response.status_code == 200
+        result = response.json()
+        assert result["files"][0]["filename"] == "skills/weather_lookup/SKILL.md"
+        # The stored filename also preserves the path so MinIO/sandbox round-trip works.
+        assert "skills/weather_lookup/SKILL.md" in setup_mocks["stored"]
+
+
+# =============================================================================
+# GET /sessions/{session_id}/objects/{file_id} — liveness probe
+# =============================================================================
+
+
+class TestLibreChatSessionObjectMetadata:
+    """LibreChat's `process.js:363` reads `lastModified` to decide whether
+    a session is still valid (>23h old means re-upload). Format matches the
+    `?detail=summary` listing: ISO 8601 with `Z` and millisecond precision."""
+
+    @pytest.fixture(autouse=True)
+    def setup_mocks(self):
+        from src.dependencies.services import get_file_service
+
+        self.mock = AsyncMock()
+        app.dependency_overrides[get_file_service] = lambda: self.mock
+        yield
+        app.dependency_overrides.clear()
+
+    def test_returns_lastmodified_with_z_suffix(self, client, auth_headers):
+        self.mock.get_file_info.return_value = FileInfo(
+            file_id="fid-1",
+            filename="data.csv",
+            size=12,
+            content_type="text/csv",
+            created_at=datetime(2026, 4, 22, 9, 17, 6, tzinfo=timezone.utc),
+            path="/data/data.csv",
+        )
+        response = client.get("/sessions/sess-1/objects/fid-1", headers=auth_headers)
+        assert response.status_code == 200
+        body = response.json()
+        assert set(body.keys()) == {"lastModified"}
+        assert body["lastModified"].endswith("Z")
+        # Parseable by JS `new Date(...)` => parseable by Python's ISO parser too
+        assert "2026-04-22" in body["lastModified"]
+
+    def test_naive_datetime_normalized_to_utc(self, client, auth_headers):
+        self.mock.get_file_info.return_value = FileInfo(
+            file_id="fid-2",
+            filename="x.txt",
+            size=1,
+            content_type="text/plain",
+            created_at=datetime(2026, 1, 15, 12, 0, 0),  # naive
+            path="/data/x.txt",
+        )
+        response = client.get("/sessions/sess-1/objects/fid-2", headers=auth_headers)
+        assert response.status_code == 200
+        assert response.json()["lastModified"].endswith("Z")
+
+    def test_missing_file_returns_404(self, client, auth_headers):
+        self.mock.get_file_info.return_value = None
+        response = client.get("/sessions/sess-1/objects/missing", headers=auth_headers)
+        # LibreChat catches and re-uploads on 404 -> the desired fallback.
+        assert response.status_code == 404
+
+    def test_lastmodified_matches_summary_endpoint(self, client, auth_headers):
+        """Same FileInfo => same lastModified value across both endpoints
+        (so LibreChat's two read paths agree about session age)."""
+        file_info = FileInfo(
+            file_id="fid-3",
+            filename="y.txt",
+            size=2,
+            content_type="text/plain",
+            created_at=datetime(2026, 3, 14, 9, 26, 53, tzinfo=timezone.utc),
+            path="/data/y.txt",
+        )
+        # Both endpoints share the same get_file_info / list_files-derived value
+        self.mock.get_file_info.return_value = file_info
+        self.mock.list_files.return_value = [file_info]
+
+        obj_resp = client.get("/sessions/sess-1/objects/fid-3", headers=auth_headers)
+        list_resp = client.get("/files/sess-1?detail=summary", headers=auth_headers)
+
+        obj_modified = obj_resp.json()["lastModified"]
+        list_modified = list_resp.json()[0]["lastModified"]
+        assert obj_modified == list_modified

@@ -7,18 +7,14 @@ class TestPTCInitialExecution:
     """Test POST /exec/programmatic with initial code execution."""
 
     @pytest.mark.asyncio
-    async def test_ptc_simple_code_completes(
-        self, async_client, auth_headers
-    ):
+    async def test_ptc_simple_code_completes(self, async_client, auth_headers):
         """PTC request with code that doesn't call any tools completes immediately."""
         response = await async_client.post(
             "/exec/programmatic",
             headers=auth_headers,
             json={
                 "code": "print('hello from ptc')",
-                "tools": [
-                    {"name": "unused_tool", "description": "Not called"}
-                ],
+                "tools": [{"name": "unused_tool", "description": "Not called"}],
             },
         )
 
@@ -29,9 +25,7 @@ class TestPTCInitialExecution:
         assert "hello from ptc" in data["stdout"]
 
     @pytest.mark.asyncio
-    async def test_ptc_response_has_all_fields(
-        self, async_client, auth_headers
-    ):
+    async def test_ptc_response_has_all_fields(self, async_client, auth_headers):
         """PTC response includes all expected fields."""
         response = await async_client.post(
             "/exec/programmatic",
@@ -54,9 +48,7 @@ class TestPTCInitialExecution:
         assert "error" in data
 
     @pytest.mark.asyncio
-    async def test_ptc_no_code_returns_error(
-        self, async_client, auth_headers
-    ):
+    async def test_ptc_no_code_returns_error(self, async_client, auth_headers):
         """PTC request without code or continuation_token returns error."""
         response = await async_client.post(
             "/exec/programmatic",
@@ -70,18 +62,14 @@ class TestPTCInitialExecution:
         assert data["error"] is not None
 
     @pytest.mark.asyncio
-    async def test_ptc_timeout_uses_milliseconds(
-        self, async_client, auth_headers
-    ):
+    async def test_ptc_timeout_uses_milliseconds(self, async_client, auth_headers):
         """A 1000ms timeout should behave like a 1 second execution budget."""
         response = await async_client.post(
             "/exec/programmatic",
             headers=auth_headers,
             json={
                 "code": (
-                    "import time\n"
-                    "time.sleep(5)\n"
-                    "print('should not complete')"
+                    "import time\n" "time.sleep(5)\n" "print('should not complete')"
                 ),
                 "tools": [],
                 "timeout": 1000,
@@ -140,19 +128,14 @@ class TestPTCToolCallFlow:
     """Test the full PTC tool call round-trip: code calls tool, we supply result."""
 
     @pytest.mark.asyncio
-    async def test_ptc_tool_call_and_continuation(
-        self, async_client, auth_headers
-    ):
+    async def test_ptc_tool_call_and_continuation(self, async_client, auth_headers):
         """Full PTC round-trip: code calls a tool, receives result, completes."""
         # Step 1: Send code that calls a tool
         initial_response = await async_client.post(
             "/exec/programmatic",
             headers=auth_headers,
             json={
-                "code": (
-                    "result = await get_number()\n"
-                    "print(f'got: {result}')"
-                ),
+                "code": ("result = await get_number()\n" "print(f'got: {result}')"),
                 "tools": [
                     {
                         "name": "get_number",
@@ -199,18 +182,13 @@ class TestPTCToolCallFlow:
         assert "got: 42" in result["stdout"]
 
     @pytest.mark.asyncio
-    async def test_ptc_tool_with_arguments(
-        self, async_client, auth_headers
-    ):
+    async def test_ptc_tool_with_arguments(self, async_client, auth_headers):
         """Tool call passes arguments correctly."""
         initial = await async_client.post(
             "/exec/programmatic",
             headers=auth_headers,
             json={
-                "code": (
-                    "result = await add(a=3, b=7)\n"
-                    "print(f'sum={result}')"
-                ),
+                "code": ("result = await add(a=3, b=7)\n" "print(f'sum={result}')"),
                 "tools": [
                     {
                         "name": "add",
@@ -258,9 +236,7 @@ class TestPTCToolCallFlow:
         assert "sum=10" in result["stdout"]
 
     @pytest.mark.asyncio
-    async def test_ptc_tool_error_result(
-        self, async_client, auth_headers
-    ):
+    async def test_ptc_tool_error_result(self, async_client, auth_headers):
         """Tool result with is_error=true is handled by the code."""
         initial = await async_client.post(
             "/exec/programmatic",
@@ -273,9 +249,7 @@ class TestPTCToolCallFlow:
                     "except Exception as e:\n"
                     "    print(f'caught: {e}')"
                 ),
-                "tools": [
-                    {"name": "failing_tool", "description": "Will fail"}
-                ],
+                "tools": [{"name": "failing_tool", "description": "Will fail"}],
             },
         )
 
@@ -311,18 +285,14 @@ class TestPTCInvalidToken:
     """Test PTC continuation with invalid/expired tokens."""
 
     @pytest.mark.asyncio
-    async def test_ptc_invalid_continuation_token(
-        self, async_client, auth_headers
-    ):
+    async def test_ptc_invalid_continuation_token(self, async_client, auth_headers):
         """Invalid continuation token returns error status."""
         response = await async_client.post(
             "/exec/programmatic",
             headers=auth_headers,
             json={
                 "continuation_token": "nonexistent-token-xyz",
-                "tool_results": [
-                    {"call_id": "fake-call", "result": "data"}
-                ],
+                "tool_results": [{"call_id": "fake-call", "result": "data"}],
             },
         )
 

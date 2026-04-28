@@ -165,21 +165,50 @@ class SandboxManager:
         Args:
             sandbox_info: Target sandbox
             content: File content as bytes
-            dest_path: Destination path (e.g., /mnt/data/file.py or file.py)
+            dest_path: Destination path. May be absolute (`/mnt/data/foo.py`,
+                `/mnt/data/skills/foo/SKILL.md`) or relative (`foo.py`).
+                Subdirectories under `/mnt/data/` are preserved; their parent
+                directories are created and chowned to the language uid.
             language: Programming language (used to set correct ownership)
 
         Returns:
             True if successful, False otherwise
         """
         try:
-            # Extract filename from dest_path (may be absolute like /mnt/data/file.py)
-            filename = Path(dest_path).name
-            file_path = sandbox_info.data_dir / filename
+            user_id = get_user_id_for_language(language.lower().strip())
+
+            # Strip the bind-mount prefix so the remainder maps cleanly under
+            # data_dir; relative paths fall through unchanged.
+            relative = dest_path
+            if relative.startswith("/mnt/data/"):
+                relative = relative[len("/mnt/data/") :]
+            elif relative == "/mnt/data":
+                relative = ""
+
+            # Use Path semantics to drop empty components but otherwise keep
+            # subdirectories. This is the one place we accept paths with `/`
+            # because the caller already controls them.
+            relative_path = Path(relative)
+            file_path = sandbox_info.data_dir / relative_path
+
+            parent = file_path.parent
+            if parent != sandbox_info.data_dir and parent.is_relative_to(
+                sandbox_info.data_dir
+            ):
+                parent.mkdir(parents=True, exist_ok=True)
+                # Chown each ancestor we may have created so the sandbox uid
+                # can traverse into the subdirectory.
+                for ancestor in [parent, *parent.parents]:
+                    if ancestor == sandbox_info.data_dir:
+                        break
+                    try:
+                        os.chown(str(ancestor), user_id, user_id)
+                        os.chmod(str(ancestor), 0o755)
+                    except (PermissionError, FileNotFoundError):
+                        pass
 
             file_path.write_bytes(content)
 
-            # Set ownership to language-specific user
-            user_id = get_user_id_for_language(language.lower().strip())
             os.chown(str(file_path), user_id, user_id)
             os.chmod(str(file_path), 0o644)
 

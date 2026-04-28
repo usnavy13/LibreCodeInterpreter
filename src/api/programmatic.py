@@ -107,6 +107,7 @@ async def execute_programmatic(
         "PTC execution request",
         request_id=request_id,
         session_id=session_id[:12],
+        lang=request.lang,
         code_length=len(request.code),
         tools_count=len(request.tools),
     )
@@ -117,6 +118,7 @@ async def execute_programmatic(
         session_id=session_id,
         timeout=_timeout_ms_to_seconds(request.timeout),
         files=request.files,
+        lang=request.lang,
     )
 
     # Ensure session_id is set in response
