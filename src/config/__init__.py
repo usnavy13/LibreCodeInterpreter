@@ -184,7 +184,12 @@ class Settings(BaseSettings):
 
     # Resource Limits - Files
     max_file_size_mb: int = Field(default=100, ge=1, le=500)
-    max_files_per_session: int = Field(default=50, ge=1, le=200)
+    # Default sized for skill bundles — Anthropic's pptx skill has 58 files
+    # (incl. ECMA XSD schemas under scripts/office/schemas/), docx and xlsx
+    # are similar. Legacy default of 50 caused 413s during /upload/batch
+    # priming. Ceiling raised to 1000 to leave headroom for multi-skill
+    # agents and future bundles.
+    max_files_per_session: int = Field(default=300, ge=1, le=1000)
     max_output_files: int = Field(default=10, ge=1, le=50)
     max_filename_length: int = Field(default=255, ge=1, le=255)
 

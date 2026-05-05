@@ -266,7 +266,15 @@ async def upload_files_batch(
             size = len(content)
             if size > max_size_bytes:
                 raise ValueError(f"File exceeds {settings.max_file_size_mb}MB limit")
-            if not settings.is_file_allowed(original_filename):
+            # Skill-priming uploads (entity_id set) come from the LibreChat host
+            # itself, not end users. Skill bundles legitimately ship arbitrary
+            # extensions (.xsd schemas, .toml configs, .lock files, .d.ts type
+            # defs, etc.) — extending the user-facing allowlist for every new
+            # skill is unsustainable. The sandbox is the actual security
+            # boundary; extension filtering exists to stop end-user uploads
+            # of executables via /upload, not to second-guess the LibreChat
+            # host's skill loader. Skip the extension check for the agent path.
+            if not is_agent_file and not settings.is_file_allowed(original_filename):
                 raise ValueError(f"File type not allowed: {original_filename}")
 
             # Preserve subdirectory structure (LibreChat skill bundles ship
