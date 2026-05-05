@@ -175,6 +175,9 @@ class ProgrammaticService:
                 command=shell_command,
                 language=sandbox_language,
                 timeout=execution_timeout,
+                # Honor ENABLE_SANDBOX_NETWORK so PTC sandboxes can also
+                # reach the inline egress proxy for skill installs.
+                network=bool(settings.enable_sandbox_network),
                 env=env,
             )
 

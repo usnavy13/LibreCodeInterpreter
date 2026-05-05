@@ -7,6 +7,10 @@ services:
     init: true
     cap_add:
       - SYS_ADMIN
+      # NET_ADMIN required to install iptables egress rules for sandbox uid
+      # when ENABLE_SANDBOX_NETWORK=true. Restricts sandbox traffic to the
+      # inline allowlist proxy and prevents SSRF to Redis/MinIO/etc.
+      - NET_ADMIN
     security_opt:
       - apparmor:unconfined
     ports:
@@ -18,6 +22,10 @@ services:
       - MINIO_ENDPOINT=minio:9000
     volumes:
       - sandbox-data:/var/lib/code-interpreter/sandboxes
+      # Persistent skill-deps cache: pip/npm/go/cargo install here when
+      # ENABLE_SANDBOX_NETWORK=true so future executions reuse the install.
+      # Survives container restarts; purge with POST /api/v1/admin/skill-deps/purge.
+      - skill-deps:/opt/skill-deps
       # SSL_CERTS_PATH is a host path; SSL_CERT_FILE and SSL_KEY_FILE must point
       # to the mounted files inside the container under /app/ssl.
       - ${SSL_CERTS_PATH:-./ssl}:/app/ssl:ro
@@ -92,5 +100,6 @@ services:
 
 volumes:
   sandbox-data:
+  skill-deps:
   redis-data:
   minio-data:

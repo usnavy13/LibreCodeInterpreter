@@ -1,0 +1,4 @@
+services:
+  api:
+    image: code-interpreter:nsjail-librechat-compat
+    pull_policy: never

@@ -37,6 +37,9 @@ def _sandbox_info(tmp_path: Path):
         sandbox_id="test-sandbox-id",
         data_dir=data_dir,
         repl_mode=False,
+        # _detect_generated_files reads this to skip unchanged mounted files
+        # and surface in-place edits. Empty for tests that don't exercise mounts.
+        mounted_file_stats={},
     )
 
 
@@ -116,6 +119,158 @@ class TestDetectGeneratedFilesRecursive:
 
         # First two after sorting alphabetically
         assert [f["path"] for f in files] == ["/mnt/data/a.txt", "/mnt/data/b.txt"]
+
+    async def test_skips_node_modules(self, runner, tmp_path):
+        """A user file at the top level should be detected; the entire
+        node_modules tree (which can contain tens of thousands of files
+        from one `npm install`) should be ignored entirely."""
+        info = _sandbox_info(tmp_path)
+        (info.data_dir / "user_output.png").write_bytes(b"x")
+        nm = info.data_dir / "node_modules"
+        nm.mkdir()
+        (nm / "package1").mkdir()
+        (nm / "package1" / "index.js").write_bytes(b"// pkg")
+        (nm / "package1" / "README.md").write_bytes(b"# readme")
+        (nm / "package2").mkdir()
+        (nm / "package2" / "index.js").write_bytes(b"// pkg2")
+
+        files = await runner._detect_generated_files(info)
+        paths = [f["path"] for f in files]
+
+        assert "/mnt/data/user_output.png" in paths
+        assert all("node_modules" not in p for p in paths), paths
+
+    async def test_skips_pycache_and_other_dep_dirs(self, runner, tmp_path):
+        info = _sandbox_info(tmp_path)
+        (info.data_dir / "report.csv").write_bytes(b"data")
+        for skip in ("__pycache__", ".venv", "target", "dist", "build"):
+            d = info.data_dir / skip
+            d.mkdir()
+            (d / "junk.bin").write_bytes(b"x" * 100)
+
+        files = await runner._detect_generated_files(info)
+        paths = [f["path"] for f in files]
+
+        assert paths == ["/mnt/data/report.csv"]
+
+    async def test_includes_user_subdirs_that_arent_dep_caches(self, runner, tmp_path):
+        """Don't over-exclude — `charts/`, `data/`, etc. are user content."""
+        info = _sandbox_info(tmp_path)
+        (info.data_dir / "charts").mkdir()
+        (info.data_dir / "charts" / "out.png").write_bytes(b"png")
+        (info.data_dir / "data").mkdir()
+        (info.data_dir / "data" / "rows.csv").write_bytes(b"csv")
+
+        files = await runner._detect_generated_files(info)
+        paths = sorted(f["path"] for f in files)
+
+        assert paths == [
+            "/mnt/data/charts/out.png",
+            "/mnt/data/data/rows.csv",
+        ]
+
+
+class TestDetectGeneratedFilesInPlaceEdits:
+    """The mtime/size snapshot stored in `sandbox_info.mounted_file_stats`
+    drives whether a mounted file gets surfaced as a generated file. This
+    is the iteration-killer fix: edits to mounted scripts must produce a
+    new file_id so LibreChat tracks the edit on its next call."""
+
+    async def test_unchanged_mounted_file_is_skipped(self, runner, tmp_path):
+        info = _sandbox_info(tmp_path)
+        f = info.data_dir / "demo_deck.js"
+        f.write_bytes(b"// v1 content\n")
+        st = os.stat(f)
+        info.mounted_file_stats = {"demo_deck.js": (st.st_mtime_ns, st.st_size)}
+
+        files = await runner._detect_generated_files(info)
+        paths = [f["path"] for f in files]
+
+        # No edit happened -> the mounted file is not surfaced.
+        assert paths == []
+
+    async def test_edited_mounted_file_is_surfaced(self, runner, tmp_path):
+        info = _sandbox_info(tmp_path)
+        f = info.data_dir / "demo_deck.js"
+        f.write_bytes(b"// v1 content\n")
+        st = os.stat(f)
+        info.mounted_file_stats = {"demo_deck.js": (st.st_mtime_ns, st.st_size)}
+
+        # Simulate user code editing the file in place. Touching mtime is
+        # enough since size also changes here, but we'd want to detect either.
+        import time
+
+        time.sleep(0.01)  # ensure mtime_ns advances on coarse-grained FS
+        f.write_bytes(b"// v2 content with extra bytes\n")
+
+        files = await runner._detect_generated_files(info)
+        paths = [f["path"] for f in files]
+
+        # Edited mounted file is now surfaced as a generated file.
+        # Orchestrator will create a new file_id for it.
+        assert paths == ["/mnt/data/demo_deck.js"]
+
+    async def test_size_change_is_detected_even_if_mtime_unchanged(
+        self, runner, tmp_path
+    ):
+        """Defensive: if mtime is somehow preserved but size differs,
+        treat as edited."""
+        info = _sandbox_info(tmp_path)
+        f = info.data_dir / "report.csv"
+        f.write_bytes(b"col1\n")
+        st = os.stat(f)
+        # Pretend the prior snapshot had a different size at the same mtime.
+        info.mounted_file_stats = {"report.csv": (st.st_mtime_ns, st.st_size + 100)}
+
+        files = await runner._detect_generated_files(info)
+        paths = [f["path"] for f in files]
+
+        assert paths == ["/mnt/data/report.csv"]
+
+    async def test_nested_mounted_file_edit_is_surfaced(self, runner, tmp_path):
+        """Mounted file at a nested path (e.g. skills/foo/SKILL.md) — edit
+        detection must work whether the snapshot key is the rel path or the
+        basename."""
+        info = _sandbox_info(tmp_path)
+        sub = info.data_dir / "skills" / "weather"
+        sub.mkdir(parents=True)
+        f = sub / "SKILL.md"
+        f.write_bytes(b"# v1\n")
+        st = os.stat(f)
+        info.mounted_file_stats = {
+            "skills/weather/SKILL.md": (st.st_mtime_ns, st.st_size),
+            "SKILL.md": (st.st_mtime_ns, st.st_size),
+        }
+
+        # No change: skipped.
+        assert await runner._detect_generated_files(info) == []
+
+        # Edit: surfaced.
+        import time
+
+        time.sleep(0.01)
+        f.write_bytes(b"# v2 content edited\n")
+        files = await runner._detect_generated_files(info)
+        paths = [f["path"] for f in files]
+        assert paths == ["/mnt/data/skills/weather/SKILL.md"]
+
+    async def test_new_file_alongside_unchanged_mount(self, runner, tmp_path):
+        """A truly-new file is detected even when an unchanged mount sits
+        next to it."""
+        info = _sandbox_info(tmp_path)
+        existing = info.data_dir / "input.csv"
+        existing.write_bytes(b"data")
+        st = os.stat(existing)
+        info.mounted_file_stats = {"input.csv": (st.st_mtime_ns, st.st_size)}
+
+        # User code generates a new artifact.
+        (info.data_dir / "output.png").write_bytes(b"png")
+
+        files = await runner._detect_generated_files(info)
+        paths = sorted(f["path"] for f in files)
+
+        # Mounted file unchanged (skipped); new file surfaced.
+        assert paths == ["/mnt/data/output.png"]
 
 
 class TestMountFilesNestedPaths:

@@ -101,6 +101,38 @@ class Settings(BaseSettings):
         ),
     )
 
+    # Sandbox egress (skill installs)
+    enable_sandbox_network: bool = Field(
+        default=False,
+        description=(
+            "Allow sandboxes to reach the internet via an inline allowlist proxy. "
+            "Required for skills that pip/npm/go/cargo install dependencies at "
+            "runtime. Outbound traffic is restricted to package registries; "
+            "everything else is refused."
+        ),
+    )
+    sandbox_egress_port: int = Field(
+        default=18443,
+        ge=1024,
+        le=65535,
+        description="Port the inline egress proxy binds to on 127.0.0.1.",
+    )
+    sandbox_egress_allowlist: Optional[str] = Field(
+        default=None,
+        description=(
+            "Comma-separated list of additional hostnames the egress proxy "
+            "permits. Defaults already cover PyPI, npm, Go modules, and crates.io."
+        ),
+    )
+    skill_deps_path: str = Field(
+        default="/opt/skill-deps",
+        description=(
+            "Host-side directory (mounted into every sandbox) that holds "
+            "user-installed skill dependencies. pip/npm/go/cargo are configured "
+            "to install here so the cache compounds across executions."
+        ),
+    )
+
     # Redis Configuration
     redis_host: str = Field(default="localhost")
     redis_port: int = Field(default=6379, ge=1, le=65535)

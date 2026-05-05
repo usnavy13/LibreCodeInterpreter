@@ -378,6 +378,9 @@ class SandboxPool:
                 command=["/usr/bin/python3", "/opt/repl_server.py"],
                 language="py",
                 repl_mode=True,
+                # Honor ENABLE_SANDBOX_NETWORK so pooled REPL sandboxes can
+                # also reach the inline egress proxy for skill installs.
+                network=bool(settings.enable_sandbox_network),
                 env=env,
             )
 

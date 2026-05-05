@@ -33,6 +33,12 @@ class SandboxInfo:
     created_at: datetime
     repl_mode: bool = False
     labels: Dict[str, str] = field(default_factory=dict)
+    # Snapshot of (mtime_ns, size) for each mounted file basename, captured
+    # right after _mount_files_to_sandbox writes the file but BEFORE user code
+    # runs. Used by _detect_generated_files to distinguish "user edited a
+    # mounted file in place" from "mounted file is unchanged" so iterative
+    # edits to scripts get persisted as new file_ids in the current session.
+    mounted_file_stats: Dict[str, tuple] = field(default_factory=dict)
 
     @property
     def id(self) -> str:
@@ -194,14 +200,19 @@ class NsjailConfig:
 
         # Seccomp policy: block dangerous syscalls
         # - ptrace: prevents process inspection/debugging (BUG-006a)
-        # - bind: prevents opening server sockets even with network access (BUG-006c)
+        # - bind: was originally blocked to prevent server sockets even with
+        #   network access (BUG-006c), but bash sandboxes need it for tools
+        #   like LibreOffice which use AF_UNIX sockets internally for IPC.
+        #   Bash has the looser sandboxing model (also gets /proc), so allow
+        #   bind there. For other languages, keep blocking.
         # Using ERRNO(1) so the process gets EPERM rather than SIGSYS
-        args.extend(
-            [
-                "--seccomp_string",
-                "POLICY policy { ERRNO(1) { ptrace, bind } } USE policy DEFAULT ALLOW",
-            ]
-        )
+        if normalized_lang == "bash":
+            seccomp_policy = "POLICY policy { ERRNO(1) { ptrace } } USE policy DEFAULT ALLOW"
+        else:
+            seccomp_policy = (
+                "POLICY policy { ERRNO(1) { ptrace, bind } } USE policy DEFAULT ALLOW"
+            )
+        args.extend(["--seccomp_string", seccomp_policy])
 
         # Working directory: /mnt/data (bind-mounted by the executor wrapper)
         args.extend(["--cwd", "/mnt/data"])

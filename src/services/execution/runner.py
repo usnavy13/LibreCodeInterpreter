@@ -238,14 +238,14 @@ class CodeExecutionRunner:
 
             generated_files = []
             if should_detect_files:
+                # _detect_generated_files now consults sandbox_info.mounted_file_stats
+                # internally to skip unchanged mounts and surface in-place edits as
+                # new generated files. The legacy _filter_generated_files blanket
+                # suppression was removed because it dropped real edits along with
+                # the noise.
                 generated_files = await self._detect_generated_files(sandbox_info)
 
-            mounted_filenames = self._get_mounted_filenames(files)
-            filtered_files = self._filter_generated_files(
-                generated_files, mounted_filenames
-            )
-
-            for file_info in filtered_files:
+            for file_info in generated_files:
                 if OutputProcessor.validate_generated_file(file_info):
                     outputs.append(
                         ExecutionOutput(
@@ -345,30 +345,6 @@ class CodeExecutionRunner:
             )
 
         return outputs
-
-    def _get_mounted_filenames(self, files: Optional[List[Dict[str, Any]]]) -> set:
-        """Get set of mounted filenames for filtering."""
-        mounted = set()
-        if files:
-            try:
-                for f in files:
-                    name = f.get("filename") or f.get("name")
-                    if name:
-                        mounted.add(name)
-                        mounted.add(OutputProcessor.sanitize_filename(name))
-            except Exception:
-                pass
-        return mounted
-
-    def _filter_generated_files(
-        self, generated: List[Dict[str, Any]], mounted_filenames: set
-    ) -> List[Dict[str, Any]]:
-        """Filter out mounted files from generated files list."""
-        return [
-            f
-            for f in generated
-            if Path(f.get("path", "")).name not in mounted_filenames
-        ]
 
     async def _create_fresh_sandbox(
         self, session_id: str, language: str
@@ -774,6 +750,20 @@ class CodeExecutionRunner:
                         actual_size = await asyncio.to_thread(
                             _set_file_perms, dest_path, user_id
                         )
+                        # Snapshot stats so _detect_generated_files can tell
+                        # later whether user code edited this file in place.
+                        # Key by both the original (possibly-nested) filename
+                        # and the normalized form, so lookup works regardless
+                        # of which form the post-walk uses.
+                        try:
+                            st = await asyncio.to_thread(os.stat, dest_path)
+                            stat_tuple = (st.st_mtime_ns, st.st_size)
+                            sandbox_info.mounted_file_stats[normalized_filename] = (
+                                stat_tuple
+                            )
+                            sandbox_info.mounted_file_stats[filename] = stat_tuple
+                        except OSError:
+                            pass
                         logger.debug(
                             "Mounted file",
                             filename=filename,
@@ -810,15 +800,55 @@ class CodeExecutionRunner:
         except Exception as e:
             logger.error(f"Failed to create placeholder file: {e}")
 
+    # Directory names we never descend into when scanning for generated
+    # artifacts. These are package-manager / build-tool caches: their contents
+    # aren't user-meaningful "artifacts" and they routinely contain tens of
+    # thousands of files which would (a) blow our max_output_files budget on
+    # noise and (b) get phantom-mounted into future executions, polluting the
+    # workspace. If a skill genuinely needs a file inside one of these dirs to
+    # round-trip, it should write a copy elsewhere in /mnt/data first.
+    _ARTIFACT_SCAN_SKIP_DIRS: frozenset = frozenset(
+        {
+            "node_modules",
+            "__pycache__",
+            ".git",
+            ".cache",
+            ".npm",
+            ".npm-cache",
+            ".venv",
+            "venv",
+            "env",
+            ".tox",
+            ".pytest_cache",
+            ".mypy_cache",
+            ".ruff_cache",
+            "target",  # Rust
+            "dist",
+            "build",
+            "vendor",  # Go vendor / PHP composer
+            ".bundle",
+            ".gradle",
+            ".m2",  # Maven
+            ".cargo",
+            "pkg",  # Go module cache mirror
+        }
+    )
+
     async def _detect_generated_files(
         self, sandbox_info: SandboxInfo
     ) -> List[Dict[str, Any]]:
-        """Detect files generated during execution.
+        """Detect files generated or modified during execution.
 
         Walks the sandbox data directory recursively so artifacts written to
         subdirectories (e.g. `/mnt/data/charts/foo.png`) are discoverable.
-        Hidden segments are skipped, and the per-execution output budget is
-        enforced after sorting for deterministic test results.
+        Hidden segments and known dependency-cache directories are skipped,
+        and the per-execution output budget is enforced after sorting for
+        deterministic test results.
+
+        For files that match a previously-mounted file by basename or relative
+        path: include them only if (mtime_ns, size) changed since mount —
+        i.e., user code edited them in place. Unchanged mounted files are
+        skipped to avoid re-uploading them on every execution.
         """
         try:
             data_dir = sandbox_info.data_dir
@@ -827,10 +857,17 @@ class CodeExecutionRunner:
 
             max_size_bytes = settings.max_file_size_mb * 1024 * 1024
             candidates: List[Dict[str, Any]] = []
+            skip_dirs = self._ARTIFACT_SCAN_SKIP_DIRS
+            mounted_stats = sandbox_info.mounted_file_stats or {}
 
             for root, dirs, files in os.walk(data_dir):
-                # Filter hidden directories in-place so os.walk doesn't descend.
-                dirs[:] = [d for d in dirs if not d.startswith(".")]
+                # Filter hidden + known-cache directories in-place so os.walk
+                # doesn't descend into them. This is the critical fix that
+                # keeps `npm install` / `pip install` from polluting the
+                # session with thousands of dependency files.
+                dirs[:] = [
+                    d for d in dirs if not d.startswith(".") and d not in skip_dirs
+                ]
 
                 for name in files:
                     # Skip hidden files and the source code we wrote in.
@@ -844,13 +881,26 @@ class CodeExecutionRunner:
                         continue
 
                     try:
-                        size = filepath.stat().st_size
+                        st = filepath.stat()
                     except OSError:
                         continue
+                    size = st.st_size
                     if size > max_size_bytes:
                         continue
 
                     rel = filepath.relative_to(data_dir).as_posix()
+
+                    # If this file was mounted, only surface it when content
+                    # changed during execution. We check both the relative path
+                    # and the basename — _mount_files_to_sandbox snapshots both
+                    # forms because we don't know which the caller originally
+                    # used (LibreChat sometimes ships nested filenames like
+                    # `skills/foo/SKILL.md`, sometimes flat).
+                    prior = mounted_stats.get(rel) or mounted_stats.get(name)
+                    if prior is not None:
+                        if prior == (st.st_mtime_ns, size):
+                            continue  # untouched mounted file
+
                     candidates.append(
                         {
                             "path": f"/mnt/data/{rel}",
