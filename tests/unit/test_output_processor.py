@@ -62,10 +62,61 @@ class TestSanitizeFilename:
         result = OutputProcessor.sanitize_filename("/absolute/path/file.txt")
         assert result == "file.txt"
 
-    def test_unicode_characters_replaced(self):
-        """Test that non-ASCII characters are replaced."""
+    def test_unicode_characters_preserved(self):
+        """Test that Unicode letters are preserved."""
         result = OutputProcessor.sanitize_filename("résumé.docx")
-        assert result == "r_sum_.docx"
+        assert result == "résumé.docx"
+
+    def test_cjk_characters_preserved(self):
+        """Test that CJK characters are preserved."""
+        result = OutputProcessor.sanitize_filename("日本語レポート.xlsx")
+        assert result == "日本語レポート.xlsx"
+
+    def test_cyrillic_characters_preserved(self):
+        """Test that Cyrillic characters are preserved."""
+        result = OutputProcessor.sanitize_filename("файл.txt")
+        assert result == "файл.txt"
+
+    def test_korean_characters_preserved(self):
+        """Test that Korean characters are preserved."""
+        result = OutputProcessor.sanitize_filename("보고서.xlsx")
+        assert result == "보고서.xlsx"
+
+    def test_arabic_characters_preserved(self):
+        """Test that Arabic characters are preserved."""
+        result = OutputProcessor.sanitize_filename("تقرير.pdf")
+        assert result == "تقرير.pdf"
+
+    def test_mixed_unicode_and_ascii(self):
+        """Test mixed Unicode and ASCII filename."""
+        result = OutputProcessor.sanitize_filename("report_2024_報告.pdf")
+        assert result == "report_2024_報告.pdf"
+
+    def test_unicode_with_spaces_sanitized(self):
+        """Test that spaces in Unicode filenames are still replaced."""
+        result = OutputProcessor.sanitize_filename("日本語 レポート.xlsx")
+        assert result == "日本語_レポート.xlsx"
+
+    def test_dangerous_chars_still_blocked(self):
+        """Test that shell metacharacters are still replaced."""
+        result = OutputProcessor.sanitize_filename("file<>|&;$().txt")
+        assert result == "file________.txt"
+
+    def test_underscores_preserved(self):
+        """Test that underscores are preserved."""
+        result = OutputProcessor.sanitize_filename("my_file_name.txt")
+        assert result == "my_file_name.txt"
+
+    def test_emoji_preserved(self):
+        """Test that emoji are preserved (matches LibreChat's \\p{Emoji})."""
+        result = OutputProcessor.sanitize_filename("chart\U0001F4CA.csv")
+        assert result == "chart\U0001F4CA.csv"
+
+    def test_nfd_normalized_to_nfc(self):
+        """Test that decomposed Unicode is NFC-normalized before sanitizing."""
+        # e + combining acute (U+0301) -> precomposed e-acute
+        result = OutputProcessor.sanitize_filename("Café.txt")
+        assert result == "Café.txt"
 
     def test_brackets_replaced(self):
         """Test that brackets are replaced with underscores."""
@@ -167,6 +218,13 @@ class TestSanitizeRelativePath:
         assert (
             OutputProcessor.sanitize_relative_path("skills/foo/SKILL.md")
             == "skills/foo/SKILL.md"
+        )
+
+    def test_unicode_segments_preserved(self):
+        """Test that Unicode directory and file names are preserved."""
+        assert (
+            OutputProcessor.sanitize_relative_path("報告/2024年/レポート.xlsx")
+            == "報告/2024年/レポート.xlsx"
         )
 
     def test_sanitize_filename_unchanged_for_basename_callers(self):

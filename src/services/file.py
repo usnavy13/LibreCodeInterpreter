@@ -360,6 +360,7 @@ class FileService(FileServiceInterface):
             content_type=metadata["content_type"],
             created_at=metadata["created_at"],
             path=metadata["path"],
+            original_filename=metadata.get("original_filename"),
         )
 
     async def list_files(self, session_id: str) -> List[FileInfo]:
@@ -419,6 +420,9 @@ class FileService(FileServiceInterface):
             "source_session_id": source_session_id,
             "source_file_id": source_file_id,
             "is_read_only": "1",
+            "original_filename": source_metadata.get(
+                "original_filename", source_metadata["filename"]
+            ),
         }
 
         await self._store_file_metadata(target_session_id, linked_file_id, metadata)
@@ -444,6 +448,7 @@ class FileService(FileServiceInterface):
             content_type=metadata["content_type"],
             created_at=datetime.fromisoformat(metadata["created_at"]),
             path=metadata["path"],
+            original_filename=metadata.get("original_filename"),
         )
 
     async def download_file(self, session_id: str, file_id: str) -> Optional[str]:
@@ -771,16 +776,18 @@ class FileService(FileServiceInterface):
         content_type: Optional[str] = None,
         is_agent_file: bool = False,
         is_read_only: bool = False,
+        original_filename: Optional[str] = None,
     ) -> str:
         """Store an uploaded file directly.
 
         Args:
             session_id: Session identifier
-            filename: Original filename
+            filename: Sanitized filename used for storage and sandbox mounting
             content: File content as bytes
             content_type: MIME type of the file
             is_agent_file: If True, marks the file as read-only (agent-assigned)
             is_read_only: If True, mounted file should be chmod 444 in sandbox
+            original_filename: Pre-sanitization filename for metadata recovery
 
         Returns:
             The generated file_id
@@ -825,6 +832,7 @@ class FileService(FileServiceInterface):
                     "1" if is_agent_file else "0"
                 ),  # Read-only if agent file
                 "is_read_only": "1" if (is_read_only or is_agent_file) else "0",
+                "original_filename": original_filename or filename,
             }
 
             await self._store_file_metadata(session_id, file_id, metadata)
