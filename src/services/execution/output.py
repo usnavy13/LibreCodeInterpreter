@@ -3,6 +3,7 @@
 import os
 import re
 import secrets
+import unicodedata
 from pathlib import Path
 from typing import Any, Dict
 
@@ -213,14 +214,27 @@ class OutputProcessor:
 
         return f"Execution failed (exit code {exit_code}):\n{stderr_clean}"
 
+    # ASCII chars safe in filenames — matches LibreChat's ASCII_FILENAME_SAFE_PATTERN.
+    _ASCII_SAFE = re.compile(r"[a-zA-Z0-9._\-]")
+    # C1 control characters (U+0080–U+009F) — unsafe in filenames.
+    _C1_CONTROLS = re.compile(r"[\x80-\x9f]")
+
+    @classmethod
+    def _sanitize_char(cls, char: str) -> str:
+        """Replace unsafe ASCII; preserve Unicode letters, marks, numbers, and emoji."""
+        if ord(char) <= 0x7F:
+            return char if cls._ASCII_SAFE.match(char) else "_"
+        return "_" if cls._C1_CONTROLS.match(char) else char
+
     @classmethod
     def sanitize_filename(cls, input_name: str) -> str:
-        """Sanitize filename while preserving Unicode letters and digits.
+        """Sanitize filename while preserving Unicode letters, digits, and emoji.
 
-        Keeps word characters (\\w — letters, digits, underscore in all
-        scripts), dots, and dashes.  Replaces everything else (path
-        separators, control chars, shell metacharacters, quotes, etc.)
-        with underscores.
+        NFC-normalizes, then applies a two-pass approach matching
+        LibreChat's ``sanitizeFilenameSegment``: strict for ASCII
+        (only ``[a-zA-Z0-9._-]``), permissive for non-ASCII (keeps
+        Unicode letters, combining marks, numbers, emoji — blocks
+        only C1 control characters).
 
         Args:
             input_name: Original filename (may include path components)
@@ -235,9 +249,12 @@ class OutputProcessor:
             # Remove any directory components (path traversal prevention)
             name = os.path.basename(input_name)
 
-            # Replace dangerous characters while preserving Unicode letters/digits.
-            # \w matches [a-zA-Z0-9_] plus all Unicode letters and digits.
-            name = re.sub(r"[^\w.\-]", "_", name)
+            # NFC-normalize so decomposed sequences (e + U+0301) become
+            # precomposed (é) before the regex runs.
+            name = unicodedata.normalize("NFC", name)
+
+            # Two-pass sanitization: strict ASCII, permissive Unicode.
+            name = "".join(cls._sanitize_char(c) for c in name)
 
             # Ensure the name doesn't start with a dot (hidden file in Unix)
             if name.startswith(".") or name == "":

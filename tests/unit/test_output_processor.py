@@ -107,6 +107,17 @@ class TestSanitizeFilename:
         result = OutputProcessor.sanitize_filename("my_file_name.txt")
         assert result == "my_file_name.txt"
 
+    def test_emoji_preserved(self):
+        """Test that emoji are preserved (matches LibreChat's \\p{Emoji})."""
+        result = OutputProcessor.sanitize_filename("chart\U0001F4CA.csv")
+        assert result == "chart\U0001F4CA.csv"
+
+    def test_nfd_normalized_to_nfc(self):
+        """Test that decomposed Unicode is NFC-normalized before sanitizing."""
+        # e + combining acute (U+0301) -> precomposed e-acute
+        result = OutputProcessor.sanitize_filename("Café.txt")
+        assert result == "Café.txt"
+
     def test_brackets_replaced(self):
         """Test that brackets are replaced with underscores."""
         result = OutputProcessor.sanitize_filename("[brackets].txt")
