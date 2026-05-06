@@ -770,6 +770,7 @@ class FileService(FileServiceInterface):
         content: bytes,
         content_type: Optional[str] = None,
         is_agent_file: bool = False,
+        is_read_only: bool = False,
     ) -> str:
         """Store an uploaded file directly.
 
@@ -779,6 +780,7 @@ class FileService(FileServiceInterface):
             content: File content as bytes
             content_type: MIME type of the file
             is_agent_file: If True, marks the file as read-only (agent-assigned)
+            is_read_only: If True, mounted file should be chmod 444 in sandbox
 
         Returns:
             The generated file_id
@@ -822,6 +824,7 @@ class FileService(FileServiceInterface):
                 "is_agent_file": (
                     "1" if is_agent_file else "0"
                 ),  # Read-only if agent file
+                "is_read_only": "1" if (is_read_only or is_agent_file) else "0",
             }
 
             await self._store_file_metadata(session_id, file_id, metadata)

@@ -1,15 +1,23 @@
 """Admin API endpoints for dashboard."""
 
+import os
+import shutil
+from pathlib import Path
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta, timezone
+
+import structlog
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel, Field
 
+from ..config import settings
 from ..dependencies.auth import verify_master_key
 from ..services.api_key_manager import get_api_key_manager
 from ..services.metrics import metrics_service as unified_metrics
 from ..services.health import health_service
 from ..models.api_key import RateLimits as RateLimitsModel
+
+logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -201,4 +209,112 @@ async def get_admin_stats(
         },
         "period_hours": hours,
         "timestamp": now.isoformat(),
+    }
+
+
+@router.get("/skill-deps", summary="Inspect persistent skill-deps cache")
+async def get_skill_deps_status(_: str = Depends(verify_master_key)):
+    """Report on the persistent /opt/skill-deps cache.
+
+    Returns size and per-ecosystem subdirectory counts so operators can see
+    what's accumulated. Useful before deciding whether to purge.
+    """
+    deps_root = Path(settings.skill_deps_path)
+    if not deps_root.exists():
+        return {
+            "path": str(deps_root),
+            "exists": False,
+            "enabled": settings.enable_sandbox_network,
+            "total_bytes": 0,
+            "ecosystems": {},
+        }
+
+    def _dir_size(p: Path) -> int:
+        total = 0
+        for root, _dirs, files in os.walk(str(p)):
+            for f in files:
+                try:
+                    total += os.path.getsize(os.path.join(root, f))
+                except OSError:
+                    pass
+        return total
+
+    ecosystems: Dict[str, Dict[str, Any]] = {}
+    for sub in ("python", "node", "go", "cargo"):
+        sp = deps_root / sub
+        if sp.exists():
+            ecosystems[sub] = {
+                "exists": True,
+                "bytes": _dir_size(sp),
+            }
+        else:
+            ecosystems[sub] = {"exists": False, "bytes": 0}
+
+    return {
+        "path": str(deps_root),
+        "exists": True,
+        "enabled": settings.enable_sandbox_network,
+        "total_bytes": _dir_size(deps_root),
+        "ecosystems": ecosystems,
+    }
+
+
+@router.post("/skill-deps/purge", summary="Wipe the persistent skill-deps cache")
+async def purge_skill_deps(_: str = Depends(verify_master_key)):
+    """Delete every package the sandbox has installed.
+
+    Use when the cache is bloated, when a bad install needs eviction, or
+    after a suspected supply-chain incident. Next sandbox install cold-starts.
+    The directory itself is recreated empty (sticky + world-writable) so
+    sandboxes can immediately install fresh.
+    """
+    deps_root = Path(settings.skill_deps_path)
+    if not deps_root.exists():
+        return {"purged": True, "freed_bytes": 0, "path": str(deps_root)}
+
+    freed = 0
+    errors: List[str] = []
+    try:
+        for entry in deps_root.iterdir():
+            try:
+                if entry.is_dir() and not entry.is_symlink():
+                    # Tally before nuking for the response.
+                    for root, _dirs, files in os.walk(str(entry)):
+                        for f in files:
+                            try:
+                                freed += os.path.getsize(os.path.join(root, f))
+                            except OSError:
+                                pass
+                    shutil.rmtree(str(entry))
+                else:
+                    try:
+                        freed += entry.stat().st_size
+                    except OSError:
+                        pass
+                    entry.unlink()
+            except OSError as exc:
+                errors.append(f"{entry}: {exc}")
+    except OSError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Could not enumerate {deps_root}: {exc}",
+        )
+
+    # Reset perms so future installs from sandbox uids work.
+    try:
+        os.chmod(str(deps_root), 0o1777)  # nosec B103
+    except OSError:
+        pass
+
+    logger.info(
+        "Skill-deps cache purged",
+        path=str(deps_root),
+        freed_bytes=freed,
+        errors=len(errors),
+    )
+    return {
+        "purged": True,
+        "path": str(deps_root),
+        "freed_bytes": freed,
+        "errors": errors,
     }

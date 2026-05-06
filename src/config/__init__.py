@@ -92,6 +92,46 @@ class Settings(BaseSettings):
     rate_limit_enabled: bool = Field(
         default=True, description="Enable per-key rate limiting for Redis-managed keys"
     )
+    auth_enabled: bool = Field(
+        default=True,
+        description=(
+            "Require x-api-key (or equivalent Basic auth) on user endpoints. "
+            "Set false when running behind a trusted network boundary. "
+            "Admin endpoints always require MASTER_API_KEY regardless."
+        ),
+    )
+
+    # Sandbox egress (skill installs)
+    enable_sandbox_network: bool = Field(
+        default=False,
+        description=(
+            "Allow sandboxes to reach the internet via an inline allowlist proxy. "
+            "Required for skills that pip/npm/go/cargo install dependencies at "
+            "runtime. Outbound traffic is restricted to package registries; "
+            "everything else is refused."
+        ),
+    )
+    sandbox_egress_port: int = Field(
+        default=18443,
+        ge=1024,
+        le=65535,
+        description="Port the inline egress proxy binds to on 127.0.0.1.",
+    )
+    sandbox_egress_allowlist: Optional[str] = Field(
+        default=None,
+        description=(
+            "Comma-separated list of additional hostnames the egress proxy "
+            "permits. Defaults already cover PyPI, npm, Go modules, and crates.io."
+        ),
+    )
+    skill_deps_path: str = Field(
+        default="/opt/skill-deps",
+        description=(
+            "Host-side directory (mounted into every sandbox) that holds "
+            "user-installed skill dependencies. pip/npm/go/cargo are configured "
+            "to install here so the cache compounds across executions."
+        ),
+    )
 
     # Redis Configuration
     redis_host: str = Field(default="localhost")
@@ -144,7 +184,12 @@ class Settings(BaseSettings):
 
     # Resource Limits - Files
     max_file_size_mb: int = Field(default=100, ge=1, le=500)
-    max_files_per_session: int = Field(default=50, ge=1, le=200)
+    # Default sized for skill bundles — Anthropic's pptx skill has 58 files
+    # (incl. ECMA XSD schemas under scripts/office/schemas/), docx and xlsx
+    # are similar. Legacy default of 50 caused 413s during /upload/batch
+    # priming. Ceiling raised to 1000 to leave headroom for multi-skill
+    # agents and future bundles.
+    max_files_per_session: int = Field(default=300, ge=1, le=1000)
     max_output_files: int = Field(default=10, ge=1, le=50)
     max_filename_length: int = Field(default=255, ge=1, le=255)
 
@@ -476,6 +521,7 @@ class Settings(BaseSettings):
         return SecurityConfig(
             api_key=self.api_key,
             api_keys=self.api_keys if isinstance(self.api_keys, str) else None,
+            auth_enabled=self.auth_enabled,
             enable_network_isolation=self.enable_network_isolation,
             enable_filesystem_isolation=self.enable_filesystem_isolation,
             enable_security_logs=self.enable_security_logs,

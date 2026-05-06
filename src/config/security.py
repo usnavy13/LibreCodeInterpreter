@@ -11,6 +11,7 @@ class SecurityConfig(BaseSettings):
     # API Key Authentication
     api_key: str = Field(default="test-api-key", min_length=16)
     api_keys: str | None = Field(default=None)  # Comma-separated additional keys
+    auth_enabled: bool = Field(default=True)
 
     # Container Isolation
     enable_network_isolation: bool = Field(default=True)

@@ -65,7 +65,9 @@ class TestSandboxManagerAvailability:
                 manager._executor = MagicMock()
                 manager._base_dir = Path("/tmp/test-sandboxes")
                 manager._initialization_error = "Failed to create directory"
-                assert manager.get_initialization_error() == "Failed to create directory"
+                assert (
+                    manager.get_initialization_error() == "Failed to create directory"
+                )
 
 
 class TestSandboxLifecycle:
@@ -73,8 +75,7 @@ class TestSandboxLifecycle:
 
     def test_create_sandbox_creates_directory(self, tmp_path):
         """Test create_sandbox creates the data directory."""
-        with patch("shutil.which", return_value="/usr/bin/nsjail"), \
-             patch("os.chown"):
+        with patch("shutil.which", return_value="/usr/bin/nsjail"), patch("os.chown"):
             with patch.object(SandboxManager, "__init__", lambda self: None):
                 manager = SandboxManager()
                 manager._nsjail_config = MagicMock()
@@ -90,8 +91,7 @@ class TestSandboxLifecycle:
 
     def test_create_sandbox_sets_repl_mode(self, tmp_path):
         """Test create_sandbox sets repl_mode correctly."""
-        with patch("shutil.which", return_value="/usr/bin/nsjail"), \
-             patch("os.chown"):
+        with patch("shutil.which", return_value="/usr/bin/nsjail"), patch("os.chown"):
             with patch.object(SandboxManager, "__init__", lambda self: None):
                 manager = SandboxManager()
                 manager._nsjail_config = MagicMock()
@@ -105,8 +105,7 @@ class TestSandboxLifecycle:
 
     def test_create_sandbox_sets_labels(self, tmp_path):
         """Test create_sandbox sets appropriate labels."""
-        with patch("shutil.which", return_value="/usr/bin/nsjail"), \
-             patch("os.chown"):
+        with patch("shutil.which", return_value="/usr/bin/nsjail"), patch("os.chown"):
             with patch.object(SandboxManager, "__init__", lambda self: None):
                 manager = SandboxManager()
                 manager._nsjail_config = MagicMock()
@@ -122,8 +121,7 @@ class TestSandboxLifecycle:
 
     def test_create_sandbox_generates_unique_ids(self, tmp_path):
         """Test create_sandbox generates unique sandbox IDs."""
-        with patch("shutil.which", return_value="/usr/bin/nsjail"), \
-             patch("os.chown"):
+        with patch("shutil.which", return_value="/usr/bin/nsjail"), patch("os.chown"):
             with patch.object(SandboxManager, "__init__", lambda self: None):
                 manager = SandboxManager()
                 manager._nsjail_config = MagicMock()
@@ -138,8 +136,7 @@ class TestSandboxLifecycle:
 
     def test_destroy_sandbox_removes_directory(self, tmp_path):
         """Test destroy_sandbox removes the sandbox directory."""
-        with patch("shutil.which", return_value="/usr/bin/nsjail"), \
-             patch("os.chown"):
+        with patch("shutil.which", return_value="/usr/bin/nsjail"), patch("os.chown"):
             with patch.object(SandboxManager, "__init__", lambda self: None):
                 manager = SandboxManager()
                 manager._nsjail_config = MagicMock()
@@ -156,8 +153,7 @@ class TestSandboxLifecycle:
 
     def test_destroy_sandbox_nonexistent_returns_true(self, tmp_path):
         """Test destroying a non-existent sandbox returns True."""
-        with patch("shutil.which", return_value="/usr/bin/nsjail"), \
-             patch("os.chown"):
+        with patch("shutil.which", return_value="/usr/bin/nsjail"), patch("os.chown"):
             with patch.object(SandboxManager, "__init__", lambda self: None):
                 manager = SandboxManager()
                 manager._nsjail_config = MagicMock()
@@ -186,9 +182,9 @@ class TestFileOperations:
 
     def test_copy_content_to_sandbox(self, tmp_path):
         """Test writing content to a sandbox."""
-        with patch("shutil.which", return_value="/usr/bin/nsjail"), \
-             patch("os.chown"), \
-             patch("os.chmod"):
+        with patch("shutil.which", return_value="/usr/bin/nsjail"), patch(
+            "os.chown"
+        ), patch("os.chmod"):
             with patch.object(SandboxManager, "__init__", lambda self: None):
                 manager = SandboxManager()
                 manager._nsjail_config = MagicMock()
@@ -203,11 +199,11 @@ class TestFileOperations:
                 assert result is True
                 assert (info.data_dir / "test.txt").read_bytes() == b"hello world"
 
-    def test_copy_content_extracts_filename(self, tmp_path):
-        """Test that copy extracts filename from full path."""
-        with patch("shutil.which", return_value="/usr/bin/nsjail"), \
-             patch("os.chown"), \
-             patch("os.chmod"):
+    def test_copy_content_preserves_subdirectories(self, tmp_path):
+        """Subdirectories under /mnt/data/ are preserved (LibreChat skill bundles)."""
+        with patch("shutil.which", return_value="/usr/bin/nsjail"), patch(
+            "os.chown"
+        ), patch("os.chmod"):
             with patch.object(SandboxManager, "__init__", lambda self: None):
                 manager = SandboxManager()
                 manager._nsjail_config = MagicMock()
@@ -220,14 +216,14 @@ class TestFileOperations:
                     info, b"data", "/mnt/data/subdir/file.txt", "py"
                 )
                 assert result is True
-                # Should extract just the filename
-                assert (info.data_dir / "file.txt").read_bytes() == b"data"
+                # Subdirectory is preserved; parent dir is created automatically.
+                assert (info.data_dir / "subdir" / "file.txt").read_bytes() == b"data"
 
     def test_get_file_content_from_sandbox(self, tmp_path):
         """Test reading content from a sandbox."""
-        with patch("shutil.which", return_value="/usr/bin/nsjail"), \
-             patch("os.chown"), \
-             patch("os.chmod"):
+        with patch("shutil.which", return_value="/usr/bin/nsjail"), patch(
+            "os.chown"
+        ), patch("os.chmod"):
             with patch.object(SandboxManager, "__init__", lambda self: None):
                 manager = SandboxManager()
                 manager._nsjail_config = MagicMock()
@@ -244,8 +240,7 @@ class TestFileOperations:
 
     def test_get_file_content_not_found(self, tmp_path):
         """Test reading non-existent file returns None."""
-        with patch("shutil.which", return_value="/usr/bin/nsjail"), \
-             patch("os.chown"):
+        with patch("shutil.which", return_value="/usr/bin/nsjail"), patch("os.chown"):
             with patch.object(SandboxManager, "__init__", lambda self: None):
                 manager = SandboxManager()
                 manager._nsjail_config = MagicMock()
@@ -261,8 +256,7 @@ class TestFileOperations:
 
     def test_get_file_content_mnt_data_prefix(self, tmp_path):
         """Test reading file with /mnt/data/ prefix."""
-        with patch("shutil.which", return_value="/usr/bin/nsjail"), \
-             patch("os.chown"):
+        with patch("shutil.which", return_value="/usr/bin/nsjail"), patch("os.chown"):
             with patch.object(SandboxManager, "__init__", lambda self: None):
                 manager = SandboxManager()
                 manager._nsjail_config = MagicMock()

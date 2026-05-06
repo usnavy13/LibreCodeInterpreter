@@ -257,3 +257,38 @@ class OutputProcessor:
         except Exception as e:
             logger.error(f"Failed to sanitize filename: {e}")
             return "_"
+
+    @classmethod
+    def sanitize_relative_path(cls, input_path: str) -> str:
+        """Sanitize a relative path while preserving subdirectory structure.
+
+        Calls `sanitize_filename` on each path segment and rejoins with `/`.
+        Used for filenames that legitimately contain subdirectories — both
+        on the input side (LibreChat sends `skills/foo/SKILL.md` for skill
+        bundles) and the output side (code that writes to `/mnt/data/charts/foo.png`
+        should round-trip back as `charts/foo.png`).
+
+        Path traversal segments (`..`) are rejected, and the result is
+        guaranteed to be a non-empty relative path with forward slashes.
+        """
+        if not input_path:
+            return "_"
+
+        # Strip leading/trailing slashes and split into segments.
+        segments = [s for s in input_path.replace("\\", "/").split("/") if s]
+        if not segments:
+            return "_"
+
+        sanitized_segments = []
+        for segment in segments:
+            if segment == "..":
+                # Drop traversal attempts entirely rather than allowing them.
+                continue
+            sanitized = cls.sanitize_filename(segment)
+            if sanitized and sanitized != "_":
+                sanitized_segments.append(sanitized)
+
+        if not sanitized_segments:
+            return "_"
+
+        return "/".join(sanitized_segments)

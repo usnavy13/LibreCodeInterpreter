@@ -22,6 +22,11 @@ async def verify_api_key(
     Verify API key authentication.
     This dependency can be used in addition to middleware for extra security.
     """
+    # Operator-controlled bypass: middleware seeds anonymous state, but this
+    # dependency may run before middleware in some test configurations.
+    if not settings.auth_enabled:
+        return getattr(request.state, "api_key", "")
+
     # First check if middleware already authenticated the request
     if hasattr(request.state, "authenticated") and request.state.authenticated:
         return getattr(request.state, "api_key", "")

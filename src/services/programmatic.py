@@ -50,6 +50,7 @@ class PausedContext:
     sandbox_info: SandboxInfo
     process: asyncio.subprocess.Process
     session_id: str
+    lang: str = "py"
     round_trip_count: int = 0
     timeout_handle: Optional[asyncio.TimerHandle] = None
     accumulated_stdout: str = ""
@@ -82,53 +83,68 @@ class ProgrammaticService:
         session_id: str,
         timeout: Optional[int] = None,
         files: Optional[List[PTCFileInput]] = None,
+        lang: str = "py",
     ) -> ProgrammaticExecResponse:
         """Start a new PTC execution.
 
-        Creates an nsjail sandbox, copies ptc_server.py into it,
-        and starts execution with the provided code and tools.
+        Creates an nsjail sandbox, copies the appropriate PTC server script
+        into it, and starts execution with the provided code and tools.
 
         Args:
-            code: Python code to execute
+            code: Code to execute (Python or bash, depending on `lang`)
             tools: Tool definitions available to the code
             session_id: Session identifier
             timeout: Execution timeout in seconds
             files: Optional referenced prior-session files to mount in sandbox
+            lang: PTC language. "py" runs ptc_server.py (asyncio + Python).
+                "bash" runs ptc_bash_server.py (Python wrapper that spawns
+                bash with one auto-generated function per tool).
 
         Returns:
             ProgrammaticExecResponse with status and optional tool_calls
         """
+        if lang not in ("py", "bash"):
+            return ProgrammaticExecResponse(
+                status="error",
+                session_id=session_id,
+                error=f"Unsupported PTC lang: {lang!r}",
+            )
+
         execution_timeout = timeout or settings.max_execution_time
         execution_deadline = time.monotonic() + execution_timeout
 
-        # Create sandbox
+        # Bash PTC sandbox runs as the bash uid; python PTC sandbox runs as py.
+        sandbox_language = lang
         sandbox_info = self._sandbox_manager.create_sandbox(
             session_id=session_id,
-            language="py",
+            language=sandbox_language,
             repl_mode=False,
         )
 
         try:
-            # Copy ptc_server.py into the sandbox data dir
-            ptc_server_path = Path("/opt/ptc_server.py")
+            ptc_server_filename = (
+                "ptc_bash_server.py" if lang == "bash" else "ptc_server.py"
+            )
+            ptc_server_path = Path("/opt") / ptc_server_filename
             if not ptc_server_path.exists():
                 # Fallback: try relative path (local development)
                 ptc_server_path = (
-                    Path(__file__).parent.parent.parent / "docker" / "ptc_server.py"
+                    Path(__file__).parent.parent.parent / "docker" / ptc_server_filename
                 )
 
             if ptc_server_path.exists():
                 self._sandbox_manager.copy_content_to_sandbox(
                     sandbox_info,
                     ptc_server_path.read_bytes(),
-                    "/mnt/data/ptc_server.py",
-                    language="py",
+                    f"/mnt/data/{ptc_server_filename}",
+                    language=sandbox_language,
                 )
             else:
+                self._sandbox_manager.destroy_sandbox(sandbox_info)
                 return ProgrammaticExecResponse(
                     status="error",
                     session_id=session_id,
-                    error="PTC server script not found",
+                    error=f"PTC server script not found: {ptc_server_filename}",
                 )
 
             # Mount any provided files
@@ -136,6 +152,7 @@ class ProgrammaticService:
                 file_error = await self._mount_requested_files(
                     sandbox_info=sandbox_info,
                     files=files,
+                    language=sandbox_language,
                 )
                 if file_error:
                     self._sandbox_manager.destroy_sandbox(sandbox_info)
@@ -145,18 +162,22 @@ class ProgrammaticService:
                         error=file_error,
                     )
 
-            # Build nsjail command - wrap in /bin/sh -c like SandboxExecutor
-            env = self._sandbox_manager.executor._build_sanitized_env("py")
+            # Both server scripts are launched via python3 — the bash variant
+            # is itself a Python wrapper that spawns bash internally.
+            env = self._sandbox_manager.executor._build_sanitized_env(sandbox_language)
             shell_command = [
                 "/bin/sh",
                 "-c",
-                "python3 /mnt/data/ptc_server.py",
+                f"python3 /mnt/data/{ptc_server_filename}",
             ]
             nsjail_args = self._nsjail_config.build_args(
                 sandbox_dir=str(sandbox_info.data_dir),
                 command=shell_command,
-                language="py",
+                language=sandbox_language,
                 timeout=execution_timeout,
+                # Honor ENABLE_SANDBOX_NETWORK so PTC sandboxes can also
+                # reach the inline egress proxy for skill installs.
+                network=bool(settings.enable_sandbox_network),
                 env=env,
             )
 
@@ -215,6 +236,7 @@ class ProgrammaticService:
                 timeout=execution_timeout,
                 execution_deadline=execution_deadline,
                 execution_timeout_seconds=execution_timeout,
+                lang=lang,
             )
 
         except Exception as e:
@@ -317,6 +339,7 @@ class ProgrammaticService:
                 accumulated_stdout=ctx.accumulated_stdout,
                 accumulated_stderr=ctx.accumulated_stderr,
                 round_trip_count=ctx.round_trip_count,
+                lang=ctx.lang,
             )
 
         except Exception as e:
@@ -343,6 +366,7 @@ class ProgrammaticService:
         accumulated_stdout: str = "",
         accumulated_stderr: str = "",
         round_trip_count: int = 0,
+        lang: str = "py",
     ) -> ProgrammaticExecResponse:
         """Read and process a response from the PTC server subprocess.
 
@@ -472,6 +496,7 @@ class ProgrammaticService:
                     sandbox_info=sandbox_info,
                     process=proc,
                     session_id=session_id,
+                    lang=lang,
                     round_trip_count=round_trip_count,
                     accumulated_stdout=total_stdout,
                     accumulated_stderr=total_stderr,
@@ -559,10 +584,13 @@ class ProgrammaticService:
         self,
         sandbox_info: SandboxInfo,
         files: List[PTCFileInput],
+        language: str = "py",
     ) -> Optional[str]:
         """Mount referenced prior-session files into the sandbox."""
         for file_info in files:
-            error = await self._mount_referenced_file(sandbox_info, file_info)
+            error = await self._mount_referenced_file(
+                sandbox_info, file_info, language=language
+            )
             if error:
                 return error
 
@@ -572,6 +600,7 @@ class ProgrammaticService:
         self,
         sandbox_info: SandboxInfo,
         file_info: PTCFileInput,
+        language: str = "py",
     ) -> Optional[str]:
         """Resolve a stored file reference and mount it into /mnt/data."""
         if self._file_service is None:
@@ -604,15 +633,22 @@ class ProgrammaticService:
             sandbox_info,
             content,
             f"/mnt/data/{filename}",
-            language="py",
+            language=language,
         )
         return None
 
     def _normalize_mount_filename(self, filename: Optional[str]) -> str:
-        """Collapse any path-like input to a safe basename for /mnt/data."""
+        """Sanitize filename for /mnt/data while preserving subdirectories.
+
+        Aligned with Item 4b's sanitize_relative_path so PTC file mounts use
+        the same rules as the main /exec mount path. Filenames may legitimately
+        contain `/` (skill bundles, nested data); only `..` traversal is rejected.
+        """
+        from .execution.output import OutputProcessor
+
         candidate = (filename or "").strip()
-        normalized = Path(candidate).name
-        if not normalized:
+        normalized = OutputProcessor.sanitize_relative_path(candidate)
+        if not normalized or normalized == "_":
             raise ValueError("Referenced PTC file input must include a valid name")
         return normalized
 

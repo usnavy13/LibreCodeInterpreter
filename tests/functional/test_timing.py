@@ -113,5 +113,3 @@ class TestFileTiming:
 
         assert response.status_code == 200
         assert latency < 5.0, f"Download took {latency:.1f}s, expected < 5s"
-
-

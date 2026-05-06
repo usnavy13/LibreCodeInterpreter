@@ -7,9 +7,7 @@ class TestMountedFileEdits:
     """Verify in-place edits to mounted files persist after execution."""
 
     @pytest.mark.asyncio
-    async def test_overwrite_mounted_file_persists(
-        self, async_client, auth_headers
-    ):
+    async def test_overwrite_mounted_file_persists(self, async_client, auth_headers):
         """Overwriting a mounted user file should persist the new content."""
         upload = await async_client.post(
             "/upload",
@@ -48,9 +46,7 @@ class TestMountedFileEdits:
         assert download.text == "modified content"
 
     @pytest.mark.asyncio
-    async def test_append_to_mounted_file_persists(
-        self, async_client, auth_headers
-    ):
+    async def test_append_to_mounted_file_persists(self, async_client, auth_headers):
         """Appending to a mounted file should persist all new lines."""
         upload = await async_client.post(
             "/upload",
@@ -115,7 +111,9 @@ class TestMountedFileEdits:
                     "os.remove('/mnt/data/temp.txt')\n"
                     "print('File deleted')\n"
                 ),
-                "files": [{"id": file_id, "session_id": session_id, "name": "temp.txt"}],
+                "files": [
+                    {"id": file_id, "session_id": session_id, "name": "temp.txt"}
+                ],
             },
         )
         assert execute.status_code == 200, execute.text
@@ -124,9 +122,7 @@ class TestMountedFileEdits:
         assert "Failed to update mounted file" not in execute_result["stderr"]
 
     @pytest.mark.asyncio
-    async def test_edit_csv_file_persists(
-        self, async_client, auth_headers
-    ):
+    async def test_edit_csv_file_persists(self, async_client, auth_headers):
         """Editing a mounted CSV file should persist the transformed data."""
         upload = await async_client.post(
             "/upload",
@@ -151,7 +147,9 @@ class TestMountedFileEdits:
                     "print('csv updated')\n"
                 ),
                 "session_id": session_id,
-                "files": [{"id": file_id, "session_id": session_id, "name": "data.csv"}],
+                "files": [
+                    {"id": file_id, "session_id": session_id, "name": "data.csv"}
+                ],
             },
         )
         assert execute.status_code == 200, execute.text

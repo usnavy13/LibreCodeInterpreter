@@ -2,7 +2,7 @@
 
 # Standard library imports
 from datetime import datetime
-from typing import List, Optional, Any
+from typing import Dict, List, Optional, Any
 
 # Third-party imports
 from pydantic import BaseModel, Field
@@ -15,6 +15,9 @@ class FileRef(BaseModel):
     name: str
     path: Optional[str] = None  # Make path optional
     session_id: Optional[str] = None  # Session ID for cross-message file persistence
+    inherited: Optional[bool] = None
+    entity_id: Optional[str] = None
+    modified_from: Optional[Dict[str, str]] = None
 
 
 class RequestFile(BaseModel):
@@ -23,6 +26,7 @@ class RequestFile(BaseModel):
     id: str
     session_id: str
     name: str
+    entity_id: Optional[str] = None
 
 
 class ExecRequest(BaseModel):
@@ -54,6 +58,12 @@ class ExecRequest(BaseModel):
     files: List[RequestFile] = Field(
         default_factory=list,
         description="Array of file references to be used during execution",
+    )
+    timeout: Optional[int] = Field(
+        default=None,
+        ge=1000,
+        le=300000,
+        description="Execution timeout in milliseconds",
     )
 
 

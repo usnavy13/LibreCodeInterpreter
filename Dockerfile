@@ -26,6 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     flex bison \
     curl wget ca-certificates gnupg software-properties-common \
     libssl-dev libffi-dev libxml2-dev libxslt-dev zlib1g-dev \
+    jq iptables \
     && rm -rf /var/lib/apt/lists/*
 
 RUN git clone https://github.com/google/nsjail.git /tmp/nsjail && \
@@ -51,6 +52,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     portaudio19-dev flac ffmpeg \
     libpulse-dev libsdl2-dev libsdl2-mixer-dev libsdl2-image-dev libsdl2-ttf-dev \
     antiword unrtf \
+    libreoffice-impress libreoffice-writer libreoffice-calc libreoffice-common \
     && rm -rf /var/lib/apt/lists/*
 
 COPY docker/requirements/python-core.txt /tmp/python-core.txt
@@ -276,8 +278,9 @@ WORKDIR /app
 # Keep the application layer thin so app-only changes do not invalidate runtime stages.
 COPY docker/repl_server.py /opt/repl_server.py
 COPY docker/ptc_server.py /opt/ptc_server.py
+COPY docker/ptc_bash_server.py /opt/ptc_bash_server.py
 COPY docker/entrypoint.sh /opt/entrypoint.sh
-RUN chmod +x /opt/repl_server.py /opt/ptc_server.py /opt/entrypoint.sh
+RUN chmod +x /opt/repl_server.py /opt/ptc_server.py /opt/ptc_bash_server.py /opt/entrypoint.sh
 
 COPY requirements.txt /tmp/requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip \

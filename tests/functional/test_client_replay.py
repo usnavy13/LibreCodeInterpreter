@@ -140,7 +140,8 @@ class TestDirectClientReplay:
             injected_files=upload_refs,
         )
         assert "a,b" in first["stdout"]
-        assert first["files"] == []
+        generated = [f for f in first["files"] if not f.get("inherited")]
+        assert generated == [], f"Expected no generated files, got: {generated}"
 
         second = await _exec_like_runtime(
             async_client,

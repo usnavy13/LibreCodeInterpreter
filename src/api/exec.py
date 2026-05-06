@@ -40,7 +40,11 @@ router = APIRouter()
 _KEEPALIVE_INTERVAL = 3
 
 
-@router.post("/exec", responses={200: {"model": ExecResponse}})
+@router.post(
+    "/exec",
+    responses={200: {"model": ExecResponse}},
+    response_model_exclude_none=True,
+)
 async def execute_code(
     request: ExecRequest,
     http_request: Request,
@@ -175,7 +179,7 @@ async def execute_code(
             request_id=request_id,
             session_id=response.session_id,
         )
-        yield response.model_dump_json().encode()
+        yield response.model_dump_json(exclude_none=True).encode()
 
     return StreamingResponse(
         _stream_response(),

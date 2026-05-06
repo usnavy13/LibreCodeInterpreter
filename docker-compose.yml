@@ -13,6 +13,7 @@ services:
     # nsjail requires these capabilities to create namespaces and cgroups
     cap_add:
       - SYS_ADMIN
+      - NET_ADMIN
     security_opt:
       - apparmor:unconfined
     ports:

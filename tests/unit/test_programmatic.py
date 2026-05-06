@@ -497,9 +497,7 @@ class TestProgrammaticServiceStartExecution:
             mock_proc.stdout = AsyncMock()
             mock_proc.stdout.read = AsyncMock(
                 return_value=(
-                    json.dumps(
-                        {"type": "completed", "stdout": "ok\n", "stderr": ""}
-                    )
+                    json.dumps({"type": "completed", "stdout": "ok\n", "stderr": ""})
                     + PTC_DELIMITER
                 ).encode()
             )
@@ -529,10 +527,13 @@ class TestProgrammaticServiceStartExecution:
             "upload-session",
             "file-123",
         )
+        # Subdirectories are preserved (Item 4b symmetry — LibreChat skill
+        # bundles ship `skills/<name>/SKILL.md` and expect to read them at
+        # the nested path inside the sandbox).
         assert mock_sandbox_manager.copy_content_to_sandbox.call_args_list[1].args == (
             mock_sandbox_manager.create_sandbox.return_value,
             b"col1,col2\n1,2\n",
-            "/mnt/data/report.csv",
+            "/mnt/data/nested/report.csv",
         )
 
     async def test_start_execution_errors_when_referenced_file_missing(
@@ -545,7 +546,9 @@ class TestProgrammaticServiceStartExecution:
         with (
             patch("pathlib.Path.exists", return_value=True),
             patch("pathlib.Path.read_bytes", return_value=b"# ptc_server.py"),
-            patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_proc,
+            patch(
+                "asyncio.create_subprocess_exec", new_callable=AsyncMock
+            ) as mock_proc,
         ):
             response = await ptc_service.start_execution(
                 code="print('hello')",
@@ -591,11 +594,14 @@ class TestProgrammaticServiceStartExecution:
         )
         ptc_service._paused_contexts[token] = ctx
 
-        with patch("time.monotonic", return_value=70.2), patch.object(
-            ptc_service,
-            "_read_ptc_response",
-            new_callable=AsyncMock,
-        ) as mock_read:
+        with (
+            patch("time.monotonic", return_value=70.2),
+            patch.object(
+                ptc_service,
+                "_read_ptc_response",
+                new_callable=AsyncMock,
+            ) as mock_read,
+        ):
             mock_read.return_value = ProgrammaticExecResponse(status="completed")
             await ptc_service.continue_execution(
                 continuation_token=token,
@@ -809,3 +815,76 @@ class TestProgrammaticServiceCleanup:
         await ptc_service.cleanup_all()
 
         assert len(ptc_service._paused_contexts) == 0
+
+
+class TestStartExecutionLangRouting:
+    """start_execution(lang=...) must select the matching PTC server script
+    and create the sandbox in the matching language.
+
+    We short-circuit at copy_content_to_sandbox so we don't have to set up
+    nsjail / unshare / a real subprocess just to verify the routing.
+    """
+
+    async def _exercise_start(self, lang: str):
+        ptc_service = ProgrammaticService()
+
+        sandbox_info = SandboxInfo(
+            sandbox_id="sb-test",
+            sandbox_dir=Path("/tmp/sb-test"),
+            data_dir=Path("/tmp/sb-test/data"),
+            language=lang,
+            session_id="sess-1",
+            created_at=datetime.utcnow(),
+            repl_mode=False,
+        )
+        ptc_service._sandbox_manager = MagicMock()
+        ptc_service._sandbox_manager.create_sandbox.return_value = sandbox_info
+        # Make copy_content_to_sandbox raise so we abort before nsjail/subprocess.
+        boom = RuntimeError("__short_circuit__")
+        ptc_service._sandbox_manager.copy_content_to_sandbox.side_effect = boom
+
+        with patch("src.services.programmatic.Path") as mock_path_cls:
+            inst = mock_path_cls.return_value
+            inst.exists.return_value = True
+            inst.read_bytes.return_value = b"# fake script"
+            # Path("/opt") / filename should also resolve through the mock.
+            inst.__truediv__ = lambda self, other: inst
+
+            response = await ptc_service.start_execution(
+                code="print('hi')" if lang == "py" else "echo hi",
+                tools=[],
+                session_id="sess-1",
+                lang=lang,
+            )
+
+        create_kwargs = ptc_service._sandbox_manager.create_sandbox.call_args.kwargs
+        copy_args = ptc_service._sandbox_manager.copy_content_to_sandbox.call_args.args
+        return response, create_kwargs, copy_args
+
+    async def test_lang_py_routes_to_python_server(self):
+        response, create_kwargs, copy_args = await self._exercise_start("py")
+        assert create_kwargs["language"] == "py"
+        # 3rd positional arg is the destination path under /mnt/data.
+        assert copy_args[2] == "/mnt/data/ptc_server.py"
+        # We intentionally raised inside copy, so this is an error response —
+        # the routing assertions above are the real check.
+        assert response.status == "error"
+
+    async def test_lang_bash_routes_to_bash_server(self):
+        response, create_kwargs, copy_args = await self._exercise_start("bash")
+        assert create_kwargs["language"] == "bash"
+        assert copy_args[2] == "/mnt/data/ptc_bash_server.py"
+        assert response.status == "error"
+
+    async def test_invalid_lang_short_circuits_before_sandbox(self):
+        ptc_service = ProgrammaticService()
+        ptc_service._sandbox_manager = MagicMock()
+
+        response = await ptc_service.start_execution(
+            code="x", tools=[], session_id="s", lang="ruby"
+        )
+
+        assert response.status == "error"
+        assert "Unsupported PTC lang" in (response.error or "")
+        # No sandbox creation attempt for an invalid lang.
+        ptc_service._sandbox_manager.create_sandbox.assert_not_called()
