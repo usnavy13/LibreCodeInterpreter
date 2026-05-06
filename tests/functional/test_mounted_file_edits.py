@@ -1,14 +1,29 @@
-"""Functional tests for mounted file edit persistence against a live API."""
+"""Functional tests for mounted file edit persistence against a live API.
+
+Modified mounted files surface as new generated outputs with fresh file_ids
+(not in-place overwrites of the original S3 object). The exec response
+includes a `modified_from` reference back to the original upload. LibreChat
+downloads the new file_id to capture the edited content.
+"""
 
 import pytest
 
 
+def _find_modified_file(exec_result, original_file_id):
+    """Find the generated file entry that was modified from the original."""
+    for f in exec_result.get("files", []):
+        modified_from = f.get("modified_from")
+        if modified_from and modified_from.get("id") == original_file_id:
+            return f
+    return None
+
+
 class TestMountedFileEdits:
-    """Verify in-place edits to mounted files persist after execution."""
+    """Verify in-place edits to mounted files surface as new generated outputs."""
 
     @pytest.mark.asyncio
     async def test_overwrite_mounted_file_persists(self, async_client, auth_headers):
-        """Overwriting a mounted user file should persist the new content."""
+        """Overwriting a mounted file should produce a new output with modified content."""
         upload = await async_client.post(
             "/upload",
             headers={"x-api-key": auth_headers["x-api-key"]},
@@ -36,10 +51,18 @@ class TestMountedFileEdits:
             },
         )
         assert execute.status_code == 200, execute.text
-        assert "File modified" in execute.json()["stdout"]
+        exec_result = execute.json()
+        assert "File modified" in exec_result["stdout"]
+
+        modified = _find_modified_file(exec_result, file_id)
+        assert modified is not None, (
+            f"No modified_from entry for {file_id} in files: {exec_result['files']}"
+        )
+        assert modified.get("inherited") is not True
+        assert modified["name"] == "test.txt"
 
         download = await async_client.get(
-            f"/download/{session_id}/{file_id}",
+            f"/download/{session_id}/{modified['id']}",
             headers=auth_headers,
         )
         assert download.status_code == 200
@@ -47,7 +70,7 @@ class TestMountedFileEdits:
 
     @pytest.mark.asyncio
     async def test_append_to_mounted_file_persists(self, async_client, auth_headers):
-        """Appending to a mounted file should persist all new lines."""
+        """Appending to a mounted file should produce a new output with all lines."""
         upload = await async_client.post(
             "/upload",
             headers={"x-api-key": auth_headers["x-api-key"]},
@@ -74,9 +97,16 @@ class TestMountedFileEdits:
             },
         )
         assert execute.status_code == 200, execute.text
+        exec_result = execute.json()
+
+        modified = _find_modified_file(exec_result, file_id)
+        assert modified is not None, (
+            f"No modified_from entry for {file_id} in files: {exec_result['files']}"
+        )
+        assert modified.get("inherited") is not True
 
         download = await async_client.get(
-            f"/download/{session_id}/{file_id}",
+            f"/download/{session_id}/{modified['id']}",
             headers=auth_headers,
         )
         assert download.status_code == 200
@@ -123,7 +153,7 @@ class TestMountedFileEdits:
 
     @pytest.mark.asyncio
     async def test_edit_csv_file_persists(self, async_client, auth_headers):
-        """Editing a mounted CSV file should persist the transformed data."""
+        """Editing a mounted CSV file should produce a new output with transformed data."""
         upload = await async_client.post(
             "/upload",
             headers={"x-api-key": auth_headers["x-api-key"]},
@@ -153,10 +183,17 @@ class TestMountedFileEdits:
             },
         )
         assert execute.status_code == 200, execute.text
-        assert "csv updated" in execute.json()["stdout"]
+        exec_result = execute.json()
+        assert "csv updated" in exec_result["stdout"]
+
+        modified = _find_modified_file(exec_result, file_id)
+        assert modified is not None, (
+            f"No modified_from entry for {file_id} in files: {exec_result['files']}"
+        )
+        assert modified.get("inherited") is not True
 
         download = await async_client.get(
-            f"/download/{session_id}/{file_id}",
+            f"/download/{session_id}/{modified['id']}",
             headers=auth_headers,
         )
         assert download.status_code == 200
