@@ -142,6 +142,7 @@ async def upload_file(
                 content=content,
                 content_type=file.content_type,
                 is_agent_file=is_agent_file,
+                original_filename=file.filename,
             )
 
             uploaded_files.append(
@@ -295,6 +296,7 @@ async def upload_files_batch(
                 content_type=upload.content_type,
                 is_agent_file=is_agent_file,
                 is_read_only=is_read_only,
+                original_filename=original_filename,
             )
 
             results.append(
@@ -413,7 +415,8 @@ async def list_files(
                         "etag": f'"{file_info.file_id}"',
                         "metadata": {
                             "content-type": file_info.content_type,
-                            "original-filename": file_info.filename,
+                            "original-filename": file_info.original_filename
+                            or file_info.filename,
                         },
                         "contentType": file_info.content_type,
                     }

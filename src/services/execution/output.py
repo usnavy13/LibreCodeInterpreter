@@ -215,11 +215,12 @@ class OutputProcessor:
 
     @classmethod
     def sanitize_filename(cls, input_name: str) -> str:
-        """Sanitize filename to match LibreChat's sanitization logic.
+        """Sanitize filename while preserving Unicode letters and digits.
 
-        Replaces all non-alphanumeric characters (except '.' and '-') with
-        underscores. This ensures filenames on disk match what LibreChat
-        reports in the system prompt.
+        Keeps word characters (\\w — letters, digits, underscore in all
+        scripts), dots, and dashes.  Replaces everything else (path
+        separators, control chars, shell metacharacters, quotes, etc.)
+        with underscores.
 
         Args:
             input_name: Original filename (may include path components)
@@ -234,8 +235,9 @@ class OutputProcessor:
             # Remove any directory components (path traversal prevention)
             name = os.path.basename(input_name)
 
-            # Replace any non-alphanumeric characters except for '.' and '-'
-            name = re.sub(r"[^a-zA-Z0-9.-]", "_", name)
+            # Replace dangerous characters while preserving Unicode letters/digits.
+            # \w matches [a-zA-Z0-9_] plus all Unicode letters and digits.
+            name = re.sub(r"[^\w.\-]", "_", name)
 
             # Ensure the name doesn't start with a dot (hidden file in Unix)
             if name.startswith(".") or name == "":
