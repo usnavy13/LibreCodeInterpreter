@@ -10,7 +10,8 @@ direct TCP from a malicious skill — bypass the proxy entirely.
 
 This module installs iptables OUTPUT rules that match on the sandbox uid:
   - ALLOW the sandbox uid → 127.0.0.1:<proxy_port>  (so pip etc. work)
-  - DROP everything else from the sandbox uid
+  - ALLOW the sandbox uid → 127.0.0.53:53 (DNS via systemd-resolved)
+  - REJECT everything else from the sandbox uid
 
 The API process itself runs as root (uid 0), so the proxy's own outbound
 traffic to PyPI/npm/etc. is unaffected by these rules.
@@ -113,10 +114,8 @@ def install_sandbox_egress_rules(sandbox_uid: int, proxy_port: int) -> bool:
             "-j",
             "ACCEPT",
         ],
-        # Allow loopback traffic generally (DNS to systemd-resolved on 127.0.0.53,
-        # localhost-only services, etc.). The proxy enforces hostname allowlist
-        # for actual outbound; this just keeps the sandbox uid able to talk
-        # to itself if it ever needs to.
+        # Allow DNS to systemd-resolved on loopback (some tools resolve
+        # before handing the CONNECT to the proxy).
         [
             "-A",
             "OUTPUT",
@@ -124,8 +123,32 @@ def install_sandbox_egress_rules(sandbox_uid: int, proxy_port: int) -> bool:
             "owner",
             "--uid-owner",
             str(sandbox_uid),
-            "-o",
-            "lo",
+            "-d",
+            "127.0.0.53",
+            "-p",
+            "udp",
+            "--dport",
+            "53",
+            "-m",
+            "comment",
+            "--comment",
+            _RULE_COMMENT,
+            "-j",
+            "ACCEPT",
+        ],
+        [
+            "-A",
+            "OUTPUT",
+            "-m",
+            "owner",
+            "--uid-owner",
+            str(sandbox_uid),
+            "-d",
+            "127.0.0.53",
+            "-p",
+            "tcp",
+            "--dport",
+            "53",
             "-m",
             "comment",
             "--comment",
