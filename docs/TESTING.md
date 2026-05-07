@@ -14,7 +14,7 @@ tests/
 
 ### `tests/unit/`
 
-- Mock Redis, MinIO, sandboxing, and other infrastructure.
+- Mock Redis, S3, sandboxing, and other infrastructure.
 - Fast feedback for service logic.
 - No external stack required.
 
@@ -99,10 +99,7 @@ If a mocked integration test passes but a `live_api` or `client_replay` test fai
 
 ## CI/CD Test Tiers
 
-GitHub Actions now uses three workflow tiers:
+GitHub Actions uses two workflow tiers:
 
-- `ci.yml`: required PR checks for static analysis, unit tests, `contract_only` integration tests, amd64 app build validation, amd64 live smoke tests, and amd64 `client_replay`
-- `release.yml`: publishes the multi-arch app image used by `docker-compose.prod.yml` after per-arch smoke validation
-- `nightly.yml`: builds the app image locally and runs the full/slow live validation suites
-
-The amd64 live smoke suite is the required compatibility gate on pull requests. Slow live scenarios stay in nightly validation so the PR path keeps the authoritative checks without forcing the heaviest runtime coverage into every change.
+- `ci.yml`: required PR checks for static analysis, unit tests, and integration tests
+- `release.yml`: publishes the multi-arch app image consumed by `docker-compose.yml` (default `API_IMAGE`) after per-arch smoke validation

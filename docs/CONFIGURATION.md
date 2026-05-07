@@ -21,11 +21,6 @@ The Code Interpreter API uses environment-based configuration with sensible defa
    API_KEY=your-secure-api-key-here
    ```
 
-3. Validate your configuration:
-   ```bash
-   python config_manager.py validate
-   ```
-
 ## Configuration Sections
 
 ### API Configuration
@@ -43,7 +38,7 @@ Controls the basic API server settings.
 
 Configures SSL/TLS support for secure HTTPS connections.
 
-Both `docker-compose.yml` and `docker-compose.prod.yml` use the same HTTPS contract:
+`docker-compose.yml` uses the following HTTPS contract:
 
 - `PORT` is the external host port published by Docker.
 - `SSL_CERTS_PATH` is a host path mounted into the API container at `/app/ssl`.
@@ -93,13 +88,10 @@ Both `docker-compose.yml` and `docker-compose.prod.yml` use the same HTTPS contr
    SSL_KEY_FILE=/app/ssl/live/example.com/privkey.pem
    ```
 
-3. **Start the stack with either compose file**:
+3. **Start the stack**:
 
    ```bash
    docker compose up -d
-
-   # or
-   docker compose -f docker-compose.prod.yml up -d
    ```
 
 4. **Verify HTTPS**:
@@ -166,17 +158,18 @@ Redis is used for session management and caching.
 REDIS_URL=redis://password@localhost:6379/0
 ```
 
-### MinIO/S3 Configuration
+### S3 Configuration
 
-MinIO provides S3-compatible object storage for files.
+S3-compatible object storage for files and archived state. The default deployment uses Garage; any S3-compatible backend (AWS S3, MinIO, Cloudflare R2, etc.) works.
 
-| Variable           | Default                  | Description                         |
-| ------------------ | ------------------------ | ----------------------------------- |
-| `MINIO_ENDPOINT`   | `localhost:9000`         | MinIO server endpoint (no protocol) |
-| `MINIO_ACCESS_KEY` | `minioadmin`             | MinIO access key                    |
-| `MINIO_SECRET_KEY` | `minioadmin`             | MinIO secret key                    |
-| `MINIO_SECURE`     | `false`                  | Use HTTPS for MinIO connections     |
-| `MINIO_BUCKET`     | `code-interpreter-files` | Bucket name for file storage        |
+| Variable         | Default                  | Description                            |
+| ---------------- | ------------------------ | -------------------------------------- |
+| `S3_ENDPOINT`    | `localhost:3900`         | S3 endpoint (host:port, no protocol)   |
+| `S3_ACCESS_KEY`  | `test-access-key`        | S3 access key                          |
+| `S3_SECRET_KEY`  | `test-secret-key`        | S3 secret key                          |
+| `S3_SECURE`      | `false`                  | Use HTTPS for S3 connections           |
+| `S3_BUCKET`      | `code-interpreter-files` | Bucket name for file storage           |
+| `S3_REGION`      | `garage`                 | S3 region (set to match your backend)  |
 
 ### Sandbox Configuration
 
@@ -203,36 +196,39 @@ nsjail is used for secure code execution in isolated sandboxes.
 
 | Variable             | Default | Description                           |
 | -------------------- | ------- | ------------------------------------- |
-| `MAX_EXECUTION_TIME` | `30`    | Maximum code execution time (seconds) |
+| `MAX_EXECUTION_TIME` | `120`   | Maximum code execution time (seconds) |
 | `MAX_MEMORY_MB`      | `512`   | Maximum memory per execution (MB)     |
 
 #### File Limits
 
-| Variable                | Default | Description                        |
-| ----------------------- | ------- | ---------------------------------- |
-| `MAX_FILE_SIZE_MB`      | `10`    | Maximum individual file size (MB)  |
-| `MAX_FILES_PER_SESSION` | `50`    | Maximum files per session          |
-| `MAX_OUTPUT_FILES`      | `10`    | Maximum output files per execution |
-| `MAX_FILENAME_LENGTH`   | `255`   | Maximum filename length            |
+| Variable                | Default | Description                                                  |
+| ----------------------- | ------- | ------------------------------------------------------------ |
+| `MAX_FILE_SIZE_MB`      | `100`   | Maximum individual file size (MB)                            |
+| `MAX_FILES_PER_SESSION` | `300`   | Maximum files per session (sized for skill bundles like pptx)|
+| `MAX_OUTPUT_FILES`      | `10`    | Maximum output files per execution                           |
+| `MAX_FILENAME_LENGTH`   | `255`   | Maximum filename length                                      |
 
 ### Session Configuration
 
-| Variable                           | Default | Description                  |
-| ---------------------------------- | ------- | ---------------------------- |
-| `SESSION_TTL_HOURS`                | `24`    | Session time-to-live (hours) |
-| `SESSION_CLEANUP_INTERVAL_MINUTES` | `10`    | Cleanup interval (minutes)   |
+| Variable                           | Default | Description                                                                |
+| ---------------------------------- | ------- | -------------------------------------------------------------------------- |
+| `SESSION_TTL_HOURS`                | `24`    | Session time-to-live (hours)                                               |
+| `SESSION_CLEANUP_INTERVAL_MINUTES` | `60`    | Cleanup interval (minutes)                                                 |
+| `ENABLE_ORPHAN_S3_CLEANUP`         | `true`  | Reap S3 objects with no matching session metadata during cleanup sweeps    |
 
 ### Sandbox Pool Configuration
 
 Pre-warmed Python REPL sandboxes reduce execution latency by eliminating interpreter startup and library import time. Only Python supports REPL pooling; all other languages use one-shot nsjail execution.
 
-| Variable                           | Default | Description                            |
-| ---------------------------------- | ------- | -------------------------------------- |
-| `SANDBOX_POOL_ENABLED`             | `true`  | Enable Python REPL pool                |
-| `SANDBOX_POOL_WARMUP_ON_STARTUP`   | `true`  | Pre-warm Python REPLs at startup       |
-| `SANDBOX_POOL_PY`                  | `5`     | Number of pre-warmed Python REPLs      |
-| `SANDBOX_POOL_PARALLEL_BATCH`      | `5`     | Number of warmup sandboxes started concurrently |
-| `SANDBOX_UID`                      | `1001`  | Shared host UID used by all sandbox languages |
+| Variable                           | Default | Description                                              |
+| ---------------------------------- | ------- | -------------------------------------------------------- |
+| `SANDBOX_POOL_ENABLED`             | `true`  | Enable Python REPL pool                                  |
+| `SANDBOX_POOL_WARMUP_ON_STARTUP`   | `true`  | Pre-warm Python REPLs at startup                         |
+| `SANDBOX_POOL_PY`                  | `2`     | Number of pre-warmed Python REPLs                        |
+| `SANDBOX_POOL_PARALLEL_BATCH`      | `5`     | Number of warmup sandboxes started concurrently          |
+| `SANDBOX_POOL_REPLENISH_INTERVAL`  | `2`     | Seconds between pool replenishment checks                |
+| `SANDBOX_POOL_EXHAUSTION_TRIGGER`  | `true`  | Trigger immediate replenishment when pool is exhausted   |
+| `SANDBOX_UID`                      | `1001`  | Shared host UID used by all sandbox languages            |
 
 **Note:** Sandboxes are destroyed immediately after execution. The pool is automatically replenished in the background. Non-Python languages do not use pooling.
 
@@ -249,19 +245,20 @@ REPL mode keeps a Python interpreter running inside pooled sandboxes with common
 
 Python `/exec` sessions can persist variables, functions, and objects across executions when a Python session is reused. The most explicit path is sending the prior `session_id`, but the backend can also reuse an existing session through same-user file references or `entity_id`.
 
-| Variable                    | Default | Description                          |
-| --------------------------- | ------- | ------------------------------------ |
-| `STATE_PERSISTENCE_ENABLED` | `true`  | Enable Python state persistence      |
-| `STATE_TTL_SECONDS`         | `7200`  | Redis hot storage TTL (2 hours)      |
-| `STATE_CAPTURE_ON_ERROR`    | `false` | Save state even on execution failure |
+| Variable                    | Default | Description                                                              |
+| --------------------------- | ------- | ------------------------------------------------------------------------ |
+| `STATE_PERSISTENCE_ENABLED` | `true`  | Enable Python state persistence                                          |
+| `STATE_TTL_SECONDS`         | `7200`  | Redis hot storage TTL (2 hours)                                          |
+| `STATE_CAPTURE_ON_ERROR`    | `false` | Save state even on execution failure                                     |
+| `STATE_MAX_REDIS_SIZE_MB`   | `100`   | Max raw state size (MB) stored in Redis. Larger states go directly to S3 |
 
 ### State Archival Configuration (Python)
 
-Inactive states are automatically archived to MinIO for long-term storage.
+Inactive states are automatically archived to S3 for long-term storage.
 
 | Variable                               | Default | Description                            |
 | -------------------------------------- | ------- | -------------------------------------- |
-| `STATE_ARCHIVE_ENABLED`                | `true`  | Enable MinIO cold storage archival     |
+| `STATE_ARCHIVE_ENABLED`                | `true`  | Enable S3 cold storage archival        |
 | `STATE_ARCHIVE_AFTER_SECONDS`          | `3600`  | Archive after this inactivity (1 hour) |
 | `STATE_ARCHIVE_TTL_DAYS`               | `1`     | Keep archives for this many days (24h) |
 | `STATE_ARCHIVE_CHECK_INTERVAL_SECONDS` | `300`   | Archival check frequency (5 min)       |
@@ -272,6 +269,17 @@ Inactive states are automatically archived to MinIO for long-term storage.
 | ----------------------------- | ------- | --------------------------------------- |
 | `ENABLE_NETWORK_ISOLATION`    | `true`  | Enable network isolation for sandboxes  |
 | `ENABLE_FILESYSTEM_ISOLATION` | `true`  | Enable filesystem isolation             |
+
+### Sandbox Network Access (Skill Installs)
+
+Off by default — sandboxes have no network access. When enabled, an inline allowlist HTTPS proxy on `127.0.0.1` lets sandboxes reach **only** package registries (PyPI, npm, Go modules, crates.io). Required for "skills" that `pip install` / `npm install` / `go get` / `cargo install` dependencies at runtime.
+
+| Variable                   | Default               | Description                                                                       |
+| -------------------------- | --------------------- | --------------------------------------------------------------------------------- |
+| `ENABLE_SANDBOX_NETWORK`   | `false`               | Allow sandboxes to reach the internet via the inline allowlist proxy              |
+| `SANDBOX_EGRESS_PORT`      | `18443`               | Port the inline egress proxy binds to on `127.0.0.1`                              |
+| `SANDBOX_EGRESS_ALLOWLIST` | (registries default)  | Comma-separated list of additional hostnames the proxy permits                    |
+| `SKILL_DEPS_PATH`          | `/opt/skill-deps`     | Host-side directory mounted into every sandbox so install caches compound across runs |
 
 ### Logging Configuration
 
@@ -321,42 +329,18 @@ All 13 language runtimes are pre-installed in the unified Docker image. No per-l
 - **D** (`d`): LDC
 - **Bash** (`bash`): GNU Bash
 
-## Configuration Management Tools
-
-### Command Line Tool
-
-Use the configuration management script:
-
-```bash
-# Show configuration summary
-python config_manager.py summary
-
-# Validate configuration
-python config_manager.py validate
-
-# Check security settings
-python config_manager.py security
-
-# Generate complete .env template
-python config_manager.py template
-
-# Export configuration as JSON
-python config_manager.py export
-```
-
-### Programmatic Access
+## Programmatic Access
 
 ```python
 from src.config import settings
-from src.utils.config_validator import validate_configuration
 
-# Access configuration
+# Flat access (backward compatible)
 print(f"API Port: {settings.api_port}")
 print(f"Max Memory: {settings.max_memory_mb}MB")
 
-# Validate configuration
-if validate_configuration():
-    print("Configuration is valid")
+# Grouped access
+print(f"S3 endpoint: {settings.s3.endpoint_url}")
+print(f"Redis URL: {settings.redis.get_url()}")
 ```
 
 ## Production Deployment Checklist
@@ -395,19 +379,11 @@ if validate_configuration():
 ### Infrastructure
 
 - [ ] Secure Redis with authentication
-- [ ] Secure MinIO with proper access keys
+- [ ] Secure S3 storage with proper access keys
 - [ ] Ensure SYS_ADMIN capability is set for nsjail
-- [ ] Set up backup for Redis and MinIO data
+- [ ] Set up backup for Redis and S3 data
 
 ## Troubleshooting
-
-### Configuration Validation Errors
-
-Run the validation tool to identify issues:
-
-```bash
-python config_manager.py validate
-```
 
 ### Common Issues
 
@@ -416,8 +392,8 @@ python config_manager.py validate
    - Verify host, port, and credentials
    - Check network connectivity
 
-2. **MinIO Connection Failed**
-   - Verify MinIO server is accessible
+2. **S3 Connection Failed**
+   - Verify S3 endpoint is accessible
    - Check access key and secret key
    - Ensure bucket exists or can be created
 

@@ -7,16 +7,16 @@ This document provides detailed instructions for setting up the development envi
 ### Prerequisites
 
 - Python 3.11+
-- Docker and docker compose (for running the API container, Redis, and MinIO)
+- Docker and docker compose (for running the API container, Redis, and Garage)
 - Redis
-- MinIO (or S3-compatible storage)
+- Garage (or S3-compatible storage)
 
 ### Installation Steps
 
 1. **Clone the repository**
 
    ```bash
-   git clone https://github.com/LibreCodeInterpreter/LibreCodeInterpreter.git
+   git clone https://github.com/usnavy13/LibreCodeInterpreter.git
    cd LibreCodeInterpreter
    ```
 
@@ -61,7 +61,7 @@ For detailed testing instructions, please refer to [TESTING.md](TESTING.md).
 # Run unit tests
 pytest tests/unit/
 
-# Run integration tests (requires running API container, Redis, MinIO)
+# Run integration tests (in-process TestClient, no running stack needed)
 pytest tests/integration/
 
 # Run all tests with coverage
@@ -79,13 +79,16 @@ not separately published packages.
 docker build --target app -t code-interpreter:nsjail .
 ```
 
-`docker compose up -d` continues to work for local development. Consumers should prefer `docker-compose.prod.yml`, which contains no `build:` step and always pulls the published image.
+By default `docker compose up -d` pulls the published image (`ghcr.io/usnavy13/librecodeinterpreter:main`). To run your locally built image instead, override `API_IMAGE`:
 
 ```bash
+# Run a locally built image
 API_IMAGE=code-interpreter:nsjail docker compose up -d
 
-# Consumer path using the published GHCR image
-docker compose -f docker-compose.prod.yml up -d
+# Or pull a specific published tag
+API_IMAGE=ghcr.io/usnavy13/librecodeinterpreter:<tag> docker compose up -d
 ```
+
+For repeated local-build workflows, copy `docker-compose.override.example.yml` to `docker-compose.override.yml` and uncomment the `build:` block so `docker compose up --build -d` rebuilds from your checkout automatically.
 
 For more details on the sandbox architecture, see [ARCHITECTURE.md](ARCHITECTURE.md).

@@ -16,7 +16,7 @@ The following metrics represent typical performance with all optimizations enabl
 | **Sandbox acquisition**        | ~3ms       | From pre-warmed pool            |
 | **Cold start (no pool)**       | 500-2000ms | First request or pool exhausted |
 | **State serialization**        | 1-25ms     | Depends on state size           |
-| **File upload (1MB)**          | 50-100ms   | To MinIO                        |
+| **File upload (1MB)**          | 50-100ms   | To S3                           |
 
 ### Performance Comparison
 
@@ -138,7 +138,7 @@ For optimal state persistence performance:
 # Faster state operations (smaller states)
 STATE_MAX_SIZE_MB=10
 
-# Less frequent archival (reduces MinIO operations)
+# Less frequent archival (reduces S3 operations)
 STATE_ARCHIVE_CHECK_INTERVAL_SECONDS=600
 
 # Longer Redis TTL (fewer archive restorations)
@@ -180,7 +180,7 @@ Sandbox acquire             ~3ms
 Code execution              ~50ms
 Output file detection       ~5ms
 File download from sandbox  ~10ms
-MinIO upload                ~20ms
+S3 upload                   ~20ms
 Response building           ~2ms
 ──────────────────────────────────
 Total                       ~104ms
@@ -214,7 +214,7 @@ For high-throughput deployments:
 
 1. **Multiple API instances**: Load balance across instances
 2. **Shared Redis**: All instances use same Redis for sessions/state
-3. **Shared MinIO**: All instances use same MinIO for files
+3. **Shared S3**: All instances use same S3 storage for files
 4. **Separate hosts**: Distribute sandbox load across API instances
 
 ```
@@ -231,13 +231,13 @@ For high-throughput deployments:
            └───────────────┼───────────────┘
                     ┌──────┴──────┐
                     │   Redis     │
-                    │   MinIO     │
+                    │     S3      │
                     └─────────────┘
 ```
 
 ### Resource Planning
 
-| Daily Requests | Instances | Pool Size (per) | Redis Memory | MinIO Storage |
+| Daily Requests | Instances | Pool Size (per) | Redis Memory | S3 Storage    |
 | -------------- | --------- | --------------- | ------------ | ------------- |
 | 1,000          | 1         | 5 Python        | 256MB        | 1GB           |
 | 10,000         | 2         | 10 Python       | 512MB        | 5GB           |

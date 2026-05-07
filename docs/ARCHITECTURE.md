@@ -36,9 +36,9 @@ This document provides a comprehensive overview of the Code Interpreter API arch
                                               │                                              │
                                               ▼                                              ▼
                                        ┌──────────────┐                               ┌──────────────┐
-                                       │    Redis     │                               │    MinIO     │
-                                       │              │                               │   (S3-API)   │
-                                       │ - Sessions   │                               │              │
+                                       │    Redis     │                               │   S3 store   │
+                                       │              │                               │  (Garage by  │
+                                       │ - Sessions   │                               │   default)   │
                                        │ - State      │                               │ - Files      │
                                        │ - Caching    │                               │ - State      │
                                        │              │                               │   Archives   │
@@ -53,11 +53,14 @@ This document provides a comprehensive overview of the Code Interpreter API arch
 
 The API layer contains thin endpoint handlers that delegate to the orchestrator:
 
-| File        | Purpose                                                       |
-| ----------- | ------------------------------------------------------------- |
-| `exec.py`   | Code execution endpoint, delegates to `ExecutionOrchestrator` |
-| `files.py`  | File upload, download, and list operations                    |
-| `health.py` | Health checks and metrics endpoints                           |
+| File                   | Purpose                                                          |
+| ---------------------- | ---------------------------------------------------------------- |
+| `exec.py`              | Code execution endpoint, delegates to `ExecutionOrchestrator`    |
+| `programmatic.py`      | `POST /exec/programmatic` — Programmatic Tool Calling endpoint   |
+| `files.py`             | File upload, download, and list operations                       |
+| `health.py`            | Health checks and metrics endpoints                              |
+| `admin.py`             | Admin / API key management endpoints (require `MASTER_API_KEY`)  |
+| `dashboard_metrics.py` | Metrics endpoints powering the admin dashboard UI                |
 
 **Design principle:** Endpoints are intentionally thin (~70 lines each). All business logic resides in services.
 
@@ -65,29 +68,32 @@ The API layer contains thin endpoint handlers that delegate to the orchestrator:
 
 Business logic is organized into focused services:
 
-| Service                   | File                | Responsibility                   |
-| ------------------------- | ------------------- | -------------------------------- |
-| **ExecutionOrchestrator** | `orchestrator.py`   | Coordinates execution workflow   |
-| **SessionService**        | `session.py`        | Redis session management         |
-| **FileService**           | `file.py`           | MinIO file storage               |
-| **StateService**          | `state.py`          | Internal Python state persistence (Redis, no external API) |
-| **StateArchivalService**  | `state_archival.py` | Internal state archival (MinIO)           |
-| **AuthService**           | `auth.py`           | API key authentication           |
-| **HealthService**         | `health.py`         | Health checks                    |
-| **MetricsService**        | `metrics.py`        | Metrics collection               |
-| **CleanupService**        | `cleanup.py`        | Background cleanup tasks         |
+| Service                   | File                | Responsibility                                              |
+| ------------------------- | ------------------- | ----------------------------------------------------------- |
+| **ExecutionOrchestrator** | `orchestrator.py`   | Coordinates execution workflow                              |
+| **ProgrammaticService**   | `programmatic.py`   | PTC paused-execution state, continuation tokens, tool stubs |
+| **SessionService**        | `session.py`        | Redis session management                                    |
+| **FileService**           | `file.py`           | S3 file storage (boto3 → Garage / any S3 backend)           |
+| **StateService**          | `state.py`          | Internal Python state persistence (Redis, no external API)  |
+| **StateArchivalService**  | `state_archival.py` | Internal state archival (S3 cold storage)                   |
+| **AuthService**           | `auth.py`           | API key authentication                                      |
+| **HealthService**         | `health.py`         | Health checks                                               |
+| **MetricsService**        | `metrics.py`        | Metrics collection                                          |
+| **CleanupService**        | `cleanup.py`        | Background cleanup tasks                                    |
 
 ### 3. Sandbox Management (`src/services/sandbox/`)
 
 Sandbox lifecycle is managed by a dedicated package:
 
-| Component            | File               | Purpose                                              |
-| -------------------- | ------------------ | ---------------------------------------------------- |
-| **SandboxManager**   | `manager.py`       | Sandbox lifecycle (create, destroy)                  |
-| **SandboxPool**      | `pool.py`          | Pre-warmed Python REPL sandbox pool                  |
-| **SandboxExecutor**  | `executor.py`      | Code execution in nsjail sandboxes                   |
-| **REPLExecutor**     | `repl_executor.py` | Python REPL communication                            |
-| **NsjailConfig**     | `nsjail.py`        | nsjail CLI argument builder and SandboxInfo dataclass |
+| Component            | File                  | Purpose                                                                                          |
+| -------------------- | --------------------- | ------------------------------------------------------------------------------------------------ |
+| **SandboxManager**   | `manager.py`          | Sandbox lifecycle (create, destroy)                                                              |
+| **SandboxPool**      | `pool.py`             | Pre-warmed Python REPL sandbox pool                                                              |
+| **SandboxExecutor**  | `executor.py`         | Code execution in nsjail sandboxes                                                               |
+| **REPLExecutor**     | `repl_executor.py`    | Python REPL communication                                                                        |
+| **NsjailConfig**     | `nsjail.py`           | nsjail CLI argument builder and SandboxInfo dataclass                                            |
+| **EgressProxy**      | `egress_proxy.py`     | Inline allowlist HTTPS proxy (only used when `ENABLE_SANDBOX_NETWORK=true` for skill installs)   |
+| **EgressFirewall**   | `egress_firewall.py`  | Sandbox egress rules / iptables enforcement for the proxy                                        |
 
 ### 4. Execution Engine (`src/services/execution/`)
 
@@ -183,7 +189,7 @@ await event_bus.publish(ExecutionCompleted(session_id=..., execution_id=...))
        │
        ├── 3b. Get/create session
        │
-       └── 3c. Store file in MinIO
+       └── 3c. Store file in S3 (Garage by default)
        │
        ▼
 4. Return session_id and file_id
@@ -264,14 +270,14 @@ Redis stores ephemeral data with TTL-based expiration:
 | State       | `state:{session_id}`   | 2h     | Python namespace (compressed) |
 | Rate limits | `ratelimit:{key}`      | varies | API rate limiting             |
 
-### MinIO (S3-Compatible)
+### S3-Compatible Object Storage (Garage by default)
 
-MinIO stores persistent files and archived state:
+The default deployment uses [Garage](https://garagehq.deuxfleurs.fr/) as the S3-compatible backend (see `docker-compose.yml`). Any other S3-compatible service (MinIO, AWS S3, Cloudflare R2, etc.) works by changing the `S3_*` environment variables.
 
-| Bucket                   | Object Pattern               | TTL | Purpose               |
-| ------------------------ | ---------------------------- | --- | --------------------- |
-| `code-interpreter-files` | `{session_id}/{file_id}`     | 24h | User files            |
-| `code-interpreter-files` | `state-archive/{session_id}` | 7d  | Archived Python state |
+| Bucket                   | Object Pattern               | TTL  | Purpose                                          |
+| ------------------------ | ---------------------------- | ---- | ------------------------------------------------ |
+| `code-interpreter-files` | `{session_id}/{file_id}`     | 24h  | User files                                       |
+| `code-interpreter-files` | `state-archive/{session_id}` | 1d   | Archived Python state (`STATE_ARCHIVE_TTL_DAYS`) |
 
 ---
 
@@ -283,7 +289,7 @@ Services are registered and injected via FastAPI's dependency system:
 # src/dependencies/services.py
 
 def get_file_service() -> FileService:
-    return FileService(minio_client)
+    return FileService()  # constructs a boto3 S3 client from settings.s3.*
 
 def get_session_service() -> SessionService:
     return SessionService(redis_pool)
@@ -318,11 +324,11 @@ Environment Variables (.env)
 │   ├── api.py        → API settings (host, port, debug)                     │
 │   ├── sandbox.py    → Sandbox settings (nsjail binary, base dir)            │
 │   ├── redis.py      → Redis settings (host, port, pool)                    │
-│   ├── minio.py      → MinIO settings (endpoint, credentials)               │
+│   ├── s3.py         → S3 storage settings (endpoint, credentials, bucket)  │
 │   ├── security.py   → Security settings (isolation, headers)               │
 │   ├── resources.py  → Resource limits (memory, cpu, timeout)               │
 │   ├── logging.py    → Logging settings (level, format)                     │
-│   └── languages.py  → Language configuration (images, multipliers)         │
+│   └── languages.py  → Language configuration (multipliers, commands)       │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
          │

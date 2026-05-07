@@ -1,16 +1,16 @@
 services:
   # Code Interpreter API (unified image with nsjail sandboxing)
   api:
-    build:
-      context: .
-      target: app
-    image: ${API_IMAGE:-code-interpreter:nsjail}
-    pull_policy: never
+    image: ${API_IMAGE:-ghcr.io/usnavy13/librecodeinterpreter:main}
+    pull_policy: always
     container_name: code-interpreter-api
     restart: unless-stopped
     # tini init process reaps zombie nsjail/python child processes
     init: true
-    # nsjail requires these capabilities to create namespaces and cgroups
+    # nsjail requires these capabilities to create namespaces and cgroups.
+    # NET_ADMIN is required to install iptables egress rules for the sandbox uid
+    # when ENABLE_SANDBOX_NETWORK=true. Restricts sandbox traffic to the
+    # inline allowlist proxy and prevents SSRF to Redis/S3/etc.
     cap_add:
       - SYS_ADMIN
       - NET_ADMIN
@@ -26,6 +26,10 @@ services:
       - S3_ENDPOINT=garage:3900
     volumes:
       - sandbox-data:/var/lib/code-interpreter/sandboxes
+      # Persistent skill-deps cache: pip/npm/go/cargo install here when
+      # ENABLE_SANDBOX_NETWORK=true so future executions reuse the install.
+      # Survives container restarts; purge with POST /api/v1/admin/skill-deps/purge.
+      - skill-deps:/opt/skill-deps
       # SSL_CERTS_PATH is a host path; SSL_CERT_FILE and SSL_KEY_FILE must point
       # to the mounted files inside the container under /app/ssl.
       - ${SSL_CERTS_PATH:-./ssl}:/app/ssl:ro
@@ -43,7 +47,6 @@ services:
       timeout: 15s
       retries: 3
       start_period: 30s
-    # No /var/run/docker.sock mount needed
 
   # Redis for session management
   redis:
@@ -66,7 +69,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # Garage S3-compatible object storage (replaces MinIO)
+  # Garage S3-compatible object storage
   garage:
     image: dxflrs/garage:v2.3.0
     container_name: code-interpreter-garage
@@ -91,5 +94,6 @@ services:
 
 volumes:
   sandbox-data:
+  skill-deps:
   redis-data:
   garage-data:
