@@ -4,7 +4,7 @@ fastapi==0.135.2
 uvicorn[standard]==0.42.0
 
 # Data validation and serialization
-pydantic==2.12.5
+pydantic==2.13.4
 pydantic-settings==2.13.1
 
 # HTTP client for external requests
