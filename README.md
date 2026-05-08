@@ -228,6 +228,10 @@ Please see [SECURITY.md](docs/SECURITY.md) for our security policy and reporting
 
 We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details on how to get started, our code of conduct, and the pull request process.
 
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=usnavy13/LibreCodeInterpreter&type=Date)](https://star-history.com/#usnavy13/LibreCodeInterpreter&Date)
+
 ## License
 
 This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
