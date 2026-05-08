@@ -14,7 +14,7 @@ httpx==0.28.1
 redis==7.4.0
 
 # SQLite async support for metrics
-aiosqlite>=0.19.0
+aiosqlite>=0.22.1
 
 # S3 storage client (Garage/any S3-compatible backend)
 boto3>=1.35.0
