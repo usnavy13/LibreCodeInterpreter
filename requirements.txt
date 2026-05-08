@@ -32,7 +32,7 @@ pytest-mock==3.15.1
 # Development tools
 black>=24.3.0
 flake8==7.3.0
-mypy==1.19.1
+mypy==2.0.0
 
 # Environment management
 python-dotenv==1.2.2
