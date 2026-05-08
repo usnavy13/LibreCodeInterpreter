@@ -128,8 +128,8 @@ Python state persistence introduces additional security considerations:
 #### Storage Security
 
 - **Redis encryption**: Consider enabling Redis TLS in production for encrypted state storage
-- **MinIO encryption**: Enable server-side encryption for archived states
-- **TTL-based cleanup**: States automatically expire (2 hours in Redis, 7 days in MinIO archives)
+- **S3 encryption**: Enable server-side encryption for archived states
+- **TTL-based cleanup**: States automatically expire (2 hours in Redis, 7 days in S3 archives)
 - **Size limits**: `STATE_MAX_SIZE_MB` prevents denial-of-service via large states
 
 #### Session Isolation
@@ -153,7 +153,7 @@ This ensures each execution starts with a clean namespace.
 State persistence operations are logged:
 
 - State save (size, session_id)
-- State load (session_id, source: redis/minio)
+- State load (session_id, source: redis/s3)
 - State archive (session_id)
 - State size limit exceeded (warning)
 

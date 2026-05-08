@@ -417,9 +417,7 @@ class TestExecEndpoint:
         assert response.status_code == 503
         assert "error" in response.json()
 
-    def test_exec_delayed_service_error_after_stream_start(
-        self, client, auth_headers
-    ):
+    def test_exec_delayed_service_error_after_stream_start(self, client, auth_headers):
         """Delayed failures should return a JSON error payload, not crash the stream."""
 
         async def _delayed_failure(*args, **kwargs):

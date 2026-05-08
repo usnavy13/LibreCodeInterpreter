@@ -62,10 +62,61 @@ class TestSanitizeFilename:
         result = OutputProcessor.sanitize_filename("/absolute/path/file.txt")
         assert result == "file.txt"
 
-    def test_unicode_characters_replaced(self):
-        """Test that non-ASCII characters are replaced."""
+    def test_unicode_characters_preserved(self):
+        """Test that Unicode letters are preserved."""
         result = OutputProcessor.sanitize_filename("résumé.docx")
-        assert result == "r_sum_.docx"
+        assert result == "résumé.docx"
+
+    def test_cjk_characters_preserved(self):
+        """Test that CJK characters are preserved."""
+        result = OutputProcessor.sanitize_filename("日本語レポート.xlsx")
+        assert result == "日本語レポート.xlsx"
+
+    def test_cyrillic_characters_preserved(self):
+        """Test that Cyrillic characters are preserved."""
+        result = OutputProcessor.sanitize_filename("файл.txt")
+        assert result == "файл.txt"
+
+    def test_korean_characters_preserved(self):
+        """Test that Korean characters are preserved."""
+        result = OutputProcessor.sanitize_filename("보고서.xlsx")
+        assert result == "보고서.xlsx"
+
+    def test_arabic_characters_preserved(self):
+        """Test that Arabic characters are preserved."""
+        result = OutputProcessor.sanitize_filename("تقرير.pdf")
+        assert result == "تقرير.pdf"
+
+    def test_mixed_unicode_and_ascii(self):
+        """Test mixed Unicode and ASCII filename."""
+        result = OutputProcessor.sanitize_filename("report_2024_報告.pdf")
+        assert result == "report_2024_報告.pdf"
+
+    def test_unicode_with_spaces_sanitized(self):
+        """Test that spaces in Unicode filenames are still replaced."""
+        result = OutputProcessor.sanitize_filename("日本語 レポート.xlsx")
+        assert result == "日本語_レポート.xlsx"
+
+    def test_dangerous_chars_still_blocked(self):
+        """Test that shell metacharacters are still replaced."""
+        result = OutputProcessor.sanitize_filename("file<>|&;$().txt")
+        assert result == "file________.txt"
+
+    def test_underscores_preserved(self):
+        """Test that underscores are preserved."""
+        result = OutputProcessor.sanitize_filename("my_file_name.txt")
+        assert result == "my_file_name.txt"
+
+    def test_emoji_preserved(self):
+        """Test that emoji are preserved (matches LibreChat's \\p{Emoji})."""
+        result = OutputProcessor.sanitize_filename("chart\U0001F4CA.csv")
+        assert result == "chart\U0001F4CA.csv"
+
+    def test_nfd_normalized_to_nfc(self):
+        """Test that decomposed Unicode is NFC-normalized before sanitizing."""
+        # e + combining acute (U+0301) -> precomposed e-acute
+        result = OutputProcessor.sanitize_filename("Café.txt")
+        assert result == "Café.txt"
 
     def test_brackets_replaced(self):
         """Test that brackets are replaced with underscores."""
@@ -102,3 +153,81 @@ class TestSanitizeFilename:
         assert result.endswith(".txt")
         # Should have a random suffix before extension
         assert "-" in result
+
+
+class TestSanitizeRelativePath:
+    """Tests for sanitize_relative_path — used wherever filenames may legitimately
+    contain subdirectories (LibreChat skill bundles, nested artifacts)."""
+
+    def test_simple_filename_unchanged(self):
+        assert OutputProcessor.sanitize_relative_path("foo.png") == "foo.png"
+
+    def test_subdirs_preserved(self):
+        assert (
+            OutputProcessor.sanitize_relative_path("charts/foo.png") == "charts/foo.png"
+        )
+
+    def test_deep_subdirs_preserved(self):
+        assert (
+            OutputProcessor.sanitize_relative_path("a/b/c/d/file.txt")
+            == "a/b/c/d/file.txt"
+        )
+
+    def test_each_segment_sanitized(self):
+        assert (
+            OutputProcessor.sanitize_relative_path("my charts/foo bar.png")
+            == "my_charts/foo_bar.png"
+        )
+
+    def test_traversal_segments_dropped(self):
+        # `..` is dropped per-segment; remaining segments survive.
+        assert OutputProcessor.sanitize_relative_path("a/../b/c.txt") == "a/b/c.txt"
+
+    def test_only_traversal_returns_underscore(self):
+        assert OutputProcessor.sanitize_relative_path("../../..") == "_"
+
+    def test_leading_slash_stripped(self):
+        assert (
+            OutputProcessor.sanitize_relative_path("/charts/foo.png")
+            == "charts/foo.png"
+        )
+
+    def test_trailing_slash_dropped(self):
+        assert OutputProcessor.sanitize_relative_path("charts/") == "charts"
+
+    def test_consecutive_slashes_collapsed(self):
+        assert (
+            OutputProcessor.sanitize_relative_path("charts//foo.png")
+            == "charts/foo.png"
+        )
+
+    def test_empty_string_returns_underscore(self):
+        assert OutputProcessor.sanitize_relative_path("") == "_"
+
+    def test_just_slash_returns_underscore(self):
+        assert OutputProcessor.sanitize_relative_path("/") == "_"
+
+    def test_backslashes_treated_as_separators(self):
+        assert (
+            OutputProcessor.sanitize_relative_path("charts\\foo.png")
+            == "charts/foo.png"
+        )
+
+    def test_librechat_skill_bundle_pattern(self):
+        # The exact shape LibreChat sends for skill priming uploads.
+        assert (
+            OutputProcessor.sanitize_relative_path("skills/foo/SKILL.md")
+            == "skills/foo/SKILL.md"
+        )
+
+    def test_unicode_segments_preserved(self):
+        """Test that Unicode directory and file names are preserved."""
+        assert (
+            OutputProcessor.sanitize_relative_path("報告/2024年/レポート.xlsx")
+            == "報告/2024年/レポート.xlsx"
+        )
+
+    def test_sanitize_filename_unchanged_for_basename_callers(self):
+        """Regression: sanitize_filename still flattens (legacy upload behavior)."""
+        # Existing single-call sites rely on this.
+        assert OutputProcessor.sanitize_filename("path/to/file.txt") == "file.txt"

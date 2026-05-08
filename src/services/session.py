@@ -99,21 +99,19 @@ class SessionService(SessionServiceInterface):
                 else:
                     logger.debug("No expired sessions to clean up")
 
-                # Opportunistically prune orphan MinIO objects (configurable)
-                if self._file_service and settings.enable_orphan_minio_cleanup:
+                # Opportunistically prune orphan S3 objects (configurable)
+                if self._file_service and settings.enable_orphan_s3_cleanup:
                     try:
                         deleted_orphans = (
                             await self._file_service.cleanup_orphan_objects()
                         )
                         if deleted_orphans:
                             logger.info(
-                                "Pruned orphan MinIO objects",
+                                "Pruned orphan S3 objects",
                                 deleted_orphans=deleted_orphans,
                             )
                     except Exception as e:
-                        logger.error(
-                            "Failed pruning orphan MinIO objects", error=str(e)
-                        )
+                        logger.error("Failed pruning orphan S3 objects", error=str(e))
 
                 # Wait for the configured cleanup interval
                 await asyncio.sleep(settings.session_cleanup_interval_minutes * 60)

@@ -16,6 +16,7 @@ Usage:
 """
 
 import asyncio
+import math
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -55,6 +56,12 @@ class ExecutionContext:
     request_id: str
     session_id: Optional[str] = None
     mounted_files: Optional[List[Dict[str, Any]]] = None
+    # Snapshot of (mtime_ns, size) per mounted-file basename, captured AFTER mount
+    # but BEFORE user code runs. Used by _handle_generated_files to detect
+    # in-place edits — files whose stats changed get surfaced as new generated
+    # FileRefs in the current session, so LibreChat tracks the new version on
+    # the next call. Empty when no files were mounted.
+    mounted_file_stats: Optional[Dict[str, tuple]] = None
     execution: Optional[Any] = None
     generated_files: Optional[List[FileRef]] = None
     stdout: str = ""
@@ -148,10 +155,11 @@ class ExecutionOrchestrator:
             # Step 5.5: Save new state (Python only, before file handling)
             await self._save_state(ctx)
 
-            # Step 5.6: Update mounted files to capture in-place edits
-            await self._update_mounted_files_content(ctx)
-
-            # Step 6: Handle generated files
+            # Step 6: Handle generated files. Includes in-place edits to mounted
+            # files now — runner._detect_generated_files compares pre-execution
+            # mtime/size against current state and surfaces edited files. Each
+            # such file becomes a new file_id owned by ctx.session_id, so
+            # LibreChat's next call references the updated content.
             ctx.generated_files = await self._handle_generated_files(ctx)
 
             # Step 7: Build response
@@ -407,6 +415,13 @@ class ExecutionOrchestrator:
                     file_info.file_id,
                 )
 
+            file_metadata = await self.file_service.get_file_metadata(
+                file_ref.session_id, file_info.file_id
+            )
+            is_read_only = (
+                file_metadata.get("is_read_only") == "1" if file_metadata else False
+            )
+
             mounted.append(
                 {
                     "file_id": file_info.file_id,
@@ -415,6 +430,8 @@ class ExecutionOrchestrator:
                     "size": file_info.size,
                     "session_id": file_ref.session_id,
                     "is_linked_input": False,
+                    "entity_id": getattr(file_ref, "entity_id", None),
+                    "is_read_only": is_read_only,
                 }
             )
             mounted_ids.add(key)
@@ -450,6 +467,9 @@ class ExecutionOrchestrator:
             is_linked_input = (
                 file_metadata.get("type") == "linked_input" if file_metadata else False
             )
+            is_read_only = (
+                file_metadata.get("is_read_only") == "1" if file_metadata else False
+            )
 
             # Skip duplicates (shouldn't happen, but defensive)
             key = (ctx.session_id, file_info.file_id)
@@ -464,6 +484,7 @@ class ExecutionOrchestrator:
                     "size": file_info.size,
                     "session_id": ctx.session_id,
                     "is_linked_input": is_linked_input,
+                    "is_read_only": is_read_only,
                 }
             )
             mounted_ids.add(key)
@@ -479,11 +500,11 @@ class ExecutionOrchestrator:
         return mounted
 
     async def _load_state(self, ctx: ExecutionContext) -> None:
-        """Load previous state from Redis (or MinIO fallback) for Python sessions.
+        """Load previous state from Redis (or S3 fallback) for Python sessions.
 
         Priority order:
         1. Redis hot storage (within 2-hour TTL)
-        2. MinIO cold storage (archived state)
+        2. S3 cold storage (archived state)
         """
         if not settings.state_persistence_enabled:
             return
@@ -510,14 +531,14 @@ class ExecutionOrchestrator:
                 )
                 return
 
-            # Try MinIO fallback (cold storage)
+            # Try S3 fallback (cold storage)
             if self.state_archival_service and settings.state_archive_enabled:
                 ctx.initial_state = await self.state_archival_service.restore_state(
                     ctx.session_id
                 )
                 if ctx.initial_state:
                     logger.debug(
-                        "Restored state from MinIO",
+                        "Restored state from S3",
                         session_id=ctx.session_id[:12],
                         state_size=len(ctx.initial_state),
                     )
@@ -553,9 +574,9 @@ class ExecutionOrchestrator:
                 max_redis_bytes = settings.state_max_redis_size_mb * 1024 * 1024
 
                 if raw_size > max_redis_bytes:
-                    # Large state: store blob in MinIO, pointer in Redis
+                    # Large state: store blob in S3, pointer in Redis
                     logger.info(
-                        "State exceeds Redis threshold, storing in MinIO",
+                        "State exceeds Redis threshold, storing in S3",
                         session_id=ctx.session_id[:12],
                         state_size_mb=round(raw_size / 1024 / 1024, 1),
                         threshold_mb=settings.state_max_redis_size_mb,
@@ -572,9 +593,9 @@ class ExecutionOrchestrator:
                             ttl_seconds=settings.state_ttl_seconds,
                         )
                     else:
-                        # MinIO failed, fall back to Redis anyway
+                        # S3 archival failed, fall back to Redis anyway
                         logger.warning(
-                            "MinIO archival failed, falling back to Redis",
+                            "S3 archival failed, falling back to Redis",
                             session_id=ctx.session_id[:12],
                         )
                         await self.state_service.save_state(
@@ -604,96 +625,17 @@ class ExecutionOrchestrator:
                     warning=error,
                 )
 
-    async def _update_mounted_files_content(self, ctx: ExecutionContext) -> None:
-        """Re-upload all mounted files to capture any modifications.
-
-        This ensures in-place edits to mounted files persist after execution.
-        Called after execution completes, reads current content from container
-        and updates the file in MinIO storage.
-
-        SECURITY: Only updates files that belong to the current session.
-        Files referenced from other sessions are read-only to prevent
-        cross-session/cross-user data modification.
-        """
-        if not ctx.mounted_files or not ctx.container:
-            return
-
-        sandbox_manager = self.execution_service.sandbox_manager
-
-        for file_info in ctx.mounted_files:
-            try:
-                filename = file_info.get("filename")
-                file_id = file_info.get("file_id")
-                file_session_id = file_info.get("session_id")
-
-                if not all([filename, file_id, file_session_id]):
-                    continue
-
-                # SECURITY: Only update files from the current session
-                # Files from other sessions are read-only
-                if file_session_id != ctx.session_id:
-                    logger.debug(
-                        "Skipping update for cross-session file",
-                        filename=filename,
-                        file_session=file_session_id[:12] if file_session_id else None,
-                        exec_session=ctx.session_id[:12] if ctx.session_id else None,
-                    )
-                    continue
-
-                # SECURITY: Skip agent-assigned files (uploaded with entity_id)
-                # Agent files are read-only and cannot be modified by user code
-                file_metadata = await self.file_service.get_file_metadata(
-                    file_session_id, file_id
-                )
-                if file_metadata and file_metadata.get("is_agent_file") == "1":
-                    logger.debug(
-                        "Skipping update for agent-assigned file (read-only)",
-                        filename=filename,
-                        file_id=file_id,
-                    )
-                    continue
-
-                if file_metadata and file_metadata.get("is_read_only") == "1":
-                    logger.debug(
-                        "Skipping update for read-only linked file",
-                        filename=filename,
-                        file_id=file_id,
-                    )
-                    continue
-
-                # Read current content from container
-                file_path = f"/mnt/data/{filename}"
-                content = sandbox_manager.get_file_content_from_sandbox(
-                    ctx.container, file_path
-                )
-
-                if content is None:
-                    # File may have been deleted - that's ok
-                    logger.debug(
-                        "Mounted file not found after execution",
-                        filename=filename,
-                    )
-                    continue
-
-                # Update file in storage
-                await self.file_service.update_file_content(
-                    session_id=file_session_id,
-                    file_id=file_id,
-                    content=content,
-                )
-
-                logger.debug(
-                    "Updated mounted file content",
-                    filename=filename,
-                    size=len(content),
-                )
-
-            except Exception as e:
-                logger.warning(
-                    "Failed to update mounted file",
-                    filename=file_info.get("filename"),
-                    error=str(e),
-                )
+    # NOTE: `_update_mounted_files_content` was removed in favor of letting
+    # `_handle_generated_files` handle in-place edits. The old in-place-update
+    # path silently dropped edits in three common scenarios (cross-session
+    # mounted files, agent-uploaded files, read-only linked aliases), and
+    # because the response carried no signal that an edit had occurred,
+    # LibreChat had no way to track the new content for the next call. The
+    # new model: if user code modifies a mounted file, the runner detects
+    # the mtime/size change and surfaces it as a regular generated file in
+    # the current session. Each iteration produces a fresh file_id which
+    # LibreChat then references on the next call. See `runner.py:
+    # _detect_generated_files` and `SandboxInfo.mounted_file_stats`.
 
     def _normalize_args(self, args: Any) -> Optional[List[str]]:
         """Normalize args parameter to List[str] or None.
@@ -721,10 +663,18 @@ class ExecutionOrchestrator:
         # Normalize args from request
         normalized_args = self._normalize_args(ctx.request.args)
 
+        # Convert per-request timeout (ms) to seconds, clamped to server max.
+        timeout_seconds = (
+            math.ceil(ctx.request.timeout / 1000)
+            if ctx.request.timeout
+            else settings.max_execution_time
+        )
+        timeout_seconds = min(timeout_seconds, settings.max_execution_time)
+
         exec_request = ExecuteCodeRequest(
             code=ctx.request.code,
             language=ctx.request.lang,
-            timeout=settings.max_execution_time,
+            timeout=timeout_seconds,
             args=normalized_args,
         )
 
@@ -762,7 +712,13 @@ class ExecutionOrchestrator:
         return execution
 
     async def _handle_generated_files(self, ctx: ExecutionContext) -> List[FileRef]:
-        """Handle files generated during execution."""
+        """Handle files generated during execution.
+
+        Preserves any subdirectory structure under `/mnt/data/` so files
+        like `/mnt/data/charts/foo.png` come back as `name="charts/foo.png"`
+        in the response. LibreChat (PR #12848) preserves these paths in its
+        own rendering — collapsing them here would break that.
+        """
         generated = []
 
         for output in ctx.execution.outputs:
@@ -770,9 +726,44 @@ class ExecutionOrchestrator:
                 continue
 
             file_path = output.content
-            filename = file_path.split("/")[-1] if "/" in file_path else file_path
+            relative = (
+                file_path[len("/mnt/data/") :]
+                if file_path.startswith("/mnt/data/")
+                else file_path
+            )
 
-            if not filename or filename.startswith("."):
+            # Skip hidden files (any segment starting with `.`). Done on the
+            # raw path because sanitize_filename rewrites `.foo` to `_.foo`,
+            # which would defeat the check.
+            raw_segments = [s for s in relative.replace("\\", "/").split("/") if s]
+            if not raw_segments or any(s.startswith(".") for s in raw_segments):
+                continue
+
+            filename = OutputProcessor.sanitize_relative_path(relative)
+            if not filename or filename == "_":
+                continue
+
+            meta = output.metadata or {}
+
+            # Inherited files: untouched mounted files. Skip download and emit
+            # the original FileRef so clients can split "Generated" from
+            # "Available" in LLM prompts and avoid re-uploading.
+            if meta.get("inherited"):
+                generated.append(
+                    FileRef(
+                        id=meta["original_file_id"],
+                        name=filename,
+                        session_id=meta.get("original_session_id"),
+                        inherited=True,
+                        entity_id=meta.get("original_entity_id"),
+                    )
+                )
+                logger.debug(
+                    "Inherited file passed through",
+                    session_id=ctx.session_id,
+                    filename=filename,
+                    original_file_id=meta.get("original_file_id"),
+                )
                 continue
 
             try:
@@ -787,13 +778,17 @@ class ExecutionOrchestrator:
                     file_content,
                 )
 
-                generated.append(
-                    FileRef(
-                        id=file_id,
-                        name=filename,
-                        session_id=ctx.session_id,  # Include for cross-message persistence
-                    )
+                file_ref = FileRef(
+                    id=file_id,
+                    name=filename,
+                    session_id=ctx.session_id,  # Include for cross-message persistence
                 )
+                if meta.get("modified_from_id"):
+                    file_ref.modified_from = {
+                        "id": meta["modified_from_id"],
+                        "session_id": meta.get("modified_from_session_id") or "",
+                    }
+                generated.append(file_ref)
                 logger.debug(
                     "Generated file stored",
                     session_id=ctx.session_id,

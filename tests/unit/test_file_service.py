@@ -9,12 +9,14 @@ from src.services.file import FileService
 
 
 @pytest.fixture
-def mock_minio_client():
-    """Mock MinIO client."""
+def mock_s3_client():
+    """Mock S3 client."""
     client = MagicMock()
-    client.bucket_exists = MagicMock(return_value=True)
+    client.head_bucket = MagicMock(return_value={})
     client.put_object = MagicMock()
     client.get_object = MagicMock()
+    client.delete_object = MagicMock()
+    client.head_object = MagicMock(return_value={"ContentLength": 1024})
     return client
 
 
@@ -35,14 +37,14 @@ def mock_redis_client():
 
 
 @pytest.fixture
-def file_service(mock_minio_client, mock_redis_client):
+def file_service(mock_s3_client, mock_redis_client):
     """Create FileService with mocked clients."""
-    with patch("src.services.file.Minio") as mock_minio_class:
-        mock_minio_class.return_value = mock_minio_client
+    with patch("src.services.file.boto3") as mock_boto3:
+        mock_boto3.client.return_value = mock_s3_client
         with patch("src.services.file.redis.from_url") as mock_redis_from_url:
             mock_redis_from_url.return_value = mock_redis_client
             service = FileService()
-            service.minio_client = mock_minio_client
+            service.s3_client = mock_s3_client
             service.redis_client = mock_redis_client
             return service
 
@@ -52,7 +54,7 @@ class TestUpdateFileContent:
 
     @pytest.mark.asyncio
     async def test_update_file_content_rejects_read_only_file(
-        self, file_service, mock_minio_client, mock_redis_client
+        self, file_service, mock_s3_client, mock_redis_client
     ):
         """Read-only linked aliases must not overwrite the source object."""
         session_id = "test-session"
@@ -73,13 +75,13 @@ class TestUpdateFileContent:
         )
 
         assert result is False
-        mock_minio_client.put_object.assert_not_called()
+        mock_s3_client.put_object.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_update_file_content_success(
-        self, file_service, mock_minio_client, mock_redis_client
+        self, file_service, mock_s3_client, mock_redis_client
     ):
-        """Test that update_file_content overwrites file in MinIO."""
+        """Test that update_file_content overwrites file in S3."""
         session_id = "test-session-123"
         file_id = "test-file-456"
         new_content = b"modified file content"
@@ -99,14 +101,12 @@ class TestUpdateFileContent:
         )
 
         assert result is True
-        # Verify MinIO put_object was called
-        mock_minio_client.put_object.assert_called_once()
-        # Verify metadata was updated
+        mock_s3_client.put_object.assert_called_once()
         mock_redis_client.hset.assert_called()
 
     @pytest.mark.asyncio
     async def test_update_file_content_updates_metadata(
-        self, file_service, mock_minio_client, mock_redis_client
+        self, file_service, mock_s3_client, mock_redis_client
     ):
         """Test that update_file_content updates file size metadata."""
         session_id = "test-session-123"
@@ -177,10 +177,10 @@ class TestUpdateFileContent:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_update_file_content_minio_error(
-        self, file_service, mock_minio_client, mock_redis_client
+    async def test_update_file_content_s3_error(
+        self, file_service, mock_s3_client, mock_redis_client
     ):
-        """Test handling of MinIO error during update."""
+        """Test handling of S3 error during update."""
         session_id = "test-session"
         file_id = "file-id"
 
@@ -191,8 +191,7 @@ class TestUpdateFileContent:
             "content_type": "text/plain",
         }
 
-        # Mock MinIO error
-        mock_minio_client.put_object.side_effect = Exception("MinIO connection error")
+        mock_s3_client.put_object.side_effect = Exception("S3 connection error")
 
         result = await file_service.update_file_content(
             session_id=session_id,
@@ -204,7 +203,7 @@ class TestUpdateFileContent:
 
     @pytest.mark.asyncio
     async def test_update_file_content_preserves_content_type(
-        self, file_service, mock_minio_client, mock_redis_client
+        self, file_service, mock_s3_client, mock_redis_client
     ):
         """Test that content_type is preserved from original metadata."""
         session_id = "test-session"
@@ -225,14 +224,12 @@ class TestUpdateFileContent:
         )
 
         assert result is True
-        # Verify put_object was called with preserved content_type
-        put_call = mock_minio_client.put_object.call_args
-        # The content_type should be "image/png" from the metadata
-        assert "image/png" in str(put_call)
+        put_call = mock_s3_client.put_object.call_args
+        assert put_call.kwargs.get("ContentType") == "image/png"
 
     @pytest.mark.asyncio
     async def test_update_file_content_only_updates_size(
-        self, file_service, mock_minio_client, mock_redis_client
+        self, file_service, mock_s3_client, mock_redis_client
     ):
         """Test that update_file_content only updates size metadata."""
         session_id = "test-session"
@@ -354,7 +351,7 @@ class TestLinkedFiles:
 
     @pytest.mark.asyncio
     async def test_delete_linked_file_only_removes_metadata(
-        self, file_service, mock_minio_client, mock_redis_client
+        self, file_service, mock_s3_client, mock_redis_client
     ):
         """Deleting a linked alias must not delete the shared object."""
         mock_redis_client.hgetall.return_value = {
@@ -375,13 +372,13 @@ class TestLinkedFiles:
         result = await file_service.delete_file("target-session", "linked-file")
 
         assert result is True
-        mock_minio_client.remove_object.assert_not_called()
+        mock_s3_client.delete_object.assert_not_called()
         mock_redis_client.delete.assert_called_once()
         assert mock_redis_client.srem.call_count == 2
 
     @pytest.mark.asyncio
     async def test_delete_source_file_keeps_object_when_aliases_exist(
-        self, file_service, mock_minio_client, mock_redis_client
+        self, file_service, mock_s3_client, mock_redis_client
     ):
         """Deleting the source metadata must not delete a shared object still referenced by aliases."""
         mock_redis_client.hgetall.return_value = {
@@ -400,12 +397,12 @@ class TestLinkedFiles:
         result = await file_service.delete_file("source-session", "source-file")
 
         assert result is True
-        mock_minio_client.remove_object.assert_not_called()
+        mock_s3_client.delete_object.assert_not_called()
         mock_redis_client.delete.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_delete_last_linked_file_cleans_orphaned_shared_object(
-        self, file_service, mock_minio_client, mock_redis_client
+        self, file_service, mock_s3_client, mock_redis_client
     ):
         """The final alias cleanup should delete the shared object once the source is gone."""
         mock_redis_client.hgetall.side_effect = [
@@ -430,7 +427,7 @@ class TestLinkedFiles:
         result = await file_service.delete_file("target-session", "linked-file")
 
         assert result is True
-        mock_minio_client.remove_object.assert_called_once_with(
-            file_service.bucket_name,
-            "sessions/source/uploads/source-file",
+        mock_s3_client.delete_object.assert_called_once_with(
+            Bucket=file_service.bucket_name,
+            Key="sessions/source/uploads/source-file",
         )

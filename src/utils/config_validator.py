@@ -4,8 +4,8 @@ import logging
 import shutil
 from typing import List, Dict, Any
 import redis
-from minio import Minio
-from minio.error import S3Error
+import boto3
+from botocore.exceptions import ClientError
 
 from ..config import settings
 
@@ -38,7 +38,7 @@ class ConfigValidator:
 
         # Validate external services
         self._validate_redis_connection()
-        self._validate_minio_connection()
+        self._validate_s3_connection()
         self._validate_nsjail()
 
         # Log results
@@ -121,40 +121,40 @@ class ConfigValidator:
             else:
                 self.errors.append(f"Redis validation error: {e}")
 
-    def _validate_minio_connection(self):
-        """Validate MinIO/S3 connection."""
+    def _validate_s3_connection(self):
+        """Validate S3 storage connection."""
         try:
-            client = Minio(
-                settings.minio_endpoint,
-                access_key=settings.minio_access_key,
-                secret_key=settings.minio_secret_key,
-                secure=settings.minio_secure,
+            client = boto3.client(
+                "s3",
+                endpoint_url=settings.s3.endpoint_url,
+                aws_access_key_id=settings.s3_access_key,
+                aws_secret_access_key=settings.s3_secret_key,
+                region_name=settings.s3_region,
             )
 
             # Test connection by listing buckets
-            buckets = list(client.list_buckets())
+            response = client.list_buckets()
+            buckets = response.get("Buckets", [])
 
             # Check if our bucket exists
             bucket_exists = any(
-                bucket.name == settings.minio_bucket for bucket in buckets
+                bucket["Name"] == settings.s3_bucket for bucket in buckets
             )
             if not bucket_exists:
                 self.warnings.append(
-                    f"MinIO bucket '{settings.minio_bucket}' does not exist - will be created"
+                    f"S3 bucket '{settings.s3_bucket}' does not exist - will be created"
                 )
 
-        except S3Error as e:
-            # Treat as warning in development mode to allow startup without MinIO
+        except ClientError as e:
             if settings.api_debug:
-                self.warnings.append(f"MinIO S3 error: {e}")
+                self.warnings.append(f"S3 error: {e}")
             else:
-                self.errors.append(f"MinIO S3 error: {e}")
+                self.errors.append(f"S3 error: {e}")
         except Exception as e:
-            # Treat as warning in development mode
             if settings.api_debug:
-                self.warnings.append(f"MinIO validation error: {e}")
+                self.warnings.append(f"S3 validation error: {e}")
             else:
-                self.errors.append(f"MinIO validation error: {e}")
+                self.errors.append(f"S3 validation error: {e}")
 
     def _validate_nsjail(self):
         """Validate nsjail sandbox availability."""

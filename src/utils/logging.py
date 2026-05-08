@@ -95,7 +95,8 @@ def configure_third_party_loggers() -> None:
     """Configure logging levels for third-party libraries."""
     # Reduce noise from third-party libraries
     logging.getLogger("urllib3").setLevel(logging.WARNING)
-    logging.getLogger("minio").setLevel(logging.WARNING)
+    logging.getLogger("botocore").setLevel(logging.WARNING)
+    logging.getLogger("boto3").setLevel(logging.WARNING)
 
     # Suppress uvicorn access logs - RequestLoggingMiddleware handles this
     # with status-aware levels (DEBUG for 2xx, WARNING for 4xx, ERROR for 5xx).

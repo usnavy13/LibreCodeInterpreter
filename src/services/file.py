@@ -1,15 +1,15 @@
-"""File management service with MinIO/S3 storage integration."""
+"""File management service with S3-compatible storage integration."""
 
 # Standard library imports
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import List, Optional, Tuple, Dict, Any
 
 # Third-party imports
+import boto3
 import redis.asyncio as redis
 import structlog
-from minio import Minio
-from minio.error import S3Error
+from botocore.exceptions import ClientError
 
 # Local application imports
 from .interfaces import FileServiceInterface
@@ -21,16 +21,16 @@ logger = structlog.get_logger()
 
 
 class FileService(FileServiceInterface):
-    """File management service with MinIO/S3 storage and Redis metadata."""
+    """File management service with S3 storage and Redis metadata."""
 
     def __init__(self):
-        """Initialize the file service with MinIO and Redis clients."""
-        # Initialize MinIO client
-        self.minio_client = Minio(
-            settings.minio_endpoint,
-            access_key=settings.minio_access_key,
-            secret_key=settings.minio_secret_key,
-            secure=settings.minio_secure,
+        """Initialize the file service with S3 and Redis clients."""
+        self.s3_client = boto3.client(
+            "s3",
+            endpoint_url=settings.s3.endpoint_url,
+            aws_access_key_id=settings.s3_access_key,
+            aws_secret_access_key=settings.s3_secret_key,
+            region_name=settings.s3_region,
         )
 
         # Initialize Redis client
@@ -38,24 +38,28 @@ class FileService(FileServiceInterface):
             settings.get_redis_url(), decode_responses=True
         )
 
-        self.bucket_name = settings.minio_bucket
+        self.bucket_name = settings.s3_bucket
 
     async def _ensure_bucket_exists(self) -> None:
-        """Ensure the MinIO bucket exists."""
+        """Ensure the S3 bucket exists."""
         try:
-            # Run in thread pool since minio client is synchronous
             loop = asyncio.get_event_loop()
-            bucket_exists = await loop.run_in_executor(
-                None, self.minio_client.bucket_exists, self.bucket_name
-            )
-
-            if not bucket_exists:
+            try:
                 await loop.run_in_executor(
-                    None, self.minio_client.make_bucket, self.bucket_name
+                    None,
+                    lambda: self.s3_client.head_bucket(Bucket=self.bucket_name),
                 )
-                logger.info("Created MinIO bucket", bucket=self.bucket_name)
+            except ClientError as e:
+                if e.response["Error"]["Code"] in ("404", "NoSuchBucket"):
+                    await loop.run_in_executor(
+                        None,
+                        lambda: self.s3_client.create_bucket(Bucket=self.bucket_name),
+                    )
+                    logger.info("Created S3 bucket", bucket=self.bucket_name)
+                else:
+                    raise
 
-        except S3Error as e:
+        except ClientError as e:
             logger.error(
                 "Failed to ensure bucket exists", error=str(e), bucket=self.bucket_name
             )
@@ -109,13 +113,13 @@ class FileService(FileServiceInterface):
         return bool(await self.redis_client.smembers(links_key))
 
     async def _delete_object(self, object_key: str) -> None:
-        """Delete a backing object from MinIO."""
+        """Delete a backing object from S3."""
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(
             None,
-            self.minio_client.remove_object,
-            self.bucket_name,
-            object_key,
+            lambda: self.s3_client.delete_object(
+                Bucket=self.bucket_name, Key=object_key
+            ),
         )
 
     async def _find_linked_file(
@@ -268,10 +272,11 @@ class FileService(FileServiceInterface):
             loop = asyncio.get_event_loop()
             upload_url = await loop.run_in_executor(
                 None,
-                self.minio_client.presigned_put_object,
-                self.bucket_name,
-                object_key,
-                timedelta(hours=1),
+                lambda: self.s3_client.generate_presigned_url(
+                    "put_object",
+                    Params={"Bucket": self.bucket_name, "Key": object_key},
+                    ExpiresIn=3600,
+                ),
             )
 
             # Store initial metadata
@@ -297,7 +302,7 @@ class FileService(FileServiceInterface):
 
             return file_id, upload_url
 
-        except S3Error as e:
+        except ClientError as e:
             logger.error(
                 "Failed to generate upload URL", error=str(e), session_id=session_id
             )
@@ -314,31 +319,36 @@ class FileService(FileServiceInterface):
         try:
             # Get object info to confirm upload and get size
             loop = asyncio.get_event_loop()
-            stat = await loop.run_in_executor(
-                None, self.minio_client.stat_object, self.bucket_name, object_key
+            head = await loop.run_in_executor(
+                None,
+                lambda: self.s3_client.head_object(
+                    Bucket=self.bucket_name, Key=object_key
+                ),
             )
 
+            file_size = head["ContentLength"]
+
             # Update metadata with actual file size
-            metadata["size"] = stat.size
+            metadata["size"] = file_size
             await self._store_file_metadata(session_id, file_id, metadata)
 
             logger.debug(
                 "Confirmed file upload",
                 session_id=session_id,
                 file_id=file_id,
-                size=stat.size,
+                size=file_size,
             )
 
             return FileInfo(
                 file_id=file_id,
                 filename=metadata["filename"],
-                size=stat.size,
+                size=file_size,
                 content_type=metadata["content_type"],
                 created_at=metadata["created_at"],
                 path=metadata["path"],
             )
 
-        except S3Error as e:
+        except ClientError as e:
             logger.error(
                 "Failed to confirm upload",
                 error=str(e),
@@ -360,6 +370,7 @@ class FileService(FileServiceInterface):
             content_type=metadata["content_type"],
             created_at=metadata["created_at"],
             path=metadata["path"],
+            original_filename=metadata.get("original_filename"),
         )
 
     async def list_files(self, session_id: str) -> List[FileInfo]:
@@ -419,6 +430,9 @@ class FileService(FileServiceInterface):
             "source_session_id": source_session_id,
             "source_file_id": source_file_id,
             "is_read_only": "1",
+            "original_filename": source_metadata.get(
+                "original_filename", source_metadata["filename"]
+            ),
         }
 
         await self._store_file_metadata(target_session_id, linked_file_id, metadata)
@@ -444,6 +458,7 @@ class FileService(FileServiceInterface):
             content_type=metadata["content_type"],
             created_at=datetime.fromisoformat(metadata["created_at"]),
             path=metadata["path"],
+            original_filename=metadata.get("original_filename"),
         )
 
     async def download_file(self, session_id: str, file_id: str) -> Optional[str]:
@@ -459,15 +474,16 @@ class FileService(FileServiceInterface):
             loop = asyncio.get_event_loop()
             download_url = await loop.run_in_executor(
                 None,
-                self.minio_client.presigned_get_object,
-                self.bucket_name,
-                object_key,
-                timedelta(hours=1),
+                lambda: self.s3_client.generate_presigned_url(
+                    "get_object",
+                    Params={"Bucket": self.bucket_name, "Key": object_key},
+                    ExpiresIn=3600,
+                ),
             )
 
             return download_url
 
-        except S3Error as e:
+        except ClientError as e:
             logger.error(
                 "Failed to generate download URL",
                 error=str(e),
@@ -512,7 +528,7 @@ class FileService(FileServiceInterface):
                         source_file_id=metadata["source_file_id"],
                         object_key=metadata["object_key"],
                     )
-                except S3Error as e:
+                except ClientError as e:
                     logger.warning(
                         "Failed to delete orphaned shared object",
                         source_session_id=metadata["source_session_id"],
@@ -534,7 +550,6 @@ class FileService(FileServiceInterface):
         object_key = metadata["object_key"]
 
         try:
-            # Delete from MinIO
             await self._delete_object(object_key)
 
             # Delete metadata from Redis
@@ -543,7 +558,7 @@ class FileService(FileServiceInterface):
             logger.debug("Deleted file", session_id=session_id, file_id=file_id)
             return True
 
-        except S3Error as e:
+        except ClientError as e:
             logger.error(
                 "Failed to delete file",
                 error=str(e),
@@ -566,36 +581,39 @@ class FileService(FileServiceInterface):
             # Clean up session files set
             await self.redis_client.delete(session_files_key)
 
-            # If no files were tracked in Redis, fall back to prefix-based deletion in MinIO
+            # If no files were tracked in Redis, fall back to prefix-based deletion
             if deleted_count == 0:
                 try:
                     loop = asyncio.get_event_loop()
-                    # List objects under both uploads and outputs prefixes
                     prefixes = [
                         f"sessions/{session_id}/uploads/",
                         f"sessions/{session_id}/outputs/",
                     ]
                     for prefix in prefixes:
-                        # MinIO list_objects returns an iterator; use recursive to get all
-                        objects = await loop.run_in_executor(
-                            None,
-                            lambda: list(
-                                self.minio_client.list_objects(
-                                    self.bucket_name, prefix=prefix, recursive=True
-                                )
-                            ),
-                        )
-                        for obj in objects:
-                            await loop.run_in_executor(
-                                None,
-                                self.minio_client.remove_object,
-                                self.bucket_name,
-                                obj.object_name,
+
+                        def _list_prefix(p: str = prefix) -> list:
+                            return list(
+                                self.s3_client.get_paginator("list_objects_v2")
+                                .paginate(Bucket=self.bucket_name, Prefix=p)
+                                .search("Contents[]")
                             )
+
+                        objects = await loop.run_in_executor(None, _list_prefix)
+                        for entry in objects:
+                            if entry is None:
+                                continue
+                            key = entry["Key"]
+
+                            def _delete(k: str = key) -> None:
+                                self.s3_client.delete_object(
+                                    Bucket=self.bucket_name, Key=k
+                                )
+
+                            await loop.run_in_executor(None, _delete)
                             deleted_count += 1
                 except Exception as e:
                     logger.error(
-                        "Prefix-based MinIO cleanup failed",
+                        "Prefix-based S3 cleanup failed",
                         session_id=session_id,
                         error=str(e),
                     )
@@ -638,20 +656,19 @@ class FileService(FileServiceInterface):
         object_key = self._get_file_key(session_id, file_id, "outputs")
 
         try:
-            # Convert bytes to BytesIO for MinIO
             import io
 
             content_stream = io.BytesIO(content)
 
-            # Upload file content directly
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(
                 None,
-                self.minio_client.put_object,
-                self.bucket_name,
-                object_key,
-                content_stream,
-                len(content),
+                lambda: self.s3_client.put_object(
+                    Bucket=self.bucket_name,
+                    Key=object_key,
+                    Body=content_stream,
+                    ContentLength=len(content),
+                ),
             )
 
             now = datetime.utcnow()
@@ -665,7 +682,7 @@ class FileService(FileServiceInterface):
                 "created_at": now.isoformat(),
                 "size": len(content),
                 "path": f"/outputs/{filename}",
-                "type": "output",  # Mark as execution output
+                "type": "output",
             }
 
             await self._store_file_metadata(session_id, file_id, metadata)
@@ -680,7 +697,7 @@ class FileService(FileServiceInterface):
 
             return file_id
 
-        except S3Error as e:
+        except ClientError as e:
             logger.error(
                 "Failed to store output file",
                 error=str(e),
@@ -701,17 +718,15 @@ class FileService(FileServiceInterface):
             loop = asyncio.get_event_loop()
 
             def _download():
-                response = self.minio_client.get_object(self.bucket_name, object_key)
-                try:
-                    return response.read()
-                finally:
-                    response.close()
-                    response.release_conn()
+                response = self.s3_client.get_object(
+                    Bucket=self.bucket_name, Key=object_key
+                )
+                return response["Body"].read()
 
             content = await loop.run_in_executor(None, _download)
             return content
 
-        except S3Error as e:
+        except ClientError as e:
             logger.error(
                 "Failed to get file content",
                 error=str(e),
@@ -723,9 +738,9 @@ class FileService(FileServiceInterface):
     async def stream_file_to_path(
         self, session_id: str, file_id: str, dest_path: str
     ) -> bool:
-        """Stream file content from MinIO directly to a local file path.
+        """Stream file content from S3 directly to a local file path.
 
-        Uses MinIO's fget_object for efficient disk-to-disk transfer
+        Uses boto3's download_file for efficient disk-to-disk transfer
         without loading the entire file into memory. Runs in a thread
         pool executor to avoid blocking the async event loop.
 
@@ -747,13 +762,12 @@ class FileService(FileServiceInterface):
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(
                 None,
-                self.minio_client.fget_object,
-                self.bucket_name,
-                object_key,
-                dest_path,
+                lambda: self.s3_client.download_file(
+                    self.bucket_name, object_key, dest_path
+                ),
             )
             return True
-        except S3Error as e:
+        except ClientError as e:
             logger.error(
                 "Failed to stream file to path",
                 error=str(e),
@@ -770,15 +784,19 @@ class FileService(FileServiceInterface):
         content: bytes,
         content_type: Optional[str] = None,
         is_agent_file: bool = False,
+        is_read_only: bool = False,
+        original_filename: Optional[str] = None,
     ) -> str:
         """Store an uploaded file directly.
 
         Args:
             session_id: Session identifier
-            filename: Original filename
+            filename: Sanitized filename used for storage and sandbox mounting
             content: File content as bytes
             content_type: MIME type of the file
             is_agent_file: If True, marks the file as read-only (agent-assigned)
+            is_read_only: If True, mounted file should be chmod 444 in sandbox
+            original_filename: Pre-sanitization filename for metadata recovery
 
         Returns:
             The generated file_id
@@ -792,7 +810,6 @@ class FileService(FileServiceInterface):
         object_key = self._get_file_key(session_id, file_id, "uploads")
 
         try:
-            # Upload file content directly
             from io import BytesIO
 
             content_stream = BytesIO(content)
@@ -800,12 +817,13 @@ class FileService(FileServiceInterface):
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(
                 None,
-                self.minio_client.put_object,
-                self.bucket_name,
-                object_key,
-                content_stream,
-                len(content),
-                content_type or "application/octet-stream",
+                lambda: self.s3_client.put_object(
+                    Bucket=self.bucket_name,
+                    Key=object_key,
+                    Body=content_stream,
+                    ContentLength=len(content),
+                    ContentType=content_type or "application/octet-stream",
+                ),
             )
 
             # Store metadata
@@ -818,10 +836,10 @@ class FileService(FileServiceInterface):
                 "created_at": datetime.utcnow().isoformat(),
                 "size": len(content),
                 "path": f"/{filename}",
-                "type": "upload",  # Mark as uploaded file
-                "is_agent_file": (
-                    "1" if is_agent_file else "0"
-                ),  # Read-only if agent file
+                "type": "upload",
+                "is_agent_file": ("1" if is_agent_file else "0"),
+                "is_read_only": "1" if (is_read_only or is_agent_file) else "0",
+                "original_filename": original_filename or filename,
             }
 
             await self._store_file_metadata(session_id, file_id, metadata)
@@ -836,7 +854,7 @@ class FileService(FileServiceInterface):
 
             return file_id
 
-        except S3Error as e:
+        except ClientError as e:
             logger.error(
                 "Failed to store uploaded file",
                 error=str(e),
@@ -846,7 +864,7 @@ class FileService(FileServiceInterface):
             raise
 
     async def cleanup_orphan_objects(self, batch_limit: int = 1000) -> int:
-        """Delete MinIO objects under sessions/ whose sessions are not active in Redis.
+        """Delete S3 objects under sessions/ whose sessions are not active in Redis.
 
         Safety guards:
         - Skip if the session index is empty (avoid mass-deletes on cold start).
@@ -859,53 +877,51 @@ class FileService(FileServiceInterface):
             active_session_ids = await self.redis_client.smembers("sessions:index")
             active_session_ids = active_session_ids or set()
 
-            # Guard 1: if index is empty, skip to avoid accidental bulk deletes
             if not active_session_ids:
-                logger.debug("Skipping orphan MinIO cleanup: empty sessions index")
+                logger.debug("Skipping orphan S3 cleanup: empty sessions index")
                 return 0
 
             loop = asyncio.get_event_loop()
-            # List all objects under the sessions/ prefix
+
+            # List all objects under the sessions/ prefix using paginator
             objects = await loop.run_in_executor(
                 None,
                 lambda: list(
-                    self.minio_client.list_objects(
-                        self.bucket_name, prefix="sessions/", recursive=True
-                    )
+                    self.s3_client.get_paginator("list_objects_v2")
+                    .paginate(Bucket=self.bucket_name, Prefix="sessions/")
+                    .search("Contents[]")
                 ),
             )
             deleted_count = 0
 
-            # Cache existence checks to minimize Redis round-trips for unknown session IDs
+            # Cache existence checks to minimize Redis round-trips
             checked_missing_sessions: Dict[str, bool] = {}
 
-            # Determine age cutoff based on TTL (older than TTL are safe to remove)
+            # Determine age cutoff based on TTL
             ttl_minutes = settings.get_session_ttl_minutes()
             ttl_seconds = ttl_minutes * 60
             now_ts = datetime.utcnow().timestamp()
 
-            for obj in objects:
+            for entry in objects:
+                if entry is None:
+                    continue
                 if deleted_count >= batch_limit:
                     break
 
-                object_key = getattr(obj, "object_name", None)
+                object_key = entry.get("Key")
                 if not object_key:
                     continue
 
                 parts = object_key.split("/")
-                # Expecting sessions/<session_id>/<type>/<file_id>
                 if len(parts) < 3 or parts[0] != "sessions":
                     continue
 
                 object_session_id = parts[1]
 
-                # Guard 2: only delete if object is older than TTL (requires last_modified)
                 try:
-                    # minio list_objects entries typically have last_modified; if missing, skip
-                    last_modified = getattr(obj, "last_modified", None)
+                    last_modified = entry.get("LastModified")
                     if last_modified is None:
                         continue
-                    # last_modified may be datetime; convert to timestamp
                     obj_ts = (
                         last_modified.timestamp()
                         if hasattr(last_modified, "timestamp")
@@ -914,7 +930,6 @@ class FileService(FileServiceInterface):
                     if obj_ts is None:
                         continue
                     if (now_ts - obj_ts) < ttl_seconds:
-                        # Too new; skip to avoid racing with active sessions
                         continue
                 except Exception as e:
                     logger.debug(
@@ -924,7 +939,6 @@ class FileService(FileServiceInterface):
                     )
                     continue
 
-                # Skip if known active
                 if object_session_id in active_session_ids:
                     continue
 
@@ -934,7 +948,6 @@ class FileService(FileServiceInterface):
                 ):
                     continue
 
-                # Double-check via Redis existence in case index is stale
                 if object_session_id not in checked_missing_sessions:
                     try:
                         exists = await self.redis_client.exists(
@@ -950,34 +963,31 @@ class FileService(FileServiceInterface):
                         checked_missing_sessions[object_session_id] = False
 
                 if checked_missing_sessions.get(object_session_id, False):
-                    # Session exists; keep the object
                     continue
 
-                # Delete orphaned object
                 try:
-                    await loop.run_in_executor(
-                        None,
-                        self.minio_client.remove_object,
-                        self.bucket_name,
-                        object_key,
-                    )
+
+                    def _delete_orphan(k: str = object_key) -> None:
+                        self.s3_client.delete_object(Bucket=self.bucket_name, Key=k)
+
+                    await loop.run_in_executor(None, _delete_orphan)
                     deleted_count += 1
                 except Exception as e:
                     logger.error(
-                        "Failed to delete orphan MinIO object",
+                        "Failed to delete orphan S3 object",
                         object_key=object_key,
                         error=str(e),
                     )
 
             if deleted_count > 0:
-                logger.info("Deleted orphan MinIO objects", deleted_count=deleted_count)
+                logger.info("Deleted orphan S3 objects", deleted_count=deleted_count)
             else:
-                logger.debug("No orphan MinIO objects found")
+                logger.debug("No orphan S3 objects found")
 
             return deleted_count
 
         except Exception as e:
-            logger.error("Orphan MinIO objects cleanup failed", error=str(e))
+            logger.error("Orphan S3 objects cleanup failed", error=str(e))
             return 0
 
     async def update_file_content(
@@ -988,7 +998,7 @@ class FileService(FileServiceInterface):
     ) -> bool:
         """Update the content of an existing file.
 
-        Overwrites the MinIO object and updates metadata. Used to persist
+        Overwrites the S3 object and updates metadata. Used to persist
         in-place edits to mounted files after execution.
 
         Args:
@@ -1027,7 +1037,6 @@ class FileService(FileServiceInterface):
                 )
                 return False
 
-            # Overwrite content in MinIO
             import io
 
             loop = asyncio.get_event_loop()
@@ -1036,12 +1045,12 @@ class FileService(FileServiceInterface):
 
             await loop.run_in_executor(
                 None,
-                lambda: self.minio_client.put_object(
-                    self.bucket_name,
-                    object_key,
-                    content_stream,
-                    len(content),
-                    content_type,
+                lambda: self.s3_client.put_object(
+                    Bucket=self.bucket_name,
+                    Key=object_key,
+                    Body=content_stream,
+                    ContentLength=len(content),
+                    ContentType=content_type,
                 ),
             )
 

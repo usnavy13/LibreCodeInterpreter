@@ -24,18 +24,17 @@ Most users should run the published Docker image from GHCR. You do not need to b
    # The default settings work out-of-the-box for local usage
    ```
 
-3. **Pull and start the published stack**
+3. **Pull and start the stack**
 
    ```bash
-   docker compose -f docker-compose.prod.yml pull
-   docker compose -f docker-compose.prod.yml up -d
+   docker compose pull
+   docker compose up -d
    ```
 
    By default this uses `ghcr.io/usnavy13/librecodeinterpreter:main`. To pin a different published tag:
 
    ```bash
-   API_IMAGE=ghcr.io/usnavy13/librecodeinterpreter:<tag> \
-   docker compose -f docker-compose.prod.yml up -d
+   API_IMAGE=ghcr.io/usnavy13/librecodeinterpreter:<tag> docker compose up -d
    ```
 
 4. **Verify the API**
@@ -47,25 +46,25 @@ Most users should run the published Docker image from GHCR. You do not need to b
 The API will be available at `http://localhost:8000`.
 Visit `http://localhost:8000/docs` for the interactive API documentation.
 
-To enable HTTPS with either compose file, set `PORT`, `ENABLE_HTTPS`, `SSL_CERTS_PATH`, `SSL_CERT_FILE`, and `SSL_KEY_FILE` in `.env`. `SSL_CERTS_PATH` is the host path mounted into the container at `/app/ssl`, while `SSL_CERT_FILE` and `SSL_KEY_FILE` must point to the certificate files inside the container. See [docs/CONFIGURATION.md](docs/CONFIGURATION.md#sslhttps-configuration).
+To enable HTTPS, set `PORT`, `ENABLE_HTTPS`, `SSL_CERTS_PATH`, `SSL_CERT_FILE`, and `SSL_KEY_FILE` in `.env`. `SSL_CERTS_PATH` is the host path mounted into the container at `/app/ssl`, while `SSL_CERT_FILE` and `SSL_KEY_FILE` must point to the certificate files inside the container. See [docs/CONFIGURATION.md](docs/CONFIGURATION.md#sslhttps-configuration).
 
 ### Common Consumer Commands
 
 ```bash
 # View API logs
-docker compose -f docker-compose.prod.yml logs -f api
+docker compose logs -f api
 
 # Stop the stack
-docker compose -f docker-compose.prod.yml down
+docker compose down
 
 # Update to the latest published image
-docker compose -f docker-compose.prod.yml pull
-docker compose -f docker-compose.prod.yml up -d
+docker compose pull
+docker compose up -d
 ```
 
 ### Published Image Channels
 
-The project now publishes two app-image channels:
+The project publishes two app-image channels:
 
 - `ghcr.io/usnavy13/librecodeinterpreter`
   - stable branch tags: `main`, `latest`
@@ -74,15 +73,15 @@ The project now publishes two app-image channels:
   - development branch tags: `dev`, `latest`
   - immutable build tags: `sha-<commit>`
 
-`docker-compose.prod.yml` stays pinned to the stable package by default:
+`docker-compose.yml` is pinned to the stable package by default:
 
 ```yaml
-image: ghcr.io/usnavy13/librecodeinterpreter:main
+image: ${API_IMAGE:-ghcr.io/usnavy13/librecodeinterpreter:main}
 ```
 
 ### Use A Local Override File
 
-If you want to pull the current `dev` image or build from your working tree without changing tracked compose files:
+If you want to pull the current `dev` image or build from your working tree without changing tracked compose files, use a local override. Compose auto-merges `docker-compose.override.yml` on top of `docker-compose.yml`, so no extra `-f` flags are needed.
 
 1. Copy the example override:
 
@@ -90,29 +89,26 @@ If you want to pull the current `dev` image or build from your working tree with
    cp docker-compose.override.example.yml docker-compose.override.yml
    ```
 
-2. Use it with the production compose stack:
+2. Bring the stack up:
 
    ```bash
-   docker compose -f docker-compose.prod.yml -f docker-compose.override.yml pull
-   docker compose -f docker-compose.prod.yml -f docker-compose.override.yml up -d
+   docker compose pull
+   docker compose up -d
    ```
 
-The checked-in example defaults to `ghcr.io/usnavy13/librecodeinterpreter-dev:latest`.
-If you want to build from your local checkout instead, edit `docker-compose.override.yml`
-and switch to the commented `build:` block in the example. In that case, skip the
-`pull` step and run:
+The checked-in example defaults to `ghcr.io/usnavy13/librecodeinterpreter-dev:latest`. To build from your local checkout instead, edit `docker-compose.override.yml` and switch to the commented `build:` block. In that case, skip `pull` and run:
 
 ```bash
-docker compose -f docker-compose.prod.yml -f docker-compose.override.yml up --build -d
+docker compose up --build -d
 ```
 
 ## Build From Source
 
-If you are developing locally or need to customize the image, use the source-backed workflow instead:
+If you are developing locally or need to customize the image:
 
 ```bash
 docker build --target app -t code-interpreter:nsjail .
-docker compose up -d
+API_IMAGE=code-interpreter:nsjail docker compose up -d
 ```
 
 The Dockerfile keeps `runtime-core` and `runtime-r` as internal build stages, but only the unified `app` image is published for deployment.
@@ -125,7 +121,7 @@ A built-in admin dashboard is available at `http://localhost:8000/admin-dashboar
 
 - **Overview**: Real-time execution metrics, success rates, and performance graphs
 - **API Keys**: Create, view, and manage API keys with rate limiting
-- **System Health**: Monitor Redis, MinIO, and sandbox pool status
+- **System Health**: Monitor Redis, S3 storage, and sandbox pool status
 
 The dashboard requires the master API key for authentication.
 
@@ -139,9 +135,9 @@ The dashboard requires the master API key for authentication.
 - **Programmatic Tool Calling (PTC)**: Enables AI agents to execute code that invokes external tools mid-execution via `POST /exec/programmatic`, with multi-round continuation support
 - **File Management**: Upload, download, and manage files within execution sessions
 - **Session Management**: Redis-based session handling with automatic cleanup
-- **S3-Compatible Storage**: MinIO integration for persistent file storage
+- **S3-Compatible Storage**: Garage (S3-compatible) integration for persistent file storage
 - **Authentication**: API key-based authentication for secure access
-- **HTTPS/SSL Support**: Optional in-container SSL/TLS termination for both compose workflows
+- **HTTPS/SSL Support**: Optional in-container SSL/TLS termination
 - **Health Monitoring**: Comprehensive health check endpoints for all dependencies
 - **Metrics Collection**: Execution and API metrics for monitoring and debugging
 - **Unicode Support**: Full Unicode filename support in file downloads
@@ -187,7 +183,7 @@ The service is highly configurable via environment variables.
 | Category      | Description                                 |
 | ------------- | ------------------------------------------- |
 | **API**       | Host, port, and security settings.          |
-| **Storage**   | Redis and MinIO/S3 connection details.      |
+| **Storage**   | Redis and S3 (Garage / MinIO / AWS) connection details. |
 | **Resources** | Per-execution memory, CPU, and time limits. |
 | **Pools**     | Sandbox pool sizing and warmup settings.    |
 
@@ -207,11 +203,10 @@ For comprehensive testing details, see [TESTING.md](docs/TESTING.md).
 
 ## CI/CD
 
-GitHub Actions is split into three workflows:
+GitHub Actions is split into two workflows:
 
-- `ci.yml`: PR validation and required checks
-- `release.yml`: publish multi-arch app images for `main`, `dev`, and release tags
-- `nightly.yml`: build the app image locally and run slow/full live validation
+- `ci.yml`: PR validation — static analysis (flake8, black, mypy, bandit), unit tests, and integration tests
+- `release.yml`: publishes multi-arch app images for `main`, `dev`, and release tags
 
 Published images use native `amd64` and `arm64` builds and are exposed as separate stable and dev GHCR packages.
 

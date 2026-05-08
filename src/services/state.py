@@ -9,7 +9,7 @@ stores and retrieves the base64 string.
 
 Hybrid storage:
 - Hot storage: Redis with configurable TTL (default 2 hours)
-- Cold storage: MinIO for long-term archival (handled by StateArchivalService)
+- Cold storage: S3 for long-term archival (handled by StateArchivalService)
 
 Storage format:
 - Redis storage: Base64-encoded
@@ -158,11 +158,11 @@ class StateService:
         state_b64: str,
         ttl_seconds: Optional[int] = None,
     ) -> Tuple[bool, Optional[str]]:
-        """Save only hash and metadata to Redis (state blob stored in MinIO).
+        """Save only hash and metadata to Redis (state blob stored in S3).
 
         Used when state exceeds the Redis size threshold. The full state
-        is stored in MinIO; Redis only holds the hash and metadata for
-        fast lookups. The orchestrator's _load_state MinIO fallback
+        is stored in S3; Redis only holds the hash and metadata for
+        fast lookups. The orchestrator's _load_state S3 fallback
         handles retrieval.
 
         Args:
@@ -192,7 +192,7 @@ class StateService:
                     "size_bytes": len(raw_bytes),
                     "hash": state_hash,
                     "created_at": now.isoformat(),
-                    "storage": "minio",
+                    "storage": "s3",
                 }
             )
             pipe.setex(self._meta_key(session_id), ttl_seconds, meta)
@@ -200,7 +200,7 @@ class StateService:
             await pipe.execute()
 
             logger.info(
-                "Saved state pointer to Redis (blob in MinIO)",
+                "Saved state pointer to Redis (blob in S3)",
                 session_id=session_id[:12],
                 state_size=len(raw_bytes),
                 hash=state_hash[:12],

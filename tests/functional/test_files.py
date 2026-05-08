@@ -219,9 +219,9 @@ class TestFileMetadata:
 
         for item in data:
             assert "metadata" in item, "Full detail must include 'metadata'"
-            assert "original-filename" in item["metadata"], (
-                "metadata must include 'original-filename'"
-            )
+            assert (
+                "original-filename" in item["metadata"]
+            ), "metadata must include 'original-filename'"
             assert isinstance(item["metadata"]["original-filename"], str)
             assert len(item["metadata"]["original-filename"]) > 0
 
@@ -341,9 +341,7 @@ class TestFileExecutionIntegration:
                 ),
                 "lang": "py",
                 "session_id": session_id,
-                "files": [
-                    {"id": file_id, "session_id": session_id, "name": filename}
-                ],
+                "files": [{"id": file_id, "session_id": session_id, "name": filename}],
             },
         )
 
@@ -379,9 +377,7 @@ class TestFileExecutionIntegration:
                 "code": f"print(open('{filename}').read())",
                 "lang": "py",
                 "session_id": session_id,
-                "files": [
-                    {"id": file_id, "session_id": session_id, "name": filename}
-                ],
+                "files": [{"id": file_id, "session_id": session_id, "name": filename}],
             },
         )
 
@@ -428,9 +424,7 @@ class TestFileExecutionIntegration:
                 ),
                 "lang": "py",
                 "session_id": session_id,
-                "files": [
-                    {"id": file_id, "session_id": session_id, "name": filename}
-                ],
+                "files": [{"id": file_id, "session_id": session_id, "name": filename}],
             },
         )
 

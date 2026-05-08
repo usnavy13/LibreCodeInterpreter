@@ -8,7 +8,7 @@ Track per-execution, per-language, and per-API-key metrics.
 |----------|-------------|---------|
 | `DETAILED_METRICS_ENABLED` | Enable detailed metrics | `true` |
 | `METRICS_BUFFER_SIZE` | In-memory buffer size | `10000` |
-| `METRICS_ARCHIVE_ENABLED` | Archive to MinIO | `true` |
+| `METRICS_ARCHIVE_ENABLED` | Archive to S3 | `true` |
 | `METRICS_ARCHIVE_RETENTION_DAYS` | Archive retention | `90` days |
 
 ## API Endpoints

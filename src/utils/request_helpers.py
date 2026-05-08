@@ -4,6 +4,7 @@ These utilities consolidate common request handling patterns used across
 the middleware and dependencies layers.
 """
 
+import base64
 from typing import Optional
 from fastapi import Request
 
@@ -11,7 +12,17 @@ from fastapi import Request
 def extract_api_key(request: Request) -> Optional[str]:
     """Extract API key from request headers.
 
-    Only checks the x-api-key header.
+    Checks two sources in order:
+    1. x-api-key header (preserved for backwards compatibility with older
+       LibreChat versions and reverse-proxy setups that inject this header).
+    2. Authorization: Basic header (single-token convention, matching how
+       Stripe / DigitalOcean / GitHub PATs work). Current LibreChat versions
+       no longer send x-api-key but axios/node-fetch will automatically
+       convert URL-embedded credentials (LIBRECHAT_CODE_BASEURL=https://KEY@host/v1)
+       into a Basic auth header.
+
+    The x-api-key header wins when both are present so deployments using a
+    reverse-proxy injection pattern have deterministic behavior.
 
     Args:
         request: FastAPI Request object
@@ -19,7 +30,22 @@ def extract_api_key(request: Request) -> Optional[str]:
     Returns:
         API key string or None if not found
     """
-    return request.headers.get("x-api-key")
+    key = request.headers.get("x-api-key")
+    if key:
+        return key
+
+    auth = request.headers.get("authorization", "")
+    if auth.lower().startswith("basic "):
+        try:
+            decoded = base64.b64decode(auth.split(" ", 1)[1]).decode(
+                "utf-8", errors="replace"
+            )
+        except Exception:
+            return None
+        user, _, password = decoded.partition(":")
+        return user or password or None
+
+    return None
 
 
 def get_client_ip(request: Request) -> str:

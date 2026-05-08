@@ -6,9 +6,11 @@
 
 ## Overview
 
-Programmatic Tool Calling enables Python code to orchestrate multiple agent tools within a single execution. Instead of the LLM making individual tool calls one at a time, it writes Python code that calls multiple tools, processes results, uses loops/conditionals, and runs tools in parallel.
+Programmatic Tool Calling enables sandboxed code (Python or bash) to orchestrate multiple agent tools within a single execution. Instead of the LLM making individual tool calls one at a time, it writes code that calls multiple tools, processes results, uses loops/conditionals, and runs tools in parallel.
 
 **Key Benefit**: Reduces LLM round-trips and token usage by letting code handle complex multi-tool workflows.
+
+**Languages supported**: Python (default, via `docker/ptc_server.py`) and bash (via `docker/ptc_bash_server.py`). The bash server uses two FIFOs so user shell code can call a tool with `tool_name '{"arg":"..."}'` and read the JSON response from stdout.
 
 ---
 
@@ -518,17 +520,16 @@ async def retrieve_execution_state(execution_id: str) -> PausedExecution:
 3. **Monitoring**: Metrics for round-trips, timeouts, errors
 4. **Load testing**: Concurrent multi-round executions
 
-### Estimated Scope
+### Implementation Map (current code)
 
-| Component               | Files to Create/Modify                            |
-| ----------------------- | ------------------------------------------------- |
-| API endpoint            | `src/api/programmatic.py` (new)                   |
-| Request/Response models | `src/models/programmatic.py` (new)                |
-| Execution orchestrator  | `src/services/programmatic_orchestrator.py` (new) |
-| State management        | `src/services/continuation.py` (new)              |
-| Python wrapper          | `src/services/execution/python_wrapper.py` (new)  |
-| Tool stub generator     | `src/services/execution/tool_stubs.py` (new)      |
-| Tests                   | `tests/integration/test_programmatic.py` (new)    |
+| Component                     | File                                                |
+| ----------------------------- | --------------------------------------------------- |
+| API endpoint                  | `src/api/programmatic.py`                           |
+| Request/Response models       | `src/models/programmatic.py`                        |
+| Execution + continuation svc  | `src/services/programmatic.py` (`ProgrammaticService`, `PausedContext`) |
+| In-sandbox PTC server (Python)| `docker/ptc_server.py`                              |
+| In-sandbox PTC server (Bash)  | `docker/ptc_bash_server.py`                         |
+| Live tests                    | `tests/functional/test_client_replay.py`            |
 
 ---
 

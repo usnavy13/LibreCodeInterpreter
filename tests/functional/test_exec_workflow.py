@@ -219,16 +219,10 @@ class TestSessionIsolation:
         assert "shared content" in r_b.json()["stdout"]
 
         # Neither user should reuse the upload session
-        assert session_a != upload_session, (
-            "User A should not reuse the upload session"
-        )
-        assert session_b != upload_session, (
-            "User B should not reuse the upload session"
-        )
+        assert session_a != upload_session, "User A should not reuse the upload session"
+        assert session_b != upload_session, "User B should not reuse the upload session"
         # Each user should get a different session
-        assert session_a != session_b, (
-            "Different users should get different sessions"
-        )
+        assert session_a != session_b, "Different users should get different sessions"
 
 
 class TestStatePersistence:

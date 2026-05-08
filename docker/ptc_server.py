@@ -26,12 +26,65 @@ Protocol:
 import asyncio
 import json
 import os
+import re
 import sys
 import traceback
 import uuid
 from io import StringIO
 
 DELIMITER = "\n---PTC_END---\n"
+
+_PYTHON_KEYWORDS = frozenset(
+    {
+        "False",
+        "None",
+        "True",
+        "and",
+        "as",
+        "assert",
+        "async",
+        "await",
+        "break",
+        "class",
+        "continue",
+        "def",
+        "del",
+        "elif",
+        "else",
+        "except",
+        "finally",
+        "for",
+        "from",
+        "global",
+        "if",
+        "import",
+        "in",
+        "is",
+        "lambda",
+        "nonlocal",
+        "not",
+        "or",
+        "pass",
+        "raise",
+        "return",
+        "try",
+        "while",
+        "with",
+        "yield",
+    }
+)
+
+
+def _normalize_python_name(name: str) -> str:
+    """Match SDK's normalizeToPythonIdentifier so generated code can call stubs."""
+    result = re.sub(r"[-\s]", "_", name)
+    result = re.sub(r"[^a-zA-Z0-9_]", "", result)
+    if result and result[0].isdigit():
+        result = "_" + result
+    if result in _PYTHON_KEYWORDS:
+        result = result + "_tool"
+    return result or "_unnamed"
+
 
 # Keep references to the REAL stdin/stdout for protocol communication.
 # User code's print() will be redirected to a StringIO capture buffer.
@@ -83,9 +136,7 @@ def _make_tool_stub(tool_name: str) -> callable:
 
         result_info = _tool_results_map.pop(call_id)
         if result_info.get("is_error"):
-            raise RuntimeError(
-                result_info.get("error_message", "Tool call failed")
-            )
+            raise RuntimeError(result_info.get("error_message", "Tool call failed"))
         return result_info.get("result")
 
     tool_stub.__name__ = tool_name
@@ -113,7 +164,8 @@ async def _execute_with_tools(
         pass
 
     for tool in tools:
-        namespace[tool["name"]] = _make_tool_stub(tool["name"])
+        normalized = _normalize_python_name(tool["name"])
+        namespace[normalized] = _make_tool_stub(tool["name"])
 
     # Wrap user code in async function
     indented_code = "\n".join("    " + line for line in code.split("\n"))
@@ -137,10 +189,12 @@ async def _execute_with_tools(
                 calls_to_send = list(_pending_calls)
                 _pending_calls.clear()
 
-                _write_message({
-                    "type": "tool_calls",
-                    "calls": calls_to_send,
-                })
+                _write_message(
+                    {
+                        "type": "tool_calls",
+                        "calls": calls_to_send,
+                    }
+                )
 
                 # Wait for results from host
                 response = _read_message()
@@ -179,10 +233,12 @@ def main():
     try:
         request = _read_message()
     except Exception as e:
-        _write_message({
-            "type": "error",
-            "error": f"Failed to read initial request: {e}",
-        })
+        _write_message(
+            {
+                "type": "error",
+                "error": f"Failed to read initial request: {e}",
+            }
+        )
         return
 
     code = request.get("code", "")
@@ -200,9 +256,7 @@ def main():
     sys.stderr = user_stderr
 
     try:
-        result = asyncio.run(
-            _execute_with_tools(code, tools, user_stdout, user_stderr)
-        )
+        result = asyncio.run(_execute_with_tools(code, tools, user_stdout, user_stderr))
     except Exception as e:
         result = {
             "type": "error",

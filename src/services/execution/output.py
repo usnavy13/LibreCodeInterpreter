@@ -3,6 +3,7 @@
 import os
 import re
 import secrets
+import unicodedata
 from pathlib import Path
 from typing import Any, Dict
 
@@ -213,13 +214,27 @@ class OutputProcessor:
 
         return f"Execution failed (exit code {exit_code}):\n{stderr_clean}"
 
+    # ASCII chars safe in filenames — matches LibreChat's ASCII_FILENAME_SAFE_PATTERN.
+    _ASCII_SAFE = re.compile(r"[a-zA-Z0-9._\-]")
+    # C1 control characters (U+0080–U+009F) — unsafe in filenames.
+    _C1_CONTROLS = re.compile(r"[\x80-\x9f]")
+
+    @classmethod
+    def _sanitize_char(cls, char: str) -> str:
+        """Replace unsafe ASCII; preserve Unicode letters, marks, numbers, and emoji."""
+        if ord(char) <= 0x7F:
+            return char if cls._ASCII_SAFE.match(char) else "_"
+        return "_" if cls._C1_CONTROLS.match(char) else char
+
     @classmethod
     def sanitize_filename(cls, input_name: str) -> str:
-        """Sanitize filename to match LibreChat's sanitization logic.
+        """Sanitize filename while preserving Unicode letters, digits, and emoji.
 
-        Replaces all non-alphanumeric characters (except '.' and '-') with
-        underscores. This ensures filenames on disk match what LibreChat
-        reports in the system prompt.
+        NFC-normalizes, then applies a two-pass approach matching
+        LibreChat's ``sanitizeFilenameSegment``: strict for ASCII
+        (only ``[a-zA-Z0-9._-]``), permissive for non-ASCII (keeps
+        Unicode letters, combining marks, numbers, emoji — blocks
+        only C1 control characters).
 
         Args:
             input_name: Original filename (may include path components)
@@ -234,8 +249,12 @@ class OutputProcessor:
             # Remove any directory components (path traversal prevention)
             name = os.path.basename(input_name)
 
-            # Replace any non-alphanumeric characters except for '.' and '-'
-            name = re.sub(r"[^a-zA-Z0-9.-]", "_", name)
+            # NFC-normalize so decomposed sequences (e + U+0301) become
+            # precomposed (é) before the regex runs.
+            name = unicodedata.normalize("NFC", name)
+
+            # Two-pass sanitization: strict ASCII, permissive Unicode.
+            name = "".join(cls._sanitize_char(c) for c in name)
 
             # Ensure the name doesn't start with a dot (hidden file in Unix)
             if name.startswith(".") or name == "":
@@ -257,3 +276,38 @@ class OutputProcessor:
         except Exception as e:
             logger.error(f"Failed to sanitize filename: {e}")
             return "_"
+
+    @classmethod
+    def sanitize_relative_path(cls, input_path: str) -> str:
+        """Sanitize a relative path while preserving subdirectory structure.
+
+        Calls `sanitize_filename` on each path segment and rejoins with `/`.
+        Used for filenames that legitimately contain subdirectories — both
+        on the input side (LibreChat sends `skills/foo/SKILL.md` for skill
+        bundles) and the output side (code that writes to `/mnt/data/charts/foo.png`
+        should round-trip back as `charts/foo.png`).
+
+        Path traversal segments (`..`) are rejected, and the result is
+        guaranteed to be a non-empty relative path with forward slashes.
+        """
+        if not input_path:
+            return "_"
+
+        # Strip leading/trailing slashes and split into segments.
+        segments = [s for s in input_path.replace("\\", "/").split("/") if s]
+        if not segments:
+            return "_"
+
+        sanitized_segments = []
+        for segment in segments:
+            if segment == "..":
+                # Drop traversal attempts entirely rather than allowing them.
+                continue
+            sanitized = cls.sanitize_filename(segment)
+            if sanitized and sanitized != "_":
+                sanitized_segments.append(sanitized)
+
+        if not sanitized_segments:
+            return "_"
+
+        return "/".join(sanitized_segments)

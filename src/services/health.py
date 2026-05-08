@@ -11,10 +11,10 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 
 # Third-party imports
+import boto3
 import redis.asyncio as redis
 import structlog
-from minio import Minio
-from minio.error import S3Error
+from botocore.exceptions import ClientError
 
 # Local application imports
 from ..config import settings
@@ -75,7 +75,7 @@ class HealthCheckService:
     def __init__(self):
         """Initialize health check service."""
         self._redis_client: Optional[redis.Redis] = None
-        self._minio_client: Optional[Minio] = None
+        self._s3_client = None
         self._sandbox_pool = None
         self._last_check_time: Optional[datetime] = None
         self._cached_results: Dict[str, HealthCheckResult] = {}
@@ -104,10 +104,10 @@ class HealthCheckService:
         # Run all health checks concurrently
         tasks = [
             self.check_redis(),
-            self.check_minio(),
+            self.check_s3(),
             self.check_nsjail(),
         ]
-        service_names = ["redis", "minio", "nsjail"]
+        service_names = ["redis", "s3", "nsjail"]
 
         # Add sandbox pool check if pool is configured
         if self._sandbox_pool and settings.sandbox_pool_enabled:
@@ -218,122 +218,124 @@ class HealthCheckService:
                 error=str(e),
             )
 
-    async def check_minio(self) -> HealthCheckResult:
-        """Check MinIO/S3 connectivity and performance."""
+    async def check_s3(self) -> HealthCheckResult:
+        """Check S3 storage connectivity and performance."""
         start_time = time.time()
 
         try:
-            # Create MinIO client if not exists
-            if not self._minio_client:
-                self._minio_client = Minio(
-                    settings.minio_endpoint,
-                    access_key=settings.minio_access_key,
-                    secret_key=settings.minio_secret_key,
-                    secure=settings.minio_secure,
+            if not self._s3_client:
+                self._s3_client = boto3.client(
+                    "s3",
+                    endpoint_url=settings.s3.endpoint_url,
+                    aws_access_key_id=settings.s3_access_key,
+                    aws_secret_access_key=settings.s3_secret_key,
+                    region_name=settings.s3_region,
                 )
 
-            # Test basic connectivity by listing buckets
             loop = asyncio.get_event_loop()
-            buckets = await loop.run_in_executor(None, self._minio_client.list_buckets)
+            buckets_resp = await loop.run_in_executor(
+                None, self._s3_client.list_buckets
+            )
+            buckets = buckets_resp.get("Buckets", [])
 
             # Check if our bucket exists
-            bucket_exists = await loop.run_in_executor(
-                None, self._minio_client.bucket_exists, settings.minio_bucket
-            )
-
-            if not bucket_exists:
-                # Try to create the bucket
+            try:
                 await loop.run_in_executor(
-                    None, self._minio_client.make_bucket, settings.minio_bucket
+                    None,
+                    lambda: self._s3_client.head_bucket(Bucket=settings.s3_bucket),
                 )
-                logger.info(f"Created missing bucket: {settings.minio_bucket}")
+                bucket_exists = True
+            except ClientError:
+                bucket_exists = False
+                await loop.run_in_executor(
+                    None,
+                    lambda: self._s3_client.create_bucket(Bucket=settings.s3_bucket),
+                )
+                logger.info(f"Created missing bucket: {settings.s3_bucket}")
 
             # Test read/write operations
             test_object = f"health_check/test_{int(time.time())}.txt"
             test_content = b"health check test content"
 
-            # Create a BytesIO object for the upload
             from io import BytesIO
 
             test_data = BytesIO(test_content)
 
-            # Upload test object
             await loop.run_in_executor(
                 None,
-                self._minio_client.put_object,
-                settings.minio_bucket,
-                test_object,
-                test_data,
-                len(test_content),
+                lambda: self._s3_client.put_object(
+                    Bucket=settings.s3_bucket,
+                    Key=test_object,
+                    Body=test_data,
+                    ContentLength=len(test_content),
+                ),
             )
 
-            # Download test object
             response = await loop.run_in_executor(
-                None, self._minio_client.get_object, settings.minio_bucket, test_object
+                None,
+                lambda: self._s3_client.get_object(
+                    Bucket=settings.s3_bucket, Key=test_object
+                ),
             )
 
-            downloaded_content = response.read()
-            response.close()
-            response.release_conn()
+            downloaded_content = response["Body"].read()
 
-            # Clean up test object
             await loop.run_in_executor(
                 None,
-                self._minio_client.remove_object,
-                settings.minio_bucket,
-                test_object,
+                lambda: self._s3_client.delete_object(
+                    Bucket=settings.s3_bucket, Key=test_object
+                ),
             )
 
             if downloaded_content != test_content:
-                raise Exception("MinIO read/write test failed")
+                raise Exception("S3 read/write test failed")
 
             response_time = (time.time() - start_time) * 1000
 
-            # Determine status based on response time
             status = HealthStatus.HEALTHY
-            if response_time > 2000:  # > 2 seconds
+            if response_time > 2000:
                 status = HealthStatus.DEGRADED
 
             details = {
-                "endpoint": settings.minio_endpoint,
-                "bucket": settings.minio_bucket,
+                "endpoint": settings.s3_endpoint,
+                "bucket": settings.s3_bucket,
                 "bucket_exists": bucket_exists,
                 "total_buckets": len(buckets),
-                "secure": settings.minio_secure,
+                "secure": settings.s3_secure,
             }
 
             return HealthCheckResult(
-                service="minio",
+                service="s3",
                 status=status,
                 response_time_ms=response_time,
                 details=details,
             )
 
-        except S3Error as e:
+        except ClientError as e:
             response_time = (time.time() - start_time) * 1000
             logger.error(
-                "MinIO health check failed",
+                "S3 health check failed",
                 error=str(e),
                 response_time_ms=response_time,
             )
 
             return HealthCheckResult(
-                service="minio",
+                service="s3",
                 status=HealthStatus.UNHEALTHY,
                 response_time_ms=response_time,
-                error=f"S3 Error: {e.message if hasattr(e, 'message') else str(e)}",
+                error=str(e),
             )
 
         except Exception as e:
             response_time = (time.time() - start_time) * 1000
             logger.error(
-                "MinIO health check failed",
+                "S3 health check failed",
                 error=str(e),
                 response_time_ms=response_time,
             )
 
             return HealthCheckResult(
-                service="minio",
+                service="s3",
                 status=HealthStatus.UNHEALTHY,
                 response_time_ms=response_time,
                 error=str(e),
@@ -470,7 +472,7 @@ class HealthCheckService:
 
             details = {
                 "enabled": True,
-                "architecture": "stateless",  # Sandboxes destroyed after each execution
+                "architecture": "stateless",
                 "total_available": total_available,
                 "total_acquisitions": total_acquisitions,
                 "pool_hits": pool_hits,

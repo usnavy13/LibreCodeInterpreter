@@ -53,7 +53,7 @@ def get_state_service() -> StateService:
 
 @lru_cache()
 def get_state_archival_service() -> StateArchivalService:
-    """Get state archival service instance for MinIO cold storage."""
+    """Get state archival service instance for S3 cold storage."""
     state_service = get_state_service()
     return StateArchivalService(state_service=state_service)
 

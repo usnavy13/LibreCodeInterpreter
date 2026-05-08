@@ -1,18 +1,25 @@
 # Copy this file to `docker-compose.override.yml` to customize how the API image
-# is sourced when running `docker compose -f docker-compose.prod.yml up -d`.
+# is sourced when running `docker compose up -d`. Compose auto-merges
+# `docker-compose.override.yml` on top of `docker-compose.yml`, so no extra `-f`
+# flags are needed.
 #
-# `docker-compose.override.yml` is ignored by git so you can keep a local choice
-# without committing it.
+# `docker-compose.override.yml` is gitignored, so your local choice stays out
+# of version control.
 #
-# Default example: pull the latest dev image package.
-# To build from your local checkout instead, comment the `image`/`pull_policy`
-# lines below and uncomment the `build` block.
+# The base `docker-compose.yml` pulls the stable published image
+# (`ghcr.io/usnavy13/librecodeinterpreter:main`). Use one of the snippets below
+# to switch to the dev channel or to a local build.
 
 services:
   api:
+    # Option 1 — pull the latest dev image:
     image: ghcr.io/usnavy13/librecodeinterpreter-dev:latest
     pull_policy: always
 
+    # Option 2 — build from your local checkout. Comment the `image` and
+    # `pull_policy` lines above and uncomment the block below, then run:
+    #   docker compose up --build -d
+    #
     # build:
     #   context: .
     #   target: app

@@ -23,9 +23,9 @@ State persistence uses a hybrid storage architecture:
 │                         Hybrid State Storage                                 │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│   Hot Storage (Redis)                  Cold Storage (MinIO)                 │
+│   Hot Storage (Redis)                  Cold Storage (S3)                    │
 │   ┌─────────────────────┐              ┌─────────────────────┐             │
-│   │ TTL: 2 hours        │    Archive   │ TTL: 7 days         │             │
+│   │ TTL: 2 hours        │    Archive   │ TTL: 1 day          │             │
 │   │ Access: ~1ms        │ ──────────▶  │ Access: ~50ms       │             │
 │   │ State: compressed   │   (after     │ State: compressed   │             │
 │   │        lz4 + base64 │   1 hour     │        lz4 + base64 │             │
@@ -57,7 +57,7 @@ State persistence uses a hybrid storage architecture:
    POST /exec {"lang": "py", "code": "print(x)", "session_id": "abc123"}
 
    → StateService loads state from Redis
-   → If not in Redis, checks MinIO archives
+   → If not in Redis, checks S3 archives
    → State deserialized into REPL namespace
    → Code executes with existing variables
    → Updated state saved back to Redis
@@ -95,7 +95,7 @@ CleanupService (every 5 min)
             │
             └── If inactive > 1 hour:
                     │
-                    ├── Upload to MinIO (state-archive/{session_id})
+                    ├── Upload to S3 (state-archive/{session_id})
                     │
                     └── Keep in Redis (will expire at 2 hours)
 ```
@@ -103,7 +103,7 @@ CleanupService (every 5 min)
 When a session resumes after Redis expiry:
 
 1. StateService checks Redis → not found
-2. StateArchivalService checks MinIO → found
+2. StateArchivalService checks S3 → found
 3. State restored to Redis for fast future access
 
 ---
@@ -116,14 +116,14 @@ When a session resumes after Redis expiry:
 | --------------------------- | ------- | ------------------------------------ |
 | `STATE_PERSISTENCE_ENABLED` | `true`  | Enable/disable state persistence     |
 | `STATE_TTL_SECONDS`         | `7200`  | Redis TTL (default 2 hours)          |
-| `STATE_MAX_SIZE_MB`         | `50`    | Maximum serialized state size        |
+| `STATE_MAX_REDIS_SIZE_MB`   | `100`   | Max raw state size in Redis (MB). Larger states bypass Redis and go straight to S3 |
 | `STATE_CAPTURE_ON_ERROR`    | `false` | Save state even on execution failure |
 
 ### State Archival Settings
 
 | Variable                               | Default | Description                            |
 | -------------------------------------- | ------- | -------------------------------------- |
-| `STATE_ARCHIVE_ENABLED`                | `true`  | Enable MinIO archival                  |
+| `STATE_ARCHIVE_ENABLED`                | `true`  | Enable S3 cold storage archival        |
 | `STATE_ARCHIVE_AFTER_SECONDS`          | `3600`  | Archive after this inactivity (1 hour) |
 | `STATE_ARCHIVE_TTL_DAYS`               | `1`     | Keep archives for this many days (24h) |
 | `STATE_ARCHIVE_CHECK_INTERVAL_SECONDS` | `300`   | Check frequency (5 minutes)            |
@@ -139,7 +139,7 @@ STATE_PERSISTENCE_ENABLED=false
 When disabled:
 
 - Each Python execution starts with a clean namespace
-- No state is saved to Redis or MinIO
+- No state is saved to Redis or S3
 - `session_id` in requests is ignored for state (it still scopes files and session continuity)
 
 ---
@@ -318,14 +318,13 @@ encoded = base64.b64encode(compressed).decode('utf-8')
 
 ### State Size Limits
 
-The maximum state size is configurable via `STATE_MAX_SIZE_MB` (default 50MB).
+The maximum *Redis* state size is configurable via `STATE_MAX_REDIS_SIZE_MB` (default 100 MB of raw bytes).
 
-If state exceeds this limit:
+When state exceeds this limit:
 
-1. A warning is logged
-2. State is NOT saved
-3. Execution still succeeds
-4. Next execution starts fresh
+1. The state bypasses Redis hot storage and is written directly to S3 cold storage
+2. Subsequent executions reload it from S3 (slightly higher latency than Redis)
+3. Execution still succeeds normally
 
 **Common causes of large state:**
 
@@ -337,14 +336,14 @@ If state exceeds this limit:
 
 - Save large data to files instead of variables
 - Clear unused variables: `del large_variable`
-- Increase limit if needed: `STATE_MAX_SIZE_MB=100`
+- Tune the Redis ceiling if needed: `STATE_MAX_REDIS_SIZE_MB=200`
 
 ### Storage Keys
 
 | Storage | Key Pattern                  | Content                     |
 | ------- | ---------------------------- | --------------------------- |
 | Redis   | `state:{session_id}`         | Compressed state + metadata |
-| MinIO   | `state-archive/{session_id}` | Compressed state (archived) |
+| S3      | `state-archive/{session_id}` | Compressed state (archived) |
 
 ---
 
@@ -396,8 +395,8 @@ Ensure sandboxes have sufficient memory for state operations.
    - Session IDs are case-sensitive
 
 3. **Check state size:**
-   - Large states may exceed `STATE_MAX_SIZE_MB`
-   - Check logs for "State size exceeds limit" warnings
+   - Very large states bypass Redis (`STATE_MAX_REDIS_SIZE_MB`) and may take longer to reload from S3
+   - Check logs for state-size related warnings
 
 ### State Restored but Variables Missing
 
@@ -420,10 +419,10 @@ curl -X GET https://localhost/health/redis \
 
 ### Archive Not Working
 
-1. **Check MinIO connectivity:**
+1. **Check S3 connectivity:**
 
    ```bash
-   curl -X GET https://localhost/health/minio \
+   curl -X GET https://localhost/health/s3 \
      -H "x-api-key: $API_KEY"
    ```
 

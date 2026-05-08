@@ -139,6 +139,97 @@ async def _perform_health_checks() -> None:
         logger.error("Initial health checks failed", error=str(e))
 
 
+async def _startup_egress_proxy(app: FastAPI) -> None:
+    """Start the inline egress proxy if sandbox network access is enabled.
+
+    Also prepares the persistent skill-deps directory: chmods it sticky +
+    world-writable so each language's sandbox uid can install packages
+    without root, while preserving package files across containers.
+    """
+    if not settings.enable_sandbox_network:
+        return
+
+    import os
+    from pathlib import Path
+
+    from .services.sandbox.egress_proxy import DEFAULT_ALLOWLIST, EgressProxy
+
+    deps_root = Path(settings.skill_deps_path)
+    try:
+        deps_root.mkdir(parents=True, exist_ok=True)
+        # Sticky + world-writable, like /tmp. The sandbox uid (e.g. 1001) needs
+        # to write here; keeping it sticky means one sandbox can't unlink
+        # another's files.
+        os.chmod(str(deps_root), 0o1777)  # nosec B103
+    except OSError as exc:
+        logger.warning(
+            "Could not prepare skill-deps directory; "
+            "sandbox installs may fail with permission errors",
+            path=str(deps_root),
+            error=str(exc),
+        )
+
+    extra = (
+        [h.strip() for h in settings.sandbox_egress_allowlist.split(",") if h.strip()]
+        if settings.sandbox_egress_allowlist
+        else []
+    )
+    proxy = EgressProxy(
+        port=settings.sandbox_egress_port,
+        allowlist=list(DEFAULT_ALLOWLIST) + extra,
+    )
+    await proxy.start()
+    app.state.egress_proxy = proxy
+
+    # Network-level enforcement so a malicious skill can't `socket.create_connection`
+    # around the application-level proxy. Without these iptables rules, sandbox
+    # processes — sharing the API container's net namespace — can directly reach
+    # Redis/S3 and any internal docker network. Refuse to enable network if the
+    # firewall can't be installed (better to fail loudly than to silently leak SSRF).
+    from .config.languages import SANDBOX_USER_ID
+    from .services.sandbox.egress_firewall import install_sandbox_egress_rules
+
+    sandbox_uid = SANDBOX_USER_ID
+    firewall_ok = install_sandbox_egress_rules(
+        sandbox_uid=sandbox_uid,
+        proxy_port=settings.sandbox_egress_port,
+    )
+    if not firewall_ok:
+        await proxy.stop()
+        app.state.egress_proxy = None
+        raise RuntimeError(
+            "ENABLE_SANDBOX_NETWORK=true but the iptables egress firewall could "
+            "not be installed. The container needs CAP_NET_ADMIN (cap_add: NET_ADMIN "
+            "in compose) and an iptables binary. Without these rules, sandboxes "
+            "could SSRF Redis/S3 via direct sockets — refusing to enable network."
+        )
+
+    logger.info(
+        "Sandbox network access ENABLED via egress proxy + firewall",
+        port=settings.sandbox_egress_port,
+        skill_deps_path=str(deps_root),
+        sandbox_uid=sandbox_uid,
+        allowlist_extra=extra or None,
+    )
+
+
+async def _shutdown_egress_proxy(app: FastAPI) -> None:
+    proxy = getattr(app.state, "egress_proxy", None)
+    if proxy is None:
+        return
+    try:
+        await proxy.stop()
+    except Exception as exc:
+        logger.warning("Failed to stop egress proxy cleanly", error=str(exc))
+    # Best-effort cleanup of the iptables rules so a restart doesn't accumulate.
+    try:
+        from .services.sandbox.egress_firewall import remove_existing_rules
+
+        remove_existing_rules()
+    except Exception as exc:
+        logger.warning("Failed to remove sandbox egress firewall", error=str(exc))
+
+
 async def _shutdown_services(app: FastAPI) -> None:
     """Stop monitoring services, sandbox pool, PTC contexts, and cleanup scheduler."""
     try:
@@ -188,13 +279,31 @@ async def lifespan(app: FastAPI):
         logger.warning("Using default API key - CHANGE THIS IN PRODUCTION!")
     if settings.api_debug:
         logger.warning("Debug mode is enabled - disable in production")
+    if not settings.auth_enabled:
+        logger.warning(
+            "AUTHENTICATION DISABLED via AUTH_ENABLED=false; "
+            "trusting network boundary for x-api-key endpoints "
+            "(master-key admin endpoints still require MASTER_API_KEY)"
+        )
     if settings.master_api_key:
         logger.info("API key management enabled")
     logger.debug("Rate limiting", enabled=settings.rate_limit_enabled)
 
+    # Bash PTC requires `jq` inside the sandbox image. The Dockerfile installs
+    # it, but warn if running outside Docker so bash PTC failures aren't a
+    # surprise.
+    import shutil
+
+    if shutil.which("jq") is None:
+        logger.warning(
+            "jq not found on PATH; /exec/programmatic with lang='bash' will fail "
+            "(bash PTC tool wrappers depend on jq for JSON marshalling)"
+        )
+
     await _startup_monitoring(app)
     await _startup_cleanup_tasks()
     await _startup_sandbox_pool(app)
+    await _startup_egress_proxy(app)
     await _perform_health_checks()
 
     logger.info("Code Interpreter API startup completed")
@@ -203,6 +312,7 @@ async def lifespan(app: FastAPI):
 
     logger.info("Shutting down Code Interpreter API")
 
+    await _shutdown_egress_proxy(app)
     await _shutdown_services(app)
 
     try:

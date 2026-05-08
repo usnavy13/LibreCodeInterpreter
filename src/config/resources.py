@@ -20,7 +20,7 @@ class ResourcesConfig(BaseSettings):
     # Session Lifecycle
     session_ttl_hours: int = Field(default=24, ge=1, le=168)
     session_cleanup_interval_minutes: int = Field(default=60, ge=1, le=1440)
-    enable_orphan_minio_cleanup: bool = Field(default=True)
+    enable_orphan_s3_cleanup: bool = Field(default=True)
 
     def get_session_ttl_minutes(self) -> int:
         """Get session TTL in minutes."""

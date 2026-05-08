@@ -498,7 +498,7 @@ class TestFilePersistence:
                 path="/output.txt",
             )
         ]
-        mock_file_service.download_file.return_value = "https://minio.test/download"
+        mock_file_service.download_file.return_value = "https://s3.test/download"
 
         from src.dependencies.services import (
             get_session_service,

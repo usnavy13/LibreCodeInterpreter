@@ -378,6 +378,9 @@ class SandboxPool:
                 command=["/usr/bin/python3", "/opt/repl_server.py"],
                 language="py",
                 repl_mode=True,
+                # Honor ENABLE_SANDBOX_NETWORK so pooled REPL sandboxes can
+                # also reach the inline egress proxy for skill installs.
+                network=bool(settings.enable_sandbox_network),
                 env=env,
             )
 
@@ -387,6 +390,10 @@ class SandboxPool:
             nsjail_cmd = " ".join(
                 shlex.quote(str(a)) for a in [settings.nsjail_binary] + nsjail_args
             )
+            tmpfs_size = settings.sandbox_tmpfs_size_mb
+            noexec_tmpfs = "noexec,nosuid,nodev,"
+            deps_path = settings.skill_deps_path
+
             wrapper_cmd = (
                 # Bind sandbox dir to /mnt/data (before hiding sandboxes dir)
                 f"mount --bind {shlex.quote(str(sandbox_info.data_dir))} /mnt/data && "
@@ -401,7 +408,18 @@ class SandboxPool:
                 f"mount -t tmpfs -o size=1k tmpfs /app/dashboard && "
                 f"mount -t tmpfs -o size=1k tmpfs /app/src && "
                 # BUG-003: Hide /proc (REPL is Python-only, always safe to mask)
-                f"mount --bind /tmp/empty_proc /proc && "
+                f"mount --bind /var/lib/code-interpreter/empty_proc /proc && "
+                # BUG-007: Ephemeral /tmp with noexec,nosuid,nodev
+                f"mount -t tmpfs -o {noexec_tmpfs}size={tmpfs_size}m,mode=1777 tmpfs /tmp && "
+                # BUG-008: Lock down other writable paths
+                f"mount -t tmpfs -o {noexec_tmpfs}size=1m,mode=1777 tmpfs /var/tmp && "
+                f"mount -t tmpfs -o {noexec_tmpfs}size=1m,mode=1777 tmpfs /run/lock && "
+                f"mount -t tmpfs -o {noexec_tmpfs}size=1m,mode=1733 tmpfs /var/lib/php/sessions && "
+                # BUG-008: skill-deps nosuid,nodev (not noexec — installed CLIs need exec)
+                f"(test -d {shlex.quote(deps_path)} && "
+                f"mount --bind {shlex.quote(deps_path)} {shlex.quote(deps_path)} && "
+                f"mount -o remount,bind,nosuid,nodev {shlex.quote(deps_path)} "
+                f"|| true) && "
                 # Execute nsjail
                 f"{nsjail_cmd}"
             )

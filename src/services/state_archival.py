@@ -1,18 +1,18 @@
-"""State archival service for MinIO cold storage.
+"""State archival service for S3 cold storage.
 
-This service handles archiving Python session states from Redis to MinIO
+This service handles archiving Python session states from Redis to S3
 for long-term storage, and restoring them on demand.
 
 Hybrid storage architecture:
 - Hot storage: Redis with 2-hour TTL (fast access)
-- Cold storage: MinIO with 7-day TTL (long-term archival)
+- Cold storage: S3 with configurable TTL (long-term archival)
 
 When a state is accessed:
 1. Check Redis first (hot storage)
-2. If not found, check MinIO (cold storage)
-3. If found in MinIO, restore to Redis
+2. If not found, check S3 (cold storage)
+3. If found in S3, restore to Redis
 
-States are archived to MinIO when:
+States are archived to S3 when:
 - TTL in Redis drops below archive_after_seconds threshold
 - This indicates the session has been inactive for a while
 """
@@ -22,9 +22,9 @@ import io
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 
+import boto3
 import structlog
-from minio import Minio
-from minio.error import S3Error
+from botocore.exceptions import ClientError
 
 from ..config import settings
 from .state import StateService
@@ -33,74 +33,79 @@ logger = structlog.get_logger(__name__)
 
 
 class StateArchivalService:
-    """Manages archiving and restoring Python session states to/from MinIO.
+    """Manages archiving and restoring Python session states to/from S3.
 
-    States are stored in MinIO under the path:
+    States are stored in S3 under the path:
         states/{session_id}/state.dat
 
-    Metadata is stored as object tags/custom metadata:
+    Metadata is stored as S3 object metadata:
         - archived_at: ISO timestamp
         - original_size: Size before any host-side compression
         - session_id: The session identifier
     """
 
-    # MinIO path prefix for archived states
     STATE_PREFIX = "states"
 
     def __init__(
         self,
         state_service: Optional[StateService] = None,
-        minio_client: Optional[Minio] = None,
+        s3_client: Optional[Any] = None,
     ):
         """Initialize the archival service.
 
         Args:
             state_service: StateService instance for Redis operations
-            minio_client: Optional MinIO client (creates new one if not provided)
+            s3_client: Optional boto3 S3 client (creates new one if not provided)
         """
         self.state_service = state_service or StateService()
-        self.minio_client = minio_client or Minio(
-            settings.minio_endpoint,
-            access_key=settings.minio_access_key,
-            secret_key=settings.minio_secret_key,
-            secure=settings.minio_secure,
+        self.s3_client = s3_client or boto3.client(
+            "s3",
+            endpoint_url=settings.s3.endpoint_url,
+            aws_access_key_id=settings.s3_access_key,
+            aws_secret_access_key=settings.s3_secret_key,
+            region_name=settings.s3_region,
         )
-        self.bucket_name = settings.minio_bucket
+        self.bucket_name = settings.s3_bucket
         self._bucket_checked = False
 
     def _get_state_object_key(self, session_id: str) -> str:
-        """Generate MinIO object key for a session state."""
+        """Generate S3 object key for a session state."""
         return f"{self.STATE_PREFIX}/{session_id}/state.dat"
 
     async def _ensure_bucket_exists(self) -> None:
-        """Ensure the MinIO bucket exists."""
+        """Ensure the S3 bucket exists."""
         if self._bucket_checked:
             return
 
         try:
             loop = asyncio.get_event_loop()
-            bucket_exists = await loop.run_in_executor(
-                None, self.minio_client.bucket_exists, self.bucket_name
-            )
-
-            if not bucket_exists:
+            try:
                 await loop.run_in_executor(
-                    None, self.minio_client.make_bucket, self.bucket_name
+                    None,
+                    lambda: self.s3_client.head_bucket(Bucket=self.bucket_name),
                 )
-                logger.info(
-                    "Created MinIO bucket for state archival", bucket=self.bucket_name
-                )
+            except ClientError as e:
+                if e.response["Error"]["Code"] in ("404", "NoSuchBucket"):
+                    await loop.run_in_executor(
+                        None,
+                        lambda: self.s3_client.create_bucket(Bucket=self.bucket_name),
+                    )
+                    logger.info(
+                        "Created S3 bucket for state archival", bucket=self.bucket_name
+                    )
+                else:
+                    raise
 
             self._bucket_checked = True
 
-        except S3Error as e:
+        except ClientError as e:
             logger.error(
                 "Failed to ensure bucket exists", error=str(e), bucket=self.bucket_name
             )
             raise
 
     async def archive_state(self, session_id: str, state_data: str) -> bool:
-        """Archive a session state to MinIO.
+        """Archive a session state to S3.
 
         Args:
             session_id: Session identifier
@@ -115,31 +120,29 @@ class StateArchivalService:
             object_key = self._get_state_object_key(session_id)
             state_bytes = state_data.encode("utf-8")
 
-            # Create metadata
             metadata = {
                 "archived_at": datetime.now(timezone.utc).isoformat(),
                 "original_size": str(len(state_bytes)),
                 "session_id": session_id,
             }
 
-            # Upload to MinIO
             loop = asyncio.get_event_loop()
             data_stream = io.BytesIO(state_bytes)
 
             await loop.run_in_executor(
                 None,
-                lambda: self.minio_client.put_object(
-                    self.bucket_name,
-                    object_key,
-                    data_stream,
-                    len(state_bytes),
-                    content_type="application/octet-stream",
-                    metadata=metadata,
+                lambda: self.s3_client.put_object(
+                    Bucket=self.bucket_name,
+                    Key=object_key,
+                    Body=data_stream,
+                    ContentLength=len(state_bytes),
+                    ContentType="application/octet-stream",
+                    Metadata=metadata,
                 ),
             )
 
             logger.info(
-                "Archived state to MinIO",
+                "Archived state to S3",
                 session_id=session_id[:12],
                 size_bytes=len(state_bytes),
                 object_key=object_key,
@@ -153,7 +156,7 @@ class StateArchivalService:
             return False
 
     async def restore_state(self, session_id: str) -> Optional[str]:
-        """Restore a session state from MinIO.
+        """Restore a session state from S3.
 
         If found, the state is also saved back to Redis for fast access.
 
@@ -169,17 +172,16 @@ class StateArchivalService:
             object_key = self._get_state_object_key(session_id)
             loop = asyncio.get_event_loop()
 
-            # Check if object exists
             try:
                 response = await loop.run_in_executor(
                     None,
-                    lambda: self.minio_client.get_object(self.bucket_name, object_key),
+                    lambda: self.s3_client.get_object(
+                        Bucket=self.bucket_name, Key=object_key
+                    ),
                 )
-                state_bytes = response.read()
-                response.close()
-                response.release_conn()
-            except S3Error as e:
-                if e.code == "NoSuchKey":
+                state_bytes = response["Body"].read()
+            except ClientError as e:
+                if e.response["Error"]["Code"] == "NoSuchKey":
                     logger.debug("No archived state found", session_id=session_id[:12])
                     return None
                 raise
@@ -197,18 +199,17 @@ class StateArchivalService:
                     session_id, state_data, ttl_seconds=settings.state_ttl_seconds
                 )
             else:
-                # Too large for Redis — save only pointer
                 await self.state_service.save_state_pointer(
                     session_id, state_data, ttl_seconds=settings.state_ttl_seconds
                 )
                 logger.info(
-                    "State too large for Redis, kept in MinIO only",
+                    "State too large for Redis, kept in S3 only",
                     session_id=session_id[:12],
                     state_size_mb=round(raw_size / 1024 / 1024, 1),
                 )
 
             logger.info(
-                "Restored state from MinIO",
+                "Restored state from S3",
                 session_id=session_id[:12],
                 size_bytes=len(state_bytes),
             )
@@ -221,7 +222,7 @@ class StateArchivalService:
             return None
 
     async def delete_archived_state(self, session_id: str) -> bool:
-        """Delete an archived state from MinIO.
+        """Delete an archived state from S3.
 
         Args:
             session_id: Session identifier
@@ -235,23 +236,17 @@ class StateArchivalService:
             object_key = self._get_state_object_key(session_id)
             loop = asyncio.get_event_loop()
 
+            # boto3 delete_object is idempotent — no error on missing key
             await loop.run_in_executor(
                 None,
-                lambda: self.minio_client.remove_object(self.bucket_name, object_key),
+                lambda: self.s3_client.delete_object(
+                    Bucket=self.bucket_name, Key=object_key
+                ),
             )
 
             logger.debug("Deleted archived state", session_id=session_id[:12])
             return True
 
-        except S3Error as e:
-            if e.code == "NoSuchKey":
-                return True  # Already doesn't exist
-            logger.error(
-                "Failed to delete archived state",
-                session_id=session_id[:12],
-                error=str(e),
-            )
-            return False
         except Exception as e:
             logger.error(
                 "Failed to delete archived state",
@@ -261,7 +256,7 @@ class StateArchivalService:
             return False
 
     async def has_archived_state(self, session_id: str) -> bool:
-        """Check if a session has archived state in MinIO.
+        """Check if a session has archived state in S3.
 
         Args:
             session_id: Session identifier
@@ -278,11 +273,13 @@ class StateArchivalService:
             try:
                 await loop.run_in_executor(
                     None,
-                    lambda: self.minio_client.stat_object(self.bucket_name, object_key),
+                    lambda: self.s3_client.head_object(
+                        Bucket=self.bucket_name, Key=object_key
+                    ),
                 )
                 return True
-            except S3Error as e:
-                if e.code == "NoSuchKey":
+            except ClientError as e:
+                if e.response["Error"]["Code"] == "404":
                     return False
                 raise
 
@@ -295,7 +292,7 @@ class StateArchivalService:
             return False
 
     async def archive_inactive_states(self) -> Dict[str, Any]:
-        """Archive inactive states from Redis to MinIO.
+        """Archive inactive states from Redis to S3.
 
         This is the main archival task that runs periodically.
         It finds states with low TTL (indicating inactivity) and archives them.
@@ -313,22 +310,18 @@ class StateArchivalService:
         }
 
         try:
-            # Find states ready for archival
             states_to_archive = await self.state_service.get_states_for_archival()
 
             for session_id, remaining_ttl, size in states_to_archive:
                 try:
-                    # Check if already archived
                     if await self.has_archived_state(session_id):
                         summary["already_archived"] += 1
                         continue
 
-                    # Get the state data
                     state_data = await self.state_service.get_state(session_id)
                     if not state_data:
                         continue
 
-                    # Archive to MinIO
                     if await self.archive_state(session_id, state_data):
                         summary["archived"] += 1
                     else:
@@ -379,22 +372,22 @@ class StateArchivalService:
             ttl_days = settings.state_archive_ttl_days
             cutoff = datetime.now(timezone.utc).timestamp() - (ttl_days * 24 * 3600)
 
-            # List all archived states
             objects = await loop.run_in_executor(
                 None,
                 lambda: list(
-                    self.minio_client.list_objects(
-                        self.bucket_name, prefix=prefix, recursive=True
-                    )
+                    self.s3_client.get_paginator("list_objects_v2")
+                    .paginate(Bucket=self.bucket_name, Prefix=prefix)
+                    .search("Contents[]")
                 ),
             )
 
-            for obj in objects:
+            for entry in objects:
+                if entry is None:
+                    continue
                 try:
-                    # Check object age
-                    if obj.last_modified and obj.last_modified.timestamp() < cutoff:
-                        # Extract session_id from path
-                        parts = obj.object_name.split("/")
+                    last_modified = entry.get("LastModified")
+                    if last_modified and last_modified.timestamp() < cutoff:
+                        parts = entry["Key"].split("/")
                         if len(parts) >= 2:
                             session_id = parts[1]
                             if await self.delete_archived_state(session_id):
@@ -405,7 +398,7 @@ class StateArchivalService:
                 except Exception as e:
                     logger.warning(
                         "Failed to cleanup archived state",
-                        object_name=obj.object_name,
+                        object_name=entry.get("Key"),
                         error=str(e),
                     )
                     summary["failed"] += 1

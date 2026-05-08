@@ -133,7 +133,7 @@ def mock_file_service():
         created_at=datetime.utcnow(),
         path="/test.txt",
     )
-    service.download_file.return_value = "https://minio.example.com/download-url"
+    service.download_file.return_value = "https://s3.example.com/download-url"
     service.validate_uploads = MagicMock(return_value=None)
     return service
 

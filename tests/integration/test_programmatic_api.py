@@ -561,3 +561,81 @@ class TestProgrammaticAuth:
             headers={"x-api-key": "wrong-key"},
         )
         assert response.status_code == 401
+
+
+class TestProgrammaticLangField:
+    """Tests for the `lang` field on /exec/programmatic.
+
+    LibreChat's BashProgrammaticToolCalling sends {lang: "bash", ...}; the
+    Python tool sends nothing (default). Invalid languages must be rejected
+    so silent Python execution doesn't surprise callers."""
+
+    @patch("src.api.programmatic._get_ptc_service")
+    def test_lang_defaults_to_py(
+        self,
+        mock_get_service,
+        client,
+        auth_headers,
+        mock_session,
+        mock_ptc_completed_response,
+    ):
+        mock_service = AsyncMock()
+        mock_service.start_execution.return_value = mock_ptc_completed_response
+        mock_get_service.return_value = mock_service
+
+        from src.dependencies.services import get_session_service
+
+        mock_session_svc = AsyncMock()
+        mock_session_svc.create_session.return_value = mock_session
+        app.dependency_overrides[get_session_service] = lambda: mock_session_svc
+
+        try:
+            response = client.post(
+                "/exec/programmatic",
+                json={"code": "print('hi')"},
+                headers=auth_headers,
+            )
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        assert mock_service.start_execution.await_args.kwargs["lang"] == "py"
+
+    @patch("src.api.programmatic._get_ptc_service")
+    def test_lang_bash_routed_to_service(
+        self,
+        mock_get_service,
+        client,
+        auth_headers,
+        mock_session,
+        mock_ptc_completed_response,
+    ):
+        mock_service = AsyncMock()
+        mock_service.start_execution.return_value = mock_ptc_completed_response
+        mock_get_service.return_value = mock_service
+
+        from src.dependencies.services import get_session_service
+
+        mock_session_svc = AsyncMock()
+        mock_session_svc.create_session.return_value = mock_session
+        app.dependency_overrides[get_session_service] = lambda: mock_session_svc
+
+        try:
+            response = client.post(
+                "/exec/programmatic",
+                json={"code": "echo hello", "lang": "bash", "tools": []},
+                headers=auth_headers,
+            )
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        assert mock_service.start_execution.await_args.kwargs["lang"] == "bash"
+
+    def test_invalid_lang_returns_422(self, client, auth_headers):
+        response = client.post(
+            "/exec/programmatic",
+            json={"code": "puts 'hi'", "lang": "ruby"},
+            headers=auth_headers,
+        )
+        assert response.status_code == 422

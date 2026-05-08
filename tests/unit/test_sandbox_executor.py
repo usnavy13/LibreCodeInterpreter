@@ -100,10 +100,22 @@ class TestBuildSanitizedEnv:
         assert env["FC"] == "gfortran"
 
     def test_unknown_language_has_base_env(self):
-        """Test unknown language gets base env only."""
-        config = NsjailConfig()
-        executor = SandboxExecutor(config)
-        env = executor._build_sanitized_env("unknown")
+        """Test unknown language gets base env only.
+
+        Note: when ENABLE_SANDBOX_NETWORK=true the network section adds
+        HTTPS_PROXY + per-language install paths regardless of `language`
+        (so bash skills can pip/npm install). Disable that toggle here so
+        the test pins the original "unknown lang -> base env only" intent.
+        """
+        from unittest.mock import patch
+
+        with patch("src.services.sandbox.executor.settings") as ms:
+            ms.enable_sandbox_network = False
+            ms.skill_deps_path = "/opt/skill-deps"
+            config = NsjailConfig()
+            executor = SandboxExecutor(config)
+            env = executor._build_sanitized_env("unknown")
+
         assert "PATH" in env
         assert "HOME" in env
         assert "TMPDIR" in env

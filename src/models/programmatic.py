@@ -8,7 +8,9 @@ information or actions from the outside world.
 
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
+
+SUPPORTED_PTC_LANGUAGES = {"py", "bash"}
 
 
 class PTCToolDefinition(BaseModel):
@@ -67,12 +69,28 @@ class ProgrammaticExecRequest(BaseModel):
 
     # Initial execution fields
     code: Optional[str] = Field(
-        default=None, description="Python code to execute (initial request)"
+        default=None, description="Code to execute (initial request)"
+    )
+    lang: str = Field(
+        default="py",
+        description=(
+            "Language for the PTC sandbox: 'py' (default) or 'bash'. "
+            "LibreChat's BashProgrammaticToolCalling tool sends 'bash'."
+        ),
     )
     tools: List[PTCToolDefinition] = Field(
         default_factory=list,
         description="Tools available to the code (initial request)",
     )
+
+    @validator("lang")
+    def _validate_lang(cls, v: str) -> str:
+        if v not in SUPPORTED_PTC_LANGUAGES:
+            raise ValueError(
+                f"lang must be one of {sorted(SUPPORTED_PTC_LANGUAGES)}, got {v!r}"
+            )
+        return v
+
     session_id: Optional[str] = Field(
         default=None, description="Optional session ID for continuity"
     )

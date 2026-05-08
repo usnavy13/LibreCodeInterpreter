@@ -238,15 +238,36 @@ class CodeExecutionRunner:
 
             generated_files = []
             if should_detect_files:
+                # _detect_generated_files now consults sandbox_info.mounted_file_stats
+                # internally to skip unchanged mounts and surface in-place edits as
+                # new generated files. The legacy _filter_generated_files blanket
+                # suppression was removed because it dropped real edits along with
+                # the noise.
                 generated_files = await self._detect_generated_files(sandbox_info)
 
-            mounted_filenames = self._get_mounted_filenames(files)
-            filtered_files = self._filter_generated_files(
-                generated_files, mounted_filenames
-            )
-
-            for file_info in filtered_files:
+            for file_info in generated_files:
                 if OutputProcessor.validate_generated_file(file_info):
+                    meta: Dict[str, Any] = {}
+                    if file_info.get("inherited"):
+                        meta = {
+                            k: file_info[k]
+                            for k in (
+                                "inherited",
+                                "original_file_id",
+                                "original_session_id",
+                                "original_entity_id",
+                            )
+                            if k in file_info
+                        }
+                    elif file_info.get("modified_from_id"):
+                        meta = {
+                            k: file_info[k]
+                            for k in (
+                                "modified_from_id",
+                                "modified_from_session_id",
+                            )
+                            if k in file_info
+                        }
                     outputs.append(
                         ExecutionOutput(
                             type=OutputType.FILE,
@@ -254,6 +275,7 @@ class CodeExecutionRunner:
                             mime_type=file_info.get("mime_type"),
                             size=file_info.get("size"),
                             timestamp=end_time,
+                            metadata=meta or None,
                         )
                     )
 
@@ -345,30 +367,6 @@ class CodeExecutionRunner:
             )
 
         return outputs
-
-    def _get_mounted_filenames(self, files: Optional[List[Dict[str, Any]]]) -> set:
-        """Get set of mounted filenames for filtering."""
-        mounted = set()
-        if files:
-            try:
-                for f in files:
-                    name = f.get("filename") or f.get("name")
-                    if name:
-                        mounted.add(name)
-                        mounted.add(OutputProcessor.sanitize_filename(name))
-            except Exception:
-                pass
-        return mounted
-
-    def _filter_generated_files(
-        self, generated: List[Dict[str, Any]], mounted_filenames: set
-    ) -> List[Dict[str, Any]]:
-        """Filter out mounted files from generated files list."""
-        return [
-            f
-            for f in generated
-            if Path(f.get("path", "")).name not in mounted_filenames
-        ]
 
     async def _create_fresh_sandbox(
         self, session_id: str, language: str
@@ -703,9 +701,13 @@ class CodeExecutionRunner:
     ) -> None:
         """Mount files to sandbox workspace.
 
-        Uses streaming (MinIO fget_object) to transfer files directly to the
+        Uses streaming (S3 download_file) to transfer files directly to the
         sandbox data directory without loading entire files into memory. This
         avoids blocking the asyncio event loop during large file transfers.
+
+        Filenames may include subdirectories (e.g. `skills/foo/SKILL.md` from
+        LibreChat skill bundles). Parent directories are created and chowned
+        to match the sandbox uid before the file is written.
         """
         try:
             from ..file import FileService
@@ -713,10 +715,27 @@ class CodeExecutionRunner:
 
             file_service = FileService()
             user_id = get_user_id_for_language(language)
+            data_dir = sandbox_info.data_dir
 
-            def _set_file_perms(path, uid):
+            def _ensure_parent_dirs(dest: Path, uid: int) -> None:
+                parent = dest.parent
+                if parent == data_dir or not parent.is_relative_to(data_dir):
+                    return
+                parent.mkdir(parents=True, exist_ok=True)
+                # Chown each newly-created ancestor so the sandbox uid can
+                # traverse and write inside it.
+                for ancestor in [parent, *parent.parents]:
+                    if ancestor == data_dir:
+                        break
+                    try:
+                        os.chown(ancestor, uid, uid)
+                        os.chmod(ancestor, 0o755)
+                    except (PermissionError, FileNotFoundError):
+                        pass
+
+            def _set_file_perms(path, uid, read_only=False):
                 os.chown(path, uid, uid)
-                os.chmod(path, 0o644)
+                os.chmod(path, 0o444 if read_only else 0o644)
                 return os.path.getsize(path)
 
             for file_info in files:
@@ -729,8 +748,12 @@ class CodeExecutionRunner:
                     continue
 
                 try:
-                    normalized_filename = OutputProcessor.sanitize_filename(filename)
-                    dest_path = str(sandbox_info.data_dir / normalized_filename)
+                    normalized_filename = OutputProcessor.sanitize_relative_path(
+                        filename
+                    )
+                    dest = data_dir / normalized_filename
+                    await asyncio.to_thread(_ensure_parent_dirs, dest, user_id)
+                    dest_path = str(dest)
 
                     file_size = file_info.get("size", 0)
                     if file_size > 10 * 1024 * 1024:
@@ -740,15 +763,37 @@ class CodeExecutionRunner:
                             size_mb=round(file_size / 1024 / 1024, 1),
                         )
 
-                    # Stream directly from MinIO to sandbox directory (non-blocking)
+                    # Stream directly from S3 to sandbox directory (non-blocking)
                     success = await file_service.stream_file_to_path(
                         session_id, file_id, dest_path
                     )
 
                     if success:
+                        is_read_only = file_info.get("is_read_only", False)
                         actual_size = await asyncio.to_thread(
-                            _set_file_perms, dest_path, user_id
+                            _set_file_perms, dest_path, user_id, read_only=is_read_only
                         )
+                        # Snapshot stats so _detect_generated_files can tell
+                        # later whether user code edited this file in place.
+                        # Key by both the original (possibly-nested) filename
+                        # and the normalized form, so lookup works regardless
+                        # of which form the post-walk uses.
+                        try:
+                            st = await asyncio.to_thread(os.stat, dest_path)
+                            entity_id = file_info.get("entity_id")
+                            stat_tuple = (
+                                st.st_mtime_ns,
+                                st.st_size,
+                                file_id,
+                                session_id,
+                                entity_id,
+                            )
+                            sandbox_info.mounted_file_stats[normalized_filename] = (
+                                stat_tuple
+                            )
+                            sandbox_info.mounted_file_stats[filename] = stat_tuple
+                        except OSError:
+                            pass
                         logger.debug(
                             "Mounted file",
                             filename=filename,
@@ -768,9 +813,13 @@ class CodeExecutionRunner:
     async def _create_placeholder_file(
         self, sandbox_info: SandboxInfo, filename: str
     ) -> None:
-        """Create a placeholder file when content cannot be retrieved."""
+        """Create a placeholder file when content cannot be retrieved.
+
+        Preserves any subdirectory structure in the filename so the placeholder
+        lands at the path the caller expects (e.g. `/mnt/data/skills/foo/SKILL.md`).
+        """
         try:
-            normalized_filename = OutputProcessor.sanitize_filename(filename)
+            normalized_filename = OutputProcessor.sanitize_relative_path(filename)
             placeholder = f"# File: {filename}\n# This is a placeholder - original file could not be retrieved\n"
             self.sandbox_manager.copy_content_to_sandbox(
                 sandbox_info,
@@ -781,38 +830,144 @@ class CodeExecutionRunner:
         except Exception as e:
             logger.error(f"Failed to create placeholder file: {e}")
 
+    # Directory names we never descend into when scanning for generated
+    # artifacts. These are package-manager / build-tool caches: their contents
+    # aren't user-meaningful "artifacts" and they routinely contain tens of
+    # thousands of files which would (a) blow our max_output_files budget on
+    # noise and (b) get phantom-mounted into future executions, polluting the
+    # workspace. If a skill genuinely needs a file inside one of these dirs to
+    # round-trip, it should write a copy elsewhere in /mnt/data first.
+    _ARTIFACT_SCAN_SKIP_DIRS: frozenset = frozenset(
+        {
+            "node_modules",
+            "__pycache__",
+            ".git",
+            ".cache",
+            ".npm",
+            ".npm-cache",
+            ".venv",
+            "venv",
+            "env",
+            ".tox",
+            ".pytest_cache",
+            ".mypy_cache",
+            ".ruff_cache",
+            "target",  # Rust
+            "dist",
+            "build",
+            "vendor",  # Go vendor / PHP composer
+            ".bundle",
+            ".gradle",
+            ".m2",  # Maven
+            ".cargo",
+            "pkg",  # Go module cache mirror
+        }
+    )
+
     async def _detect_generated_files(
         self, sandbox_info: SandboxInfo
     ) -> List[Dict[str, Any]]:
-        """Detect files generated during execution."""
-        try:
-            generated_files = []
-            data_dir = sandbox_info.data_dir
+        """Detect files generated or modified during execution.
 
+        Walks the sandbox data directory recursively so artifacts written to
+        subdirectories (e.g. `/mnt/data/charts/foo.png`) are discoverable.
+        Hidden segments and known dependency-cache directories are skipped,
+        and the per-execution output budget is enforced after sorting for
+        deterministic test results.
+
+        For files that match a previously-mounted file by basename or relative
+        path: include them only if (mtime_ns, size) changed since mount —
+        i.e., user code edited them in place. Unchanged mounted files are
+        skipped to avoid re-uploading them on every execution.
+        """
+        try:
+            data_dir = sandbox_info.data_dir
             if not data_dir.exists():
                 return []
 
-            for name in os.listdir(data_dir):
-                # Skip code files
-                if name.startswith("code") or name.startswith("Code."):
-                    continue
+            max_size_bytes = settings.max_file_size_mb * 1024 * 1024
+            candidates: List[Dict[str, Any]] = []
+            skip_dirs = self._ARTIFACT_SCAN_SKIP_DIRS
+            mounted_stats = sandbox_info.mounted_file_stats or {}
 
-                filepath = data_dir / name
-                if filepath.is_file():
-                    size = filepath.stat().st_size
-                    if size <= settings.max_file_size_mb * 1024 * 1024:
-                        generated_files.append(
-                            {
-                                "path": f"/mnt/data/{name}",
-                                "size": size,
-                                "mime_type": OutputProcessor.guess_mime_type(name),
-                            }
-                        )
+            for root, dirs, files in os.walk(data_dir):
+                # Filter hidden + known-cache directories in-place so os.walk
+                # doesn't descend into them. This is the critical fix that
+                # keeps `npm install` / `pip install` from polluting the
+                # session with thousands of dependency files.
+                dirs[:] = [
+                    d for d in dirs if not d.startswith(".") and d not in skip_dirs
+                ]
 
-                        if len(generated_files) >= settings.max_output_files:
-                            break
+                for name in files:
+                    # Skip hidden files and the source code we wrote in.
+                    if name.startswith("."):
+                        continue
+                    if name.startswith("code") or name.startswith("Code."):
+                        continue
 
-            return generated_files
+                    filepath = Path(root) / name
+                    if not filepath.is_file():
+                        continue
+
+                    try:
+                        st = filepath.stat()
+                    except OSError:
+                        continue
+                    size = st.st_size
+                    if size > max_size_bytes:
+                        continue
+
+                    rel = filepath.relative_to(data_dir).as_posix()
+
+                    # If this file was mounted, only surface it when content
+                    # changed during execution. We check both the relative path
+                    # and the basename — _mount_files_to_sandbox snapshots both
+                    # forms because we don't know which the caller originally
+                    # used (LibreChat sometimes ships nested filenames like
+                    # `skills/foo/SKILL.md`, sometimes flat).
+                    prior = mounted_stats.get(rel) or mounted_stats.get(name)
+                    if prior is not None:
+                        if prior[:2] == (st.st_mtime_ns, size):
+                            candidates.append(
+                                {
+                                    "path": f"/mnt/data/{rel}",
+                                    "size": size,
+                                    "mime_type": OutputProcessor.guess_mime_type(rel),
+                                    "inherited": True,
+                                    "original_file_id": prior[2],
+                                    "original_session_id": prior[3],
+                                    "original_entity_id": prior[4],
+                                }
+                            )
+                            continue
+                        else:
+                            candidates.append(
+                                {
+                                    "path": f"/mnt/data/{rel}",
+                                    "size": size,
+                                    "mime_type": OutputProcessor.guess_mime_type(rel),
+                                    "modified_from_id": prior[2],
+                                    "modified_from_session_id": prior[3],
+                                }
+                            )
+                            continue
+
+                    candidates.append(
+                        {
+                            "path": f"/mnt/data/{rel}",
+                            "size": size,
+                            "mime_type": OutputProcessor.guess_mime_type(rel),
+                        }
+                    )
+
+            # Stable ordering before applying the output budget keeps tests
+            # deterministic when many files exist. Inherited files don't count
+            # against the budget — they're not new content.
+            inherited = [c for c in candidates if c.get("inherited")]
+            generated = [c for c in candidates if not c.get("inherited")]
+            generated.sort(key=lambda f: f["path"])
+            return inherited + generated[: settings.max_output_files]
 
         except Exception as e:
             logger.error(f"Failed to detect generated files: {e}")

@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import redis.asyncio as redis
-from minio import Minio
 
 # Set test environment before importing config
 # These match the docker-compose infrastructure settings
@@ -13,10 +12,10 @@ from minio import Minio
 os.environ.setdefault("API_KEY", "test-api-key-for-testing-12345")
 os.environ.setdefault("REDIS_HOST", "localhost")
 os.environ.setdefault("REDIS_PORT", "6379")
-os.environ.setdefault("MINIO_ENDPOINT", "localhost:9000")
-os.environ.setdefault("MINIO_ACCESS_KEY", "minioadmin")
-os.environ.setdefault("MINIO_SECRET_KEY", "minioadmin")
-os.environ.setdefault("MINIO_SECURE", "false")
+os.environ.setdefault("S3_ENDPOINT", "localhost:3900")
+os.environ.setdefault("S3_ACCESS_KEY", "GKminioadmin0000")
+os.environ.setdefault("S3_SECRET_KEY", "minioadminsecret")
+os.environ.setdefault("S3_SECURE", "false")
 
 from src.services.session import SessionService
 from src.services.execution import CodeExecutionService
@@ -48,19 +47,17 @@ def mock_redis():
 
 
 @pytest.fixture
-def mock_minio():
-    """Mock MinIO client for testing."""
-    mock_client = MagicMock(spec=Minio)
+def mock_s3_client():
+    """Mock S3 client for testing."""
+    mock_client = MagicMock()
 
-    # Mock common MinIO operations
-    mock_client.bucket_exists.return_value = True
-    mock_client.make_bucket.return_value = None
-    mock_client.presigned_put_object.return_value = "https://example.com/upload"
-    mock_client.presigned_get_object.return_value = "https://example.com/download"
-    mock_client.stat_object.return_value = MagicMock(size=1024)
-    mock_client.put_object.return_value = None
-    mock_client.get_object.return_value = MagicMock()
-    mock_client.remove_object.return_value = None
+    mock_client.head_bucket.return_value = {}
+    mock_client.create_bucket.return_value = {}
+    mock_client.generate_presigned_url.return_value = "https://example.com/presigned"
+    mock_client.head_object.return_value = {"ContentLength": 1024}
+    mock_client.put_object.return_value = {}
+    mock_client.get_object.return_value = {"Body": MagicMock(read=MagicMock(return_value=b""))}
+    mock_client.delete_object.return_value = {}
 
     return mock_client
 
@@ -116,13 +113,15 @@ def execution_service(mock_sandbox_manager):
 
 
 @pytest.fixture
-def file_service(mock_minio, mock_redis):
+def file_service(mock_s3_client, mock_redis):
     """Create FileService instance with mocked dependencies."""
-    with patch("src.services.file.Minio", return_value=mock_minio), patch(
-        "src.services.file.redis.Redis", return_value=mock_redis
+    with patch("src.services.file.boto3") as mock_boto3, patch(
+        "src.services.file.redis.from_url", return_value=mock_redis
     ):
+        mock_boto3.client.return_value = mock_s3_client
         service = FileService()
         yield service
+
 
 @pytest.fixture
 def mock_settings():
@@ -135,11 +134,12 @@ def mock_settings():
         mock_settings.redis_url = None
         mock_settings.session_ttl_hours = 24
         mock_settings.session_cleanup_interval_minutes = 60
-        mock_settings.minio_endpoint = "localhost:9000"
-        mock_settings.minio_access_key = "test_key"
-        mock_settings.minio_secret_key = "test_secret"
-        mock_settings.minio_secure = False
-        mock_settings.minio_bucket = "test-bucket"
+        mock_settings.s3_endpoint = "localhost:3900"
+        mock_settings.s3_access_key = "test_key"
+        mock_settings.s3_secret_key = "test_secret"
+        mock_settings.s3_secure = False
+        mock_settings.s3_bucket = "test-bucket"
+        mock_settings.s3_region = "garage"
         mock_settings.api_key = "test-api-key-12345"
         mock_settings.max_execution_time = 30
         mock_settings.max_file_size_mb = 10
@@ -151,6 +151,8 @@ def mock_settings():
         )
 
         yield mock_settings
+
+
 # ============================================================================
 # Integration Test Fixtures
 # ============================================================================
@@ -170,6 +172,7 @@ def auth_headers():
     """Provide authentication headers for integration tests."""
     return {"x-api-key": "test-api-key-for-testing-12345"}
 
+
 def pytest_collection_modifyitems(config, items):
     """Apply shared markers based on the suite layer."""
     contract_only_files = (
@@ -185,9 +188,7 @@ def pytest_collection_modifyitems(config, items):
         "tests/functional/test_mounted_file_edits.py",
         "tests/functional/test_timing.py",
     )
-    client_replay_files = (
-        "tests/functional/test_client_replay.py",
-    )
+    client_replay_files = ("tests/functional/test_client_replay.py",)
 
     for item in items:
         path = Path(str(item.fspath)).as_posix()

@@ -1,18 +1,19 @@
 services:
   # Code Interpreter API (unified image with nsjail sandboxing)
   api:
-    build:
-      context: .
-      target: app
-    image: ${API_IMAGE:-code-interpreter:nsjail}
-    pull_policy: never
+    image: ${API_IMAGE:-ghcr.io/usnavy13/librecodeinterpreter:main}
+    pull_policy: always
     container_name: code-interpreter-api
     restart: unless-stopped
     # tini init process reaps zombie nsjail/python child processes
     init: true
-    # nsjail requires these capabilities to create namespaces and cgroups
+    # nsjail requires these capabilities to create namespaces and cgroups.
+    # NET_ADMIN is required to install iptables egress rules for the sandbox uid
+    # when ENABLE_SANDBOX_NETWORK=true. Restricts sandbox traffic to the
+    # inline allowlist proxy and prevents SSRF to Redis/S3/etc.
     cap_add:
       - SYS_ADMIN
+      - NET_ADMIN
     security_opt:
       - apparmor:unconfined
     ports:
@@ -22,26 +23,30 @@ services:
     environment:
       # Container-specific overrides (service discovery within compose network)
       - REDIS_HOST=redis
-      - MINIO_ENDPOINT=minio:9000
+      - S3_ENDPOINT=garage:3900
     volumes:
       - sandbox-data:/var/lib/code-interpreter/sandboxes
+      # Persistent skill-deps cache: pip/npm/go/cargo install here when
+      # ENABLE_SANDBOX_NETWORK=true so future executions reuse the install.
+      # Survives container restarts; purge with POST /api/v1/admin/skill-deps/purge.
+      - skill-deps:/opt/skill-deps
       # SSL_CERTS_PATH is a host path; SSL_CERT_FILE and SSL_KEY_FILE must point
       # to the mounted files inside the container under /app/ssl.
       - ${SSL_CERTS_PATH:-./ssl}:/app/ssl:ro
     tmpfs:
+      - /tmp:size=512m,mode=1777,noexec,nosuid,nodev
       - /app/data:size=100m
     depends_on:
       redis:
         condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
+      garage:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -fs http://localhost:8000/health || curl -fsk https://localhost:8000/health"]
       interval: 30s
       timeout: 15s
       retries: 3
       start_period: 30s
-    # No /var/run/docker.sock mount needed
 
   # Redis for session management
   redis:
@@ -64,44 +69,31 @@ services:
       timeout: 5s
       retries: 5
 
-  # MinIO for file storage
-  minio:
-    image: minio/minio:latest
-    container_name: code-interpreter-minio
+  # Garage S3-compatible object storage
+  garage:
+    image: dxflrs/garage:v2.3.0
+    container_name: code-interpreter-garage
     restart: unless-stopped
+    command: /garage server --single-node --default-bucket
     ports:
-      - "127.0.0.1:${MINIO_PORT:-9000}:9000"
-      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
+      - "127.0.0.1:${S3_PORT:-3900}:3900"
+      - "127.0.0.1:${GARAGE_ADMIN_PORT:-3903}:3903"
     environment:
-      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
-    command: server /data --console-address ":9001"
+      GARAGE_DEFAULT_ACCESS_KEY: ${S3_ACCESS_KEY:-GKminioadmin0000}
+      GARAGE_DEFAULT_SECRET_KEY: ${S3_SECRET_KEY:-minioadminsecret}
+      GARAGE_DEFAULT_BUCKET: ${S3_BUCKET:-code-interpreter-files}
     volumes:
-      - minio-data:/data
+      - garage-data:/var/lib/garage
+      - ./garage.toml:/etc/garage.toml
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD", "/garage", "status"]
       interval: 10s
       timeout: 5s
       retries: 5
-
-  # MinIO bucket initialization
-  minio-init:
-    image: minio/mc:latest
-    depends_on:
-      minio:
-        condition: service_healthy
-    entrypoint: >
-      /bin/sh -c "
-      mc alias set myminio http://minio:9000 $${MINIO_ACCESS_KEY:-minioadmin} $${MINIO_SECRET_KEY:-minioadmin};
-      mc mb --ignore-existing myminio/$${MINIO_BUCKET:-code-interpreter-files};
-      exit 0;
-      "
-    environment:
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
-      MINIO_BUCKET: ${MINIO_BUCKET:-code-interpreter-files}
+      start_period: 10s
 
 volumes:
   sandbox-data:
+  skill-deps:
   redis-data:
-  minio-data:
+  garage-data:

@@ -40,6 +40,7 @@ class FileInfo(BaseModel):
     content_type: str
     created_at: datetime
     path: str = Field(..., description="File path in the session")
+    original_filename: Optional[str] = None
 
     class Config:
         json_encoders = {datetime: lambda v: v.isoformat()}

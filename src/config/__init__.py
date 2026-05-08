@@ -29,7 +29,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # Import grouped configurations
 from .api import APIConfig
 from .redis import RedisConfig
-from .minio import MinIOConfig
+from .s3 import S3Config
 from .security import SecurityConfig
 from .resources import ResourcesConfig
 from .logging import LoggingConfig
@@ -92,6 +92,46 @@ class Settings(BaseSettings):
     rate_limit_enabled: bool = Field(
         default=True, description="Enable per-key rate limiting for Redis-managed keys"
     )
+    auth_enabled: bool = Field(
+        default=True,
+        description=(
+            "Require x-api-key (or equivalent Basic auth) on user endpoints. "
+            "Set false when running behind a trusted network boundary. "
+            "Admin endpoints always require MASTER_API_KEY regardless."
+        ),
+    )
+
+    # Sandbox egress (skill installs)
+    enable_sandbox_network: bool = Field(
+        default=False,
+        description=(
+            "Allow sandboxes to reach the internet via an inline allowlist proxy. "
+            "Required for skills that pip/npm/go/cargo install dependencies at "
+            "runtime. Outbound traffic is restricted to package registries; "
+            "everything else is refused."
+        ),
+    )
+    sandbox_egress_port: int = Field(
+        default=18443,
+        ge=1024,
+        le=65535,
+        description="Port the inline egress proxy binds to on 127.0.0.1.",
+    )
+    sandbox_egress_allowlist: Optional[str] = Field(
+        default=None,
+        description=(
+            "Comma-separated list of additional hostnames the egress proxy "
+            "permits. Defaults already cover PyPI, npm, Go modules, and crates.io."
+        ),
+    )
+    skill_deps_path: str = Field(
+        default="/opt/skill-deps",
+        description=(
+            "Host-side directory (mounted into every sandbox) that holds "
+            "user-installed skill dependencies. pip/npm/go/cargo are configured "
+            "to install here so the cache compounds across executions."
+        ),
+    )
 
     # Redis Configuration
     redis_host: str = Field(default="localhost")
@@ -103,12 +143,13 @@ class Settings(BaseSettings):
     redis_socket_timeout: int = Field(default=5, ge=1)
     redis_socket_connect_timeout: int = Field(default=5, ge=1)
 
-    # MinIO/S3 Configuration
-    minio_endpoint: str = Field(default="localhost:9000")
-    minio_access_key: str = Field(default="test-access-key", min_length=3)
-    minio_secret_key: str = Field(default="test-secret-key", min_length=8)
-    minio_secure: bool = Field(default=False)
-    minio_bucket: str = Field(default="code-interpreter-files")
+    # S3 Storage Configuration
+    s3_endpoint: str = Field(default="localhost:3900")
+    s3_access_key: str = Field(default="test-access-key", min_length=3)
+    s3_secret_key: str = Field(default="test-secret-key", min_length=8)
+    s3_secure: bool = Field(default=False)
+    s3_bucket: str = Field(default="code-interpreter-files")
+    s3_region: str = Field(default="garage")
 
     # Sandbox (nsjail) Configuration
     nsjail_binary: str = Field(
@@ -144,14 +185,19 @@ class Settings(BaseSettings):
 
     # Resource Limits - Files
     max_file_size_mb: int = Field(default=100, ge=1, le=500)
-    max_files_per_session: int = Field(default=50, ge=1, le=200)
+    # Default sized for skill bundles — Anthropic's pptx skill has 58 files
+    # (incl. ECMA XSD schemas under scripts/office/schemas/), docx and xlsx
+    # are similar. Legacy default of 50 caused 413s during /upload/batch
+    # priming. Ceiling raised to 1000 to leave headroom for multi-skill
+    # agents and future bundles.
+    max_files_per_session: int = Field(default=300, ge=1, le=1000)
     max_output_files: int = Field(default=10, ge=1, le=50)
     max_filename_length: int = Field(default=255, ge=1, le=255)
 
     # Session Configuration
     session_ttl_hours: int = Field(default=24, ge=1, le=168)
     session_cleanup_interval_minutes: int = Field(default=60, ge=1, le=1440)
-    enable_orphan_minio_cleanup: bool = Field(default=True)
+    enable_orphan_s3_cleanup: bool = Field(default=True)
 
     # Sandbox Pool Configuration
     sandbox_pool_enabled: bool = Field(default=True)
@@ -205,24 +251,24 @@ class Settings(BaseSettings):
         default=100,
         ge=1,
         le=500,
-        description="Max state size (MB, raw bytes) for Redis storage. Larger states go directly to MinIO",
+        description="Max state size (MB, raw bytes) for Redis storage. Larger states go directly to S3 cold storage",
     )
 
-    # State Archival Configuration - Hybrid Redis + MinIO storage
+    # State Archival Configuration - Hybrid Redis + S3 storage
     state_archive_enabled: bool = Field(
-        default=True, description="Enable archiving inactive states from Redis to MinIO"
+        default=True, description="Enable archiving inactive states from Redis to S3"
     )
     state_archive_after_seconds: int = Field(
         default=3600,
         ge=300,
         le=86400,
-        description="Archive state to MinIO after this many seconds of inactivity. Default: 1 hour",
+        description="Archive state to S3 after this many seconds of inactivity. Default: 1 hour",
     )
     state_archive_ttl_days: int = Field(
         default=1,
         ge=1,
         le=30,
-        description="Keep archived states in MinIO for N days. Default: 1 (24 hours)",
+        description="Keep archived states in S3 for N days. Default: 1 (24 hours)",
     )
     state_archive_check_interval_seconds: int = Field(
         default=300,
@@ -404,12 +450,12 @@ class Settings(BaseSettings):
         """Parse comma-separated API keys into a list."""
         return [key.strip() for key in v.split(",") if key.strip()] if v else None
 
-    @validator("minio_endpoint")
-    def validate_minio_endpoint(cls, v):
-        """Ensure MinIO endpoint doesn't include protocol."""
+    @validator("s3_endpoint")
+    def validate_s3_endpoint(cls, v):
+        """Ensure S3 endpoint doesn't include protocol."""
         if v.startswith(("http://", "https://")):
             raise ValueError(
-                "MinIO endpoint should not include protocol (use minio_secure instead)"
+                "S3 endpoint should not include protocol (use s3_secure instead)"
             )
         return v
 
@@ -460,14 +506,15 @@ class Settings(BaseSettings):
         )
 
     @property
-    def minio(self) -> MinIOConfig:
-        """Access MinIO configuration group."""
-        return MinIOConfig(
-            minio_endpoint=self.minio_endpoint,
-            minio_access_key=self.minio_access_key,
-            minio_secret_key=self.minio_secret_key,
-            minio_secure=self.minio_secure,
-            minio_bucket=self.minio_bucket,
+    def s3(self) -> S3Config:
+        """Access S3 storage configuration group."""
+        return S3Config(
+            s3_endpoint=self.s3_endpoint,
+            s3_access_key=self.s3_access_key,
+            s3_secret_key=self.s3_secret_key,
+            s3_secure=self.s3_secure,
+            s3_bucket=self.s3_bucket,
+            s3_region=self.s3_region,
         )
 
     @property
@@ -476,6 +523,7 @@ class Settings(BaseSettings):
         return SecurityConfig(
             api_key=self.api_key,
             api_keys=self.api_keys if isinstance(self.api_keys, str) else None,
+            auth_enabled=self.auth_enabled,
             enable_network_isolation=self.enable_network_isolation,
             enable_filesystem_isolation=self.enable_filesystem_isolation,
             enable_security_logs=self.enable_security_logs,
@@ -493,7 +541,7 @@ class Settings(BaseSettings):
             max_filename_length=self.max_filename_length,
             session_ttl_hours=self.session_ttl_hours,
             session_cleanup_interval_minutes=self.session_cleanup_interval_minutes,
-            enable_orphan_minio_cleanup=self.enable_orphan_minio_cleanup,
+            enable_orphan_s3_cleanup=self.enable_orphan_s3_cleanup,
         )
 
     @property
@@ -566,7 +614,7 @@ __all__ = [
     # Grouped configs
     "APIConfig",
     "RedisConfig",
-    "MinIOConfig",
+    "S3Config",
     "SecurityConfig",
     "ResourcesConfig",
     "LoggingConfig",

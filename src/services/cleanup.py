@@ -7,7 +7,7 @@ Note: With the simplified pool (no session tracking), containers are destroyed
 immediately after execution by the orchestrator. This scheduler handles:
 - File cleanup when sessions are explicitly deleted
 - Legacy cleanup for non-pooled containers
-- Periodic state archival from Redis to MinIO
+- Periodic state archival from Redis to S3
 """
 
 import asyncio
@@ -27,7 +27,7 @@ class CleanupScheduler:
     With the simplified container pool architecture:
     - Containers are destroyed immediately after execution (no TTL tracking)
     - This scheduler handles file cleanup and session-level resource cleanup
-    - Periodic state archival from Redis to MinIO
+    - Periodic state archival from Redis to S3
     """
 
     def __init__(self, delay_seconds: int = 5):
@@ -178,7 +178,7 @@ class CleanupScheduler:
         return len(self._pending_cleanups)
 
     async def _archival_loop(self):
-        """Background loop for archiving inactive states to MinIO."""
+        """Background loop for archiving inactive states to S3."""
         interval = settings.state_archive_check_interval_seconds
 
         while True:

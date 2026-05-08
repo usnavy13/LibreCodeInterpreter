@@ -116,11 +116,11 @@ async def redis_health_check(_: str = Depends(verify_api_key)):
         )
 
 
-@router.get("/health/minio", summary="MinIO health check")
-async def minio_health_check(_: str = Depends(verify_api_key)):
-    """Check MinIO/S3 connectivity and performance."""
+@router.get("/health/s3", summary="S3 storage health check")
+async def s3_health_check(_: str = Depends(verify_api_key)):
+    """Check S3 storage connectivity and performance."""
     try:
-        result = await health_service.check_minio()
+        result = await health_service.check_s3()
 
         if result.status == HealthStatus.UNHEALTHY:
             return JSONResponse(status_code=503, content=result.to_dict())
@@ -128,13 +128,13 @@ async def minio_health_check(_: str = Depends(verify_api_key)):
             return JSONResponse(status_code=200, content=result.to_dict())
 
     except Exception as e:
-        logger.error("MinIO health check failed", error=str(e))
+        logger.error("S3 health check failed", error=str(e))
         return JSONResponse(
             status_code=503,
             content={
-                "service": "minio",
+                "service": "s3",
                 "status": "unhealthy",
-                "error": str(e) if settings.api_debug else "MinIO check failed",
+                "error": str(e) if settings.api_debug else "S3 check failed",
             },
         )
 

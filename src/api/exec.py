@@ -40,7 +40,11 @@ router = APIRouter()
 _KEEPALIVE_INTERVAL = 3
 
 
-@router.post("/exec", responses={200: {"model": ExecResponse}})
+@router.post(
+    "/exec",
+    responses={200: {"model": ExecResponse}},
+    response_model_exclude_none=True,
+)
 async def execute_code(
     request: ExecRequest,
     http_request: Request,
@@ -60,7 +64,7 @@ async def execute_code(
     within the same session, whether the caller supplies `session_id` directly
     or the orchestrator reuses a session through same-user file references or
     `entity_id` continuity. State is stored in Redis (2 hour TTL) with
-    automatic archival to MinIO for long-term storage (7 day TTL).
+    automatic archival to S3 for long-term storage (configurable TTL).
 
     Returns a streaming response that sends keepalive whitespace before the
     JSON body to prevent client socket timeouts during long operations.
@@ -175,7 +179,7 @@ async def execute_code(
             request_id=request_id,
             session_id=response.session_id,
         )
-        yield response.model_dump_json().encode()
+        yield response.model_dump_json(exclude_none=True).encode()
 
     return StreamingResponse(
         _stream_response(),
