@@ -100,7 +100,7 @@ class TestFileTiming:
             files=files,
             data={"entity_id": unique_entity_id},
         )
-        session_id = upload.json()["session_id"]
+        session_id = upload.json()["storage_session_id"]
         file_id = upload.json()["files"][0]["fileId"]
 
         # Time the download

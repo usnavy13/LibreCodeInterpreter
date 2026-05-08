@@ -172,6 +172,7 @@ async def upload_file(
         # Note: Production API returns different format with fileId instead of id
         return {
             "message": "success",
+            "storage_session_id": session_id,
             "session_id": session_id,
             "files": [
                 {"filename": file["name"], "fileId": file["id"]}
@@ -339,6 +340,7 @@ async def upload_files_batch(
 
     return {
         "message": message,
+        "storage_session_id": session_id,
         "session_id": session_id,
         "files": results,
         "succeeded": succeeded,
@@ -408,6 +410,7 @@ async def list_files(
                     {
                         "name": f"{session_id}/{file_info.file_id}",
                         "id": file_info.file_id,
+                        "storage_session_id": session_id,
                         "session_id": session_id,
                         "content": None,  # Not returned in list
                         "size": file_info.size,

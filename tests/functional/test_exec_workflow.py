@@ -172,7 +172,7 @@ class TestSessionIsolation:
         )
         assert upload.status_code == 200
         upload_data = upload.json()
-        upload_session = upload_data["session_id"]
+        upload_session = upload_data["storage_session_id"]
         file_id = upload_data["files"][0]["fileId"]
         filename = upload_data["files"][0]["filename"]
 
@@ -187,7 +187,7 @@ class TestSessionIsolation:
                 "files": [
                     {
                         "id": file_id,
-                        "session_id": upload_session,
+                        "storage_session_id": upload_session,
                         "name": filename,
                     }
                 ],
@@ -208,7 +208,7 @@ class TestSessionIsolation:
                 "files": [
                     {
                         "id": file_id,
-                        "session_id": upload_session,
+                        "storage_session_id": upload_session,
                         "name": filename,
                     }
                 ],

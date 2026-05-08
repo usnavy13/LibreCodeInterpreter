@@ -415,7 +415,9 @@ class TestFilePersistence:
                 "/files/upload", files=files, data=data, headers=auth_headers
             )
             assert upload_response.status_code == 200
-            uploaded_file = upload_response.json()["files"][0]
+            upload_result = upload_response.json()
+            uploaded_file = upload_result["files"][0]
+            storage_session_id = upload_result["storage_session_id"]
 
             # Execute code that references the file
             exec_response = client.post(
@@ -426,8 +428,8 @@ class TestFilePersistence:
                     "entity_id": "file-test-entity",
                     "files": [
                         {
-                            "id": uploaded_file["id"],
-                            "session_id": uploaded_file["session_id"],
+                            "id": uploaded_file["fileId"],
+                            "storage_session_id": storage_session_id,
                             "name": "data.txt",
                         }
                     ],

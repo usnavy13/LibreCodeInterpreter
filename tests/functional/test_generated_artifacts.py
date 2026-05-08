@@ -114,7 +114,7 @@ class TestGeneratedArtifacts:
                 "files": [
                     {
                         "id": generated_file["id"],
-                        "session_id": generate_result["session_id"],
+                        "storage_session_id": generate_result["session_id"],
                         "name": generated_file["name"],
                     }
                 ],

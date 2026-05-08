@@ -275,7 +275,7 @@ class TestProgrammaticInitialExecution:
                     "code": "print('hello')",
                     "files": [
                         {
-                            "session_id": "upload-session",
+                            "storage_session_id": "upload-session",
                             "id": "file-123",
                             "name": "report.csv",
                         }

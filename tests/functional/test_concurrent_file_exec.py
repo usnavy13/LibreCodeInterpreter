@@ -56,7 +56,7 @@ class TestConcurrentFileExecution:
         assert upload_resp.status_code == 200, f"Upload failed: {upload_resp.text}"
 
         result = upload_resp.json()
-        session_id = result["session_id"]
+        session_id = result["storage_session_id"]
         file_id = result["files"][0]["fileId"]
         filename = result["files"][0]["filename"]
 
@@ -72,7 +72,7 @@ class TestConcurrentFileExecution:
                     "lang": "py",
                     "session_id": session_id,
                     "files": [
-                        {"id": file_id, "session_id": session_id, "name": filename}
+                        {"id": file_id, "storage_session_id": session_id, "name": filename}
                     ],
                 },
                 timeout=60.0,

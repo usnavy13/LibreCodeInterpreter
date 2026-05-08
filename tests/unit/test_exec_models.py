@@ -29,6 +29,7 @@ class TestFileRefSerialization:
         assert dumped["entity_id"] == "agent-1"
         assert dumped["id"] == "orig-1"
         assert dumped["session_id"] == "sess-1"
+        assert dumped["storage_session_id"] == "sess-1"
 
     def test_inherited_none_excluded_with_exclude_none(self):
         ref = FileRef(id="fid", name="out.png", session_id="sess-1")
@@ -36,18 +37,22 @@ class TestFileRefSerialization:
         assert "inherited" not in dumped
         assert "entity_id" not in dumped
         assert "modified_from" not in dumped
-        # Existing optional fields must also be excluded.
         assert "path" not in dumped
+        assert dumped["session_id"] == "sess-1"
+        assert dumped["storage_session_id"] == "sess-1"
 
     def test_modified_from_preserved(self):
         ref = FileRef(
             id="new-fid",
             name="report.csv",
             session_id="sess-2",
-            modified_from={"id": "old-fid", "session_id": "sess-1"},
+            modified_from={"id": "old-fid", "storage_session_id": "sess-1"},
         )
         dumped = ref.model_dump(exclude_none=True)
-        assert dumped["modified_from"] == {"id": "old-fid", "session_id": "sess-1"}
+        assert dumped["modified_from"] == {
+            "id": "old-fid",
+            "storage_session_id": "sess-1",
+        }
 
 
 class TestRequestFileEntityId:
@@ -65,6 +70,25 @@ class TestRequestFileEntityId:
     def test_entity_id_optional(self):
         rf = RequestFile(id="fid", session_id="sess", name="data.csv")
         assert rf.entity_id is None
+
+
+class TestStorageSessionIdAlias:
+    """RequestFile accepts storage_session_id (new) and session_id (legacy).
+    FileRef serializes session_id as storage_session_id."""
+
+    def test_request_file_accepts_storage_session_id(self):
+        rf = RequestFile(id="fid", storage_session_id="sess", name="data.csv")
+        assert rf.session_id == "sess"
+
+    def test_request_file_accepts_legacy_session_id(self):
+        rf = RequestFile(id="fid", session_id="sess", name="data.csv")
+        assert rf.session_id == "sess"
+
+    def test_fileref_emits_both_session_id_and_storage_session_id(self):
+        ref = FileRef(id="fid", name="out.png", session_id="sess-1")
+        dumped = ref.model_dump(exclude_none=True)
+        assert dumped["storage_session_id"] == "sess-1"
+        assert dumped["session_id"] == "sess-1"
 
 
 class TestExecRequestTimeout:

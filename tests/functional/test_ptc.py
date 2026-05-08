@@ -95,7 +95,7 @@ class TestPTCInitialExecution:
 
         assert upload.status_code == 200
         upload_payload = upload.json()
-        session_id = upload_payload["session_id"]
+        session_id = upload_payload["storage_session_id"]
         file_id = upload_payload["files"][0]["fileId"]
 
         response = await async_client.post(
@@ -109,7 +109,7 @@ class TestPTCInitialExecution:
                 "tools": [],
                 "files": [
                     {
-                        "session_id": session_id,
+                        "storage_session_id": session_id,
                         "id": file_id,
                         "name": "report.csv",
                     }

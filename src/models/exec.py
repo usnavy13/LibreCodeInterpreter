@@ -5,26 +5,37 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any
 
 # Third-party imports
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, computed_field
 
 
 class FileRef(BaseModel):
     """File reference model for execution response."""
 
+    model_config = ConfigDict(populate_by_name=True)
+
     id: str
     name: str
-    path: Optional[str] = None  # Make path optional
-    session_id: Optional[str] = None  # Session ID for cross-message file persistence
+    path: Optional[str] = None
+    session_id: Optional[str] = None
     inherited: Optional[bool] = None
     entity_id: Optional[str] = None
     modified_from: Optional[Dict[str, str]] = None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def storage_session_id(self) -> Optional[str]:
+        return self.session_id
 
 
 class RequestFile(BaseModel):
     """Request file model."""
 
+    model_config = ConfigDict(populate_by_name=True)
+
     id: str
-    session_id: str
+    session_id: str = Field(
+        validation_alias=AliasChoices("storage_session_id", "session_id"),
+    )
     name: str
     entity_id: Optional[str] = None
 

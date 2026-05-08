@@ -786,7 +786,8 @@ class ExecutionOrchestrator:
                 if meta.get("modified_from_id"):
                     file_ref.modified_from = {
                         "id": meta["modified_from_id"],
-                        "session_id": meta.get("modified_from_session_id") or "",
+                        "storage_session_id": meta.get("modified_from_session_id")
+                        or "",
                     }
                 generated.append(file_ref)
                 logger.debug(

@@ -214,7 +214,7 @@ class TestProgrammaticExecRequest:
             timeout=60000,
             files=[
                 {
-                    "session_id": "source-session",
+                    "storage_session_id": "source-session",
                     "id": "file-123",
                     "name": "test.txt",
                 }
