@@ -2038,6 +2038,46 @@ class TestLibreChatUploadBatch:
         # The stored filename also preserves the path so S3/sandbox round-trip works.
         assert "skills/weather_lookup/SKILL.md" in setup_mocks["stored"]
 
+    def test_kind_skill_marks_files_as_agent(self, client, auth_headers, setup_mocks):
+        """LibreChat sends kind=skill (not entity_id) for skill-priming uploads.
+
+        appendCodeEnvFileIdentity() in LibreChat appends kind/id/version fields
+        to the multipart form — entity_id is never sent. The endpoint must
+        recognise kind=skill as an agent-file upload so that skill bundle files
+        with non-standard extensions (.xsd schemas, .toml configs, etc.) bypass
+        the user-facing extension whitelist and are tagged read-only in the sandbox.
+        """
+        files = [("file", ("schema.xsd", io.BytesIO(b"<xs:schema/>"), "application/xml"))]
+        data = {"kind": "skill", "id": "skill_abc123", "version": "3"}
+        response = client.post(
+            "/upload/batch", files=files, data=data, headers=auth_headers
+        )
+
+        assert response.status_code == 200
+        store = setup_mocks["file_service"].store_uploaded_file
+        assert store.await_count == 1
+        kwargs = store.await_args.kwargs
+        assert kwargs["is_agent_file"] is True
+
+    def test_batch_response_includes_storage_session_id(
+        self, client, auth_headers, setup_mocks
+    ):
+        """LibreChat's batchUploadCodeEnvFiles validates storage_session_id in the response.
+
+        crud.js throws if the field is absent:
+            if (!result.storage_session_id || !Array.isArray(result.files)) {
+                throw new Error(`Unexpected batch upload response: ...`)
+            }
+        The field must equal session_id (same underlying value, different name).
+        """
+        files = [("file", ("data.csv", io.BytesIO(b"a,b"), "text/csv"))]
+        response = client.post("/upload/batch", files=files, headers=auth_headers)
+
+        assert response.status_code == 200
+        body = response.json()
+        assert "storage_session_id" in body
+        assert body["storage_session_id"] == body["session_id"]
+
 
 # =============================================================================
 # GET /sessions/{session_id}/objects/{file_id} — liveness probe

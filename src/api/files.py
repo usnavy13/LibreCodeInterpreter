@@ -249,7 +249,13 @@ async def upload_files_batch(
     entity_id: Optional[str] = (
         entity_id_raw if isinstance(entity_id_raw, str) and entity_id_raw else None
     )
-    is_agent_file = entity_id is not None
+    # LibreChat sends kind=skill/agent (not entity_id) for skill-priming uploads.
+    # Treat these as agent files so skill bundles bypass the user-facing extension
+    # whitelist and are correctly tagged read-only in the sandbox.
+    kind_raw = form.get("kind")
+    is_agent_file = entity_id is not None or (
+        isinstance(kind_raw, str) and kind_raw in ("skill", "agent")
+    )
 
     read_only_raw = form.get("read_only")
     is_read_only = isinstance(read_only_raw, str) and read_only_raw.lower() in (
@@ -340,6 +346,7 @@ async def upload_files_batch(
     return {
         "message": message,
         "session_id": session_id,
+        "storage_session_id": session_id,  # LibreChat alias for session_id
         "files": results,
         "succeeded": succeeded,
         "failed": failed,
