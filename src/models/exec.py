@@ -19,6 +19,9 @@ class FileRef(BaseModel):
     session_id: Optional[str] = None
     inherited: Optional[bool] = None
     entity_id: Optional[str] = None
+    resource_id: Optional[str] = None
+    kind: Optional[str] = None
+    version: Optional[int] = None
     modified_from: Optional[Dict[str, str]] = None
 
     @computed_field  # type: ignore[prop-decorator]
@@ -38,6 +41,9 @@ class RequestFile(BaseModel):
     )
     name: str
     entity_id: Optional[str] = None
+    resource_id: Optional[str] = None
+    kind: Optional[str] = None
+    version: Optional[int] = None
 
 
 class ExecRequest(BaseModel):

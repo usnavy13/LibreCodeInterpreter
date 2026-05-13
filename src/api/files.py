@@ -250,7 +250,10 @@ async def upload_files_batch(
     entity_id: Optional[str] = (
         entity_id_raw if isinstance(entity_id_raw, str) and entity_id_raw else None
     )
-    is_agent_file = entity_id is not None
+    kind_raw = form.get("kind")
+    is_agent_file = entity_id is not None or (
+        isinstance(kind_raw, str) and kind_raw in ("skill", "agent")
+    )
 
     read_only_raw = form.get("read_only")
     is_read_only = isinstance(read_only_raw, str) and read_only_raw.lower() in (
@@ -354,6 +357,18 @@ async def list_files(
     detail: Optional[str] = Query(
         None,
         description="Detail level: 'simple' for basic info, otherwise full details",
+    ),
+    kind: Optional[str] = Query(
+        None,
+        description="Resource kind filter: 'skill', 'agent', or 'user'",
+    ),
+    id: Optional[str] = Query(
+        None,
+        description="Resource id for scoped file listing",
+    ),
+    version: Optional[int] = Query(
+        None,
+        description="Resource version (only meaningful when kind=skill)",
     ),
     file_service: FileServiceDep = None,
 ):

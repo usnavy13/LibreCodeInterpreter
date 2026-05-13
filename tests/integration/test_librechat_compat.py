@@ -2041,6 +2041,50 @@ class TestLibreChatUploadBatch:
         # The stored filename also preserves the path so S3/sandbox round-trip works.
         assert "skills/weather_lookup/SKILL.md" in setup_mocks["stored"]
 
+    def test_kind_skill_marks_files_as_agent(self, client, auth_headers, setup_mocks):
+        """kind=skill bypasses extension whitelist for skill-priming uploads."""
+        files = [
+            ("file", ("schema.xsd", io.BytesIO(b"<xs:schema/>"), "application/xml"))
+        ]
+        data = {"kind": "skill", "id": "skill_abc123", "version": "3"}
+        response = client.post(
+            "/upload/batch", files=files, data=data, headers=auth_headers
+        )
+
+        assert response.status_code == 200
+        store = setup_mocks["file_service"].store_uploaded_file
+        assert store.await_count == 1
+        kwargs = store.await_args.kwargs
+        assert kwargs["is_agent_file"] is True
+
+    def test_kind_agent_marks_files_as_agent(self, client, auth_headers, setup_mocks):
+        """kind=agent also bypasses extension whitelist."""
+        files = [
+            ("file", ("config.toml", io.BytesIO(b"[tool]"), "application/toml"))
+        ]
+        data = {"kind": "agent", "id": "agent_xyz"}
+        response = client.post(
+            "/upload/batch", files=files, data=data, headers=auth_headers
+        )
+
+        assert response.status_code == 200
+        store = setup_mocks["file_service"].store_uploaded_file
+        assert store.await_count == 1
+        kwargs = store.await_args.kwargs
+        assert kwargs["is_agent_file"] is True
+
+    def test_batch_response_includes_storage_session_id(
+        self, client, auth_headers, setup_mocks
+    ):
+        """LibreChat validates storage_session_id in batch upload response."""
+        files = [("file", ("data.csv", io.BytesIO(b"a,b"), "text/csv"))]
+        response = client.post("/upload/batch", files=files, headers=auth_headers)
+
+        assert response.status_code == 200
+        body = response.json()
+        assert "storage_session_id" in body
+        assert body["storage_session_id"] == body["session_id"]
+
 
 # =============================================================================
 # GET /sessions/{session_id}/objects/{file_id} — liveness probe

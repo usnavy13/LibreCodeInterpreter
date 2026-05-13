@@ -91,6 +91,52 @@ class TestStorageSessionIdAlias:
         assert dumped["session_id"] == "sess-1"
 
 
+class TestCodeEnvFileFields:
+    """RequestFile and FileRef accept resource_id, kind, and version
+    fields sent by the librechat-agents CodeEnvFile type."""
+
+    def test_request_file_accepts_code_env_file_shape(self):
+        rf = RequestFile(
+            id="fid",
+            storage_session_id="sess",
+            name="data.csv",
+            resource_id="res-1",
+            kind="skill",
+            version=3,
+        )
+        assert rf.session_id == "sess"
+        assert rf.resource_id == "res-1"
+        assert rf.kind == "skill"
+        assert rf.version == 3
+
+    def test_request_file_code_env_fields_optional(self):
+        rf = RequestFile(id="fid", session_id="sess", name="data.csv")
+        assert rf.resource_id is None
+        assert rf.kind is None
+        assert rf.version is None
+
+    def test_fileref_resource_id_kind_version(self):
+        ref = FileRef(
+            id="fid",
+            name="out.png",
+            session_id="sess-1",
+            resource_id="res-1",
+            kind="skill",
+            version=2,
+        )
+        dumped = ref.model_dump(exclude_none=True)
+        assert dumped["resource_id"] == "res-1"
+        assert dumped["kind"] == "skill"
+        assert dumped["version"] == 2
+
+    def test_fileref_code_env_fields_excluded_when_none(self):
+        ref = FileRef(id="fid", name="out.png", session_id="sess-1")
+        dumped = ref.model_dump(exclude_none=True)
+        assert "resource_id" not in dumped
+        assert "kind" not in dumped
+        assert "version" not in dumped
+
+
 class TestExecRequestTimeout:
     """ExecRequest.timeout: optional, milliseconds, range 1000-300000."""
 

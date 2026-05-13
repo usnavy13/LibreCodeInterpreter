@@ -63,6 +63,9 @@ class PTCFileInput(BaseModel):
         description="Source session for a referenced file",
         validation_alias=AliasChoices("storage_session_id", "session_id"),
     )
+    resource_id: Optional[str] = None
+    kind: Optional[str] = None
+    version: Optional[int] = None
 
 
 class ProgrammaticExecRequest(BaseModel):
