@@ -8,7 +8,7 @@ information or actions from the outside world.
 
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field, validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, validator
 
 SUPPORTED_PTC_LANGUAGES = {"py", "bash"}
 
@@ -51,12 +51,21 @@ class PTCFileInput(BaseModel):
     """File payload for PTC initial execution.
 
     Matches the LibreChat/librechat-agents CodeEnvFile shape:
-    {session_id, id, name}
+    {storage_session_id, id, name}
     """
+
+    model_config = ConfigDict(populate_by_name=True)
 
     id: str = Field(..., description="File identifier")
     name: str = Field(..., description="Original filename for the referenced file")
-    session_id: str = Field(..., description="Source session for a referenced file")
+    session_id: str = Field(
+        ...,
+        description="Source session for a referenced file",
+        validation_alias=AliasChoices("storage_session_id", "session_id"),
+    )
+    resource_id: Optional[str] = None
+    kind: Optional[str] = None
+    version: Optional[int] = None
 
 
 class ProgrammaticExecRequest(BaseModel):

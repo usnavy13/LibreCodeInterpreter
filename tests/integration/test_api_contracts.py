@@ -402,10 +402,10 @@ class TestFileUploadContract:
 
         assert response.status_code == 200
         data = response.json()
-        # session_id is at the top level of the response
-        assert "session_id" in data
+        # storage_session_id is at the top level of the response
+        assert "storage_session_id" in data
         # API generates a random session ID when no entity_id is provided
-        assert len(data["session_id"]) > 0
+        assert len(data["storage_session_id"]) > 0
 
 
 class TestFileListContract:

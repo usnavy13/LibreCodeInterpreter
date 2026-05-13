@@ -31,7 +31,7 @@ class TestMountedFileEdits:
         )
         assert upload.status_code == 200, upload.text
         upload_result = upload.json()
-        session_id = upload_result["session_id"]
+        session_id = upload_result["storage_session_id"]
         file_id = upload_result["files"][0]["fileId"]
 
         execute = await async_client.post(
@@ -46,7 +46,7 @@ class TestMountedFileEdits:
                 ),
                 "session_id": session_id,
                 "files": [
-                    {"id": file_id, "session_id": session_id, "name": "test.txt"}
+                    {"id": file_id, "storage_session_id": session_id, "name": "test.txt"}
                 ],
             },
         )
@@ -78,7 +78,7 @@ class TestMountedFileEdits:
         )
         assert upload.status_code == 200, upload.text
         upload_result = upload.json()
-        session_id = upload_result["session_id"]
+        session_id = upload_result["storage_session_id"]
         file_id = upload_result["files"][0]["fileId"]
 
         execute = await async_client.post(
@@ -93,7 +93,7 @@ class TestMountedFileEdits:
                     "print('Appended')\n"
                 ),
                 "session_id": session_id,
-                "files": [{"id": file_id, "session_id": session_id, "name": "log.txt"}],
+                "files": [{"id": file_id, "storage_session_id": session_id, "name": "log.txt"}],
             },
         )
         assert execute.status_code == 200, execute.text
@@ -127,7 +127,7 @@ class TestMountedFileEdits:
         )
         assert upload.status_code == 200, upload.text
         upload_result = upload.json()
-        session_id = upload_result["session_id"]
+        session_id = upload_result["storage_session_id"]
         file_id = upload_result["files"][0]["fileId"]
 
         execute = await async_client.post(
@@ -142,7 +142,7 @@ class TestMountedFileEdits:
                     "print('File deleted')\n"
                 ),
                 "files": [
-                    {"id": file_id, "session_id": session_id, "name": "temp.txt"}
+                    {"id": file_id, "storage_session_id": session_id, "name": "temp.txt"}
                 ],
             },
         )
@@ -161,7 +161,7 @@ class TestMountedFileEdits:
         )
         assert upload.status_code == 200, upload.text
         upload_result = upload.json()
-        session_id = upload_result["session_id"]
+        session_id = upload_result["storage_session_id"]
         file_id = upload_result["files"][0]["fileId"]
 
         execute = await async_client.post(
@@ -178,7 +178,7 @@ class TestMountedFileEdits:
                 ),
                 "session_id": session_id,
                 "files": [
-                    {"id": file_id, "session_id": session_id, "name": "data.csv"}
+                    {"id": file_id, "storage_session_id": session_id, "name": "data.csv"}
                 ],
             },
         )

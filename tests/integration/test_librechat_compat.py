@@ -108,7 +108,7 @@ class TestLibreChatExecRequest:
             "files": [
                 {
                     "id": "file-svc-abc123",
-                    "session_id": "sess_xyz789",
+                    "storage_session_id": "sess_xyz789",
                     "name": "data.csv",
                 }
             ],
@@ -128,9 +128,9 @@ class TestLibreChatExecRequest:
             "code": "import os; print(os.listdir('.'))",
             "lang": "py",
             "files": [
-                {"id": "file-1", "session_id": "sess-1", "name": "file1.txt"},
-                {"id": "file-2", "session_id": "sess-2", "name": "file2.txt"},
-                {"id": "file-3", "session_id": "sess-3", "name": "file3.csv"},
+                {"id": "file-1", "storage_session_id": "sess-1", "name": "file1.txt"},
+                {"id": "file-2", "storage_session_id": "sess-2", "name": "file2.txt"},
+                {"id": "file-3", "storage_session_id": "sess-3", "name": "file3.csv"},
             ],
         }
 
@@ -384,19 +384,19 @@ class TestLibreChatFileUpload:
         assert response.status_code == 200
         result = response.json()
 
-        # API returns {message, session_id, files: [{fileId, filename}]}
+        # API returns {message, storage_session_id, files: [{fileId, filename}]}
         # LibreChat checks: if (result.message !== 'success') throw error
         assert result.get("message") == "success", "LibreChat expects message='success'"
         assert "files" in result
         assert len(result["files"]) == 1
-        assert "session_id" in result
+        assert "storage_session_id" in result
 
         file_info = result["files"][0]
         assert "fileId" in file_info
         assert "filename" in file_info
 
-    def test_upload_response_has_session_id(self, client, auth_headers):
-        """Test that upload response includes a session_id."""
+    def test_upload_response_has_storage_session_id(self, client, auth_headers):
+        """Test that upload response includes a storage_session_id."""
         entity_id = "asst_specific_entity"
         # LibreChat uses 'file' (singular)
         files = {"file": ("test.txt", io.BytesIO(b"content"), "text/plain")}
@@ -405,9 +405,8 @@ class TestLibreChatFileUpload:
         response = client.post("/upload", files=files, data=data, headers=auth_headers)
 
         result = response.json()
-        # API generates a new session_id for uploads (entity_id is currently not used)
-        assert "session_id" in result
-        assert len(result["session_id"]) > 0
+        assert "storage_session_id" in result
+        assert len(result["storage_session_id"]) > 0
 
     def test_librechat_upload_with_user_id_header(self, client, auth_headers):
         """
@@ -722,7 +721,7 @@ class TestLibreChatFileLifecycle:
         assert upload_response.status_code == 200
         upload_result = upload_response.json()
         assert upload_result["message"] == "success"
-        session_id = upload_result["session_id"]
+        session_id = upload_result["storage_session_id"]
         file_id = upload_result["files"][0]["fileId"]
 
         # Step 2: Check summary endpoint
@@ -769,7 +768,7 @@ class TestLibreChatFileLifecycle:
         )
         assert upload_response.status_code == 200
         upload_result = upload_response.json()
-        session_id = upload_result["session_id"]
+        session_id = upload_result["storage_session_id"]
         file_id = upload_result["files"][0]["fileId"]
 
         # Step 2: Execute with file reference
@@ -786,7 +785,11 @@ class TestLibreChatFileLifecycle:
                 "code": "with open('/mnt/data/input.txt') as f: print(f.read())",
                 "lang": "py",
                 "files": [
-                    {"id": file_id, "session_id": session_id, "name": "input.txt"}
+                    {
+                        "id": file_id,
+                        "storage_session_id": session_id,
+                        "name": "input.txt",
+                    }
                 ],
             },
             headers=auth_headers,
@@ -953,7 +956,7 @@ class TestLibreChatPrimeFiles:
         assert upload_response.status_code == 200
         result = upload_response.json()
         assert result["message"] == "success"
-        assert "session_id" in result
+        assert "storage_session_id" in result
         assert len(result["files"]) == 1
 
     def test_prime_files_empty_session_returns_empty_array(self, client, auth_headers):
@@ -1702,7 +1705,7 @@ class TestLibreChatProgrammaticToolCalling:
                     "code": "print('Hello from PTC')",
                     "files": [
                         {
-                            "session_id": "upload-session",
+                            "storage_session_id": "upload-session",
                             "id": "file-123",
                             "name": "report.csv",
                         }
@@ -1944,7 +1947,7 @@ class TestLibreChatUploadBatch:
         assert response.status_code == 200
         result = response.json()
         # All five top-level keys present (LibreChat reads each one)
-        for key in ("message", "session_id", "files", "succeeded", "failed"):
+        for key in ("message", "storage_session_id", "files", "succeeded", "failed"):
             assert key in result, f"Missing required key: {key}"
         assert result["message"] == "success"
         assert result["succeeded"] == 2
@@ -2037,6 +2040,50 @@ class TestLibreChatUploadBatch:
         assert result["files"][0]["filename"] == "skills/weather_lookup/SKILL.md"
         # The stored filename also preserves the path so S3/sandbox round-trip works.
         assert "skills/weather_lookup/SKILL.md" in setup_mocks["stored"]
+
+    def test_kind_skill_marks_files_as_agent(self, client, auth_headers, setup_mocks):
+        """kind=skill bypasses extension whitelist for skill-priming uploads."""
+        files = [
+            ("file", ("schema.xsd", io.BytesIO(b"<xs:schema/>"), "application/xml"))
+        ]
+        data = {"kind": "skill", "id": "skill_abc123", "version": "3"}
+        response = client.post(
+            "/upload/batch", files=files, data=data, headers=auth_headers
+        )
+
+        assert response.status_code == 200
+        store = setup_mocks["file_service"].store_uploaded_file
+        assert store.await_count == 1
+        kwargs = store.await_args.kwargs
+        assert kwargs["is_agent_file"] is True
+
+    def test_kind_agent_marks_files_as_agent(self, client, auth_headers, setup_mocks):
+        """kind=agent also bypasses extension whitelist."""
+        files = [
+            ("file", ("config.toml", io.BytesIO(b"[tool]"), "application/toml"))
+        ]
+        data = {"kind": "agent", "id": "agent_xyz"}
+        response = client.post(
+            "/upload/batch", files=files, data=data, headers=auth_headers
+        )
+
+        assert response.status_code == 200
+        store = setup_mocks["file_service"].store_uploaded_file
+        assert store.await_count == 1
+        kwargs = store.await_args.kwargs
+        assert kwargs["is_agent_file"] is True
+
+    def test_batch_response_includes_storage_session_id(
+        self, client, auth_headers, setup_mocks
+    ):
+        """LibreChat validates storage_session_id in batch upload response."""
+        files = [("file", ("data.csv", io.BytesIO(b"a,b"), "text/csv"))]
+        response = client.post("/upload/batch", files=files, headers=auth_headers)
+
+        assert response.status_code == 200
+        body = response.json()
+        assert "storage_session_id" in body
+        assert body["storage_session_id"] == body["session_id"]
 
 
 # =============================================================================

@@ -29,6 +29,7 @@ class TestFileRefSerialization:
         assert dumped["entity_id"] == "agent-1"
         assert dumped["id"] == "orig-1"
         assert dumped["session_id"] == "sess-1"
+        assert dumped["storage_session_id"] == "sess-1"
 
     def test_inherited_none_excluded_with_exclude_none(self):
         ref = FileRef(id="fid", name="out.png", session_id="sess-1")
@@ -36,18 +37,22 @@ class TestFileRefSerialization:
         assert "inherited" not in dumped
         assert "entity_id" not in dumped
         assert "modified_from" not in dumped
-        # Existing optional fields must also be excluded.
         assert "path" not in dumped
+        assert dumped["session_id"] == "sess-1"
+        assert dumped["storage_session_id"] == "sess-1"
 
     def test_modified_from_preserved(self):
         ref = FileRef(
             id="new-fid",
             name="report.csv",
             session_id="sess-2",
-            modified_from={"id": "old-fid", "session_id": "sess-1"},
+            modified_from={"id": "old-fid", "storage_session_id": "sess-1"},
         )
         dumped = ref.model_dump(exclude_none=True)
-        assert dumped["modified_from"] == {"id": "old-fid", "session_id": "sess-1"}
+        assert dumped["modified_from"] == {
+            "id": "old-fid",
+            "storage_session_id": "sess-1",
+        }
 
 
 class TestRequestFileEntityId:
@@ -65,6 +70,71 @@ class TestRequestFileEntityId:
     def test_entity_id_optional(self):
         rf = RequestFile(id="fid", session_id="sess", name="data.csv")
         assert rf.entity_id is None
+
+
+class TestStorageSessionIdAlias:
+    """RequestFile accepts storage_session_id (new) and session_id (legacy).
+    FileRef serializes session_id as storage_session_id."""
+
+    def test_request_file_accepts_storage_session_id(self):
+        rf = RequestFile(id="fid", storage_session_id="sess", name="data.csv")
+        assert rf.session_id == "sess"
+
+    def test_request_file_accepts_legacy_session_id(self):
+        rf = RequestFile(id="fid", session_id="sess", name="data.csv")
+        assert rf.session_id == "sess"
+
+    def test_fileref_emits_both_session_id_and_storage_session_id(self):
+        ref = FileRef(id="fid", name="out.png", session_id="sess-1")
+        dumped = ref.model_dump(exclude_none=True)
+        assert dumped["storage_session_id"] == "sess-1"
+        assert dumped["session_id"] == "sess-1"
+
+
+class TestCodeEnvFileFields:
+    """RequestFile and FileRef accept resource_id, kind, and version
+    fields sent by the librechat-agents CodeEnvFile type."""
+
+    def test_request_file_accepts_code_env_file_shape(self):
+        rf = RequestFile(
+            id="fid",
+            storage_session_id="sess",
+            name="data.csv",
+            resource_id="res-1",
+            kind="skill",
+            version=3,
+        )
+        assert rf.session_id == "sess"
+        assert rf.resource_id == "res-1"
+        assert rf.kind == "skill"
+        assert rf.version == 3
+
+    def test_request_file_code_env_fields_optional(self):
+        rf = RequestFile(id="fid", session_id="sess", name="data.csv")
+        assert rf.resource_id is None
+        assert rf.kind is None
+        assert rf.version is None
+
+    def test_fileref_resource_id_kind_version(self):
+        ref = FileRef(
+            id="fid",
+            name="out.png",
+            session_id="sess-1",
+            resource_id="res-1",
+            kind="skill",
+            version=2,
+        )
+        dumped = ref.model_dump(exclude_none=True)
+        assert dumped["resource_id"] == "res-1"
+        assert dumped["kind"] == "skill"
+        assert dumped["version"] == 2
+
+    def test_fileref_code_env_fields_excluded_when_none(self):
+        ref = FileRef(id="fid", name="out.png", session_id="sess-1")
+        dumped = ref.model_dump(exclude_none=True)
+        assert "resource_id" not in dumped
+        assert "kind" not in dumped
+        assert "version" not in dumped
 
 
 class TestExecRequestTimeout:

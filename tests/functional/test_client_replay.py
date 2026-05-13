@@ -12,7 +12,7 @@ def _normalize_artifact_files(result: dict) -> list[dict]:
     session_id = result["session_id"]
     return [
         {
-            "session_id": file_info.get("session_id") or session_id,
+            "storage_session_id": file_info.get("storage_session_id") or session_id,
             "id": file_info["id"],
             "name": file_info["name"],
         }
@@ -36,7 +36,7 @@ async def _fetch_runtime_file_refs(
         file_id = name_parts[1].split(".")[0] if len(name_parts) > 1 else ""
         file_references.append(
             {
-                "session_id": session_id,
+                "storage_session_id": session_id,
                 "id": file_id,
                 "name": file_info["metadata"]["original-filename"],
             }
@@ -128,7 +128,7 @@ class TestDirectClientReplay:
             data={"entity_id": unique_entity_id},
         )
         assert upload.status_code == 200, upload.text
-        upload_session_id = upload.json()["session_id"]
+        upload_session_id = upload.json()["storage_session_id"]
         upload_refs = await _fetch_runtime_file_refs(
             async_client, auth_headers, upload_session_id
         )
@@ -164,7 +164,7 @@ class TestDirectClientReplay:
             data={"entity_id": unique_entity_id},
         )
         assert upload.status_code == 200, upload.text
-        upload_session_id = upload.json()["session_id"]
+        upload_session_id = upload.json()["storage_session_id"]
         upload_refs = await _fetch_runtime_file_refs(
             async_client, auth_headers, upload_session_id
         )
@@ -298,7 +298,7 @@ class TestProgrammaticClientReplay:
         )
         assert upload.status_code == 200, upload.text
         upload_result = upload.json()
-        session_id = upload_result["session_id"]
+        session_id = upload_result["storage_session_id"]
 
         initial = await _start_ptc_like_runtime(
             async_client,

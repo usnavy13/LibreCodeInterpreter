@@ -198,7 +198,7 @@ class TestExecEndpoint:
             "code": "with open('data.txt', 'r') as f: print(f.read())",
             "lang": "py",
             "files": [
-                {"id": "file-123", "session_id": "test-session", "name": "data.txt"}
+                {"id": "file-123", "storage_session_id": "test-session", "name": "data.txt"}
             ],
         }
 

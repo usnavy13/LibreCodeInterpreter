@@ -25,7 +25,7 @@ class TestFileUpload:
         result = response.json()
 
         assert result["message"] == "success"
-        assert "session_id" in result
+        assert "storage_session_id" in result
         assert len(result["files"]) == 1
         assert "fileId" in result["files"][0]
         assert "filename" in result["files"][0]
@@ -50,10 +50,10 @@ class TestFileUpload:
         assert response.json()["message"] == "success"
 
     @pytest.mark.asyncio
-    async def test_upload_returns_session_id(
+    async def test_upload_returns_storage_session_id(
         self, async_client, auth_headers, unique_entity_id
     ):
-        """Upload response includes session_id."""
+        """Upload response includes storage_session_id."""
         files = {"files": ("test.txt", b"content", "text/plain")}
         data = {"entity_id": unique_entity_id}
 
@@ -65,8 +65,8 @@ class TestFileUpload:
         )
 
         result = response.json()
-        assert "session_id" in result
-        assert len(result["session_id"]) > 0
+        assert "storage_session_id" in result
+        assert len(result["storage_session_id"]) > 0
 
     @pytest.mark.asyncio
     async def test_upload_returns_file_info(
@@ -120,7 +120,7 @@ class TestFileList:
             files=files,
             data={"entity_id": unique_entity_id},
         )
-        session_id = upload.json()["session_id"]
+        session_id = upload.json()["storage_session_id"]
 
         # List files
         response = await async_client.get(
@@ -145,7 +145,7 @@ class TestFileList:
             files=files,
             data={"entity_id": unique_entity_id},
         )
-        session_id = upload.json()["session_id"]
+        session_id = upload.json()["storage_session_id"]
 
         # List with simple detail
         response = await async_client.get(
@@ -170,7 +170,7 @@ class TestFileList:
             files=files,
             data={"entity_id": unique_entity_id},
         )
-        session_id = upload.json()["session_id"]
+        session_id = upload.json()["storage_session_id"]
 
         # List with summary detail
         response = await async_client.get(
@@ -204,7 +204,7 @@ class TestFileMetadata:
             data={"entity_id": unique_entity_id},
         )
         assert upload.status_code == 200
-        session_id = upload.json()["session_id"]
+        session_id = upload.json()["storage_session_id"]
 
         # Get full detail
         response = await async_client.get(
@@ -237,7 +237,7 @@ class TestFileMetadata:
             files=files,
             data={"entity_id": unique_entity_id},
         )
-        session_id = upload.json()["session_id"]
+        session_id = upload.json()["storage_session_id"]
 
         response = await async_client.get(
             f"/files/{session_id}?detail=full",
@@ -278,7 +278,7 @@ class TestFileDownload:
             data={"entity_id": unique_entity_id},
         )
 
-        session_id = upload.json()["session_id"]
+        session_id = upload.json()["storage_session_id"]
         file_id = upload.json()["files"][0]["fileId"]
 
         response = await async_client.get(
@@ -322,7 +322,7 @@ class TestFileExecutionIntegration:
         )
         assert upload.status_code == 200
         upload_data = upload.json()
-        session_id = upload_data["session_id"]
+        session_id = upload_data["storage_session_id"]
         file_id = upload_data["files"][0]["fileId"]
         filename = upload_data["files"][0]["filename"]
 
@@ -341,7 +341,7 @@ class TestFileExecutionIntegration:
                 ),
                 "lang": "py",
                 "session_id": session_id,
-                "files": [{"id": file_id, "session_id": session_id, "name": filename}],
+                "files": [{"id": file_id, "storage_session_id": session_id, "name": filename}],
             },
         )
 
@@ -366,7 +366,7 @@ class TestFileExecutionIntegration:
             data={"entity_id": unique_entity_id},
         )
         upload_data = upload.json()
-        session_id = upload_data["session_id"]
+        session_id = upload_data["storage_session_id"]
         file_id = upload_data["files"][0]["fileId"]
         filename = upload_data["files"][0]["filename"]
 
@@ -377,7 +377,7 @@ class TestFileExecutionIntegration:
                 "code": f"print(open('{filename}').read())",
                 "lang": "py",
                 "session_id": session_id,
-                "files": [{"id": file_id, "session_id": session_id, "name": filename}],
+                "files": [{"id": file_id, "storage_session_id": session_id, "name": filename}],
             },
         )
 
@@ -400,7 +400,7 @@ class TestFileExecutionIntegration:
             data={"entity_id": unique_entity_id},
         )
         upload_data = upload.json()
-        session_id = upload_data["session_id"]
+        session_id = upload_data["storage_session_id"]
         file_id = upload_data["files"][0]["fileId"]
         filename = upload_data["files"][0]["filename"]
 
@@ -424,7 +424,7 @@ class TestFileExecutionIntegration:
                 ),
                 "lang": "py",
                 "session_id": session_id,
-                "files": [{"id": file_id, "session_id": session_id, "name": filename}],
+                "files": [{"id": file_id, "storage_session_id": session_id, "name": filename}],
             },
         )
 
