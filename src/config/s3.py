@@ -37,8 +37,19 @@ class S3Config(BaseSettings):
         ``secret_key`` are set. When they are ``None``, boto3 falls through to
         its default credential chain (env vars, ``~/.aws/credentials``, EC2/ECS
         instance metadata).
+
+        Raises ``ValueError`` when exactly one of the pair is set — partial
+        static config is always a misconfiguration.
         """
-        kwargs: dict[str, Any] = {"endpoint_url": self.endpoint_url, "region_name": self.region}
+        if bool(self.access_key) != bool(self.secret_key):
+            raise ValueError(
+                "S3_ACCESS_KEY and S3_SECRET_KEY must both be set or both be unset. "
+                "Partial static credentials are not supported."
+            )
+        kwargs: dict[str, Any] = {
+            "endpoint_url": self.endpoint_url,
+            "region_name": self.region,
+        }
         if self.access_key and self.secret_key:
             kwargs["aws_access_key_id"] = self.access_key
             kwargs["aws_secret_access_key"] = self.secret_key

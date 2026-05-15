@@ -125,18 +125,16 @@ class ConfigValidator:
         try:
             client = settings.s3.make_client()
 
-            # Test connection by listing buckets
-            response = client.list_buckets()
-            buckets = response.get("Buckets", [])
-
-            # Check if our bucket exists
-            bucket_exists = any(
-                bucket["Name"] == settings.s3_bucket for bucket in buckets
-            )
-            if not bucket_exists:
-                self.warnings.append(
-                    f"S3 bucket '{settings.s3_bucket}' does not exist - will be created"
-                )
+            try:
+                client.head_bucket(Bucket=settings.s3_bucket)
+            except ClientError as e:
+                code = e.response["Error"]["Code"]
+                if code in ("404", "NoSuchBucket"):
+                    self.warnings.append(
+                        f"S3 bucket '{settings.s3_bucket}' does not exist"
+                    )
+                else:
+                    raise
 
         except ClientError as e:
             if settings.api_debug:

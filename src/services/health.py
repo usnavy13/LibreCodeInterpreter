@@ -226,12 +226,8 @@ class HealthCheckService:
                 self._s3_client = settings.s3.make_client()
 
             loop = asyncio.get_event_loop()
-            buckets_resp = await loop.run_in_executor(
-                None, self._s3_client.list_buckets
-            )
-            buckets = buckets_resp.get("Buckets", [])
 
-            # Check if our bucket exists
+            # Check if our bucket exists; create it if not
             try:
                 await loop.run_in_executor(
                     None,
@@ -293,7 +289,6 @@ class HealthCheckService:
                 "endpoint": settings.s3_endpoint,
                 "bucket": settings.s3_bucket,
                 "bucket_exists": bucket_exists,
-                "total_buckets": len(buckets),
                 "secure": settings.s3_secure,
             }
 
