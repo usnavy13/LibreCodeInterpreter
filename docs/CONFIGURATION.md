@@ -270,13 +270,16 @@ Inactive states are automatically archived to S3 for long-term storage.
 | `ENABLE_NETWORK_ISOLATION`    | `true`  | Enable network isolation for sandboxes  |
 | `ENABLE_FILESYSTEM_ISOLATION` | `true`  | Enable filesystem isolation             |
 
-### Sandbox Network Access (Skill Installs)
+### Sandbox Network Access
 
-Off by default — sandboxes have no network access. When enabled, an inline allowlist HTTPS proxy on `127.0.0.1` lets sandboxes reach **only** package registries (PyPI, npm, Go modules, crates.io). Required for "skills" that `pip install` / `npm install` / `go get` / `cargo install` dependencies at runtime.
+Off by default — sandboxes have no network access. When enabled, an inline HTTPS proxy on `127.0.0.1` lets sandboxes reach external hosts without giving sandbox processes direct network access. The default `allowlist` mode permits only package registries (PyPI, npm, Go modules, crates.io) plus any hostnames in `SANDBOX_EGRESS_ALLOWLIST`. This is required for "skills" that `pip install` / `npm install` / `go get` / `cargo install` dependencies at runtime.
+
+For agent workflows that need to retrieve data from public APIs, set `SANDBOX_EGRESS_MODE=public_https`. Public HTTPS mode permits arbitrary public HTTPS hostnames on port `443`, while still rejecting private, loopback, link-local, reserved, multicast, and unspecified IP addresses. The iptables egress firewall remains active, so sandbox processes still cannot bypass the proxy with direct sockets.
 
 | Variable                   | Default               | Description                                                                       |
 | -------------------------- | --------------------- | --------------------------------------------------------------------------------- |
 | `ENABLE_SANDBOX_NETWORK`   | `false`               | Allow sandboxes to reach the internet via the inline allowlist proxy              |
+| `SANDBOX_EGRESS_MODE`      | `allowlist`           | Egress mode: `allowlist` or `public_https`                                        |
 | `SANDBOX_EGRESS_PORT`      | `18443`               | Port the inline egress proxy binds to on `127.0.0.1`                              |
 | `SANDBOX_EGRESS_ALLOWLIST` | (registries default)  | Comma-separated list of additional hostnames the proxy permits                    |
 | `SKILL_DEPS_PATH`          | `/opt/skill-deps`     | Host-side directory mounted into every sandbox so install caches compound across runs |

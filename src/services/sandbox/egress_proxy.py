@@ -10,11 +10,14 @@ into their env; pip, npm, go, cargo all honor that variable. The proxy:
 - Refuses to open tunnels to private IP ranges (RFC 1918, loopback, link-local)
   even if a public hostname resolves to one. This stops trivial SSRF against
   Redis/S3/etc. on the same docker network.
-- Refuses any request whose host doesn't match the allowlist.
+- Refuses any request whose host doesn't match the allowlist, unless
+  public HTTPS mode is explicitly enabled.
 
 Allowlist defaults cover Python (PyPI), Node (npmjs), Go modules, and
 Rust crates so `pip install`, `npm install`, `go get`, `cargo add` work
-out of the box. Add more via SANDBOX_EGRESS_ALLOWLIST=host1,host2.
+out of the box. Add more via SANDBOX_EGRESS_ALLOWLIST=host1,host2. Operators
+can set SANDBOX_EGRESS_MODE=public_https to permit arbitrary public HTTPS
+hosts while retaining private/link-local IP blocking.
 """
 
 from __future__ import annotations
@@ -145,9 +148,11 @@ class EgressProxy:
         port: int,
         allowlist: Iterable[str] = DEFAULT_ALLOWLIST,
         bind_host: str = "127.0.0.1",
+        allow_public_https: bool = False,
     ):
         self.port = port
         self.bind_host = bind_host
+        self.allow_public_https = allow_public_https
         self.allowlist: Set[str] = {h.strip().lower() for h in allowlist if h.strip()}
         self._server: Optional[asyncio.base_events.Server] = None
         self._serve_task: Optional[asyncio.Task] = None
@@ -164,6 +169,7 @@ class EgressProxy:
         logger.info(
             "Sandbox egress proxy started",
             bind=f"{self.bind_host}:{self.port}",
+            mode="public_https" if self.allow_public_https else "allowlist",
             allowlist_size=len(self.allowlist),
         )
 
@@ -235,15 +241,24 @@ class EgressProxy:
             return
         host = _normalize_host(host)
 
-        # Allowlist check on the host *before* we resolve it, so audit logs show
-        # the requested host even when DNS would have failed.
+        # Host checks run *before* DNS so audit logs show the requested host even
+        # when resolution would fail.
         if _is_private_ip(host):
             logger.warning(
                 "Egress proxy refused private IP literal", host=host, peer=peer
             )
             await self._reply_and_close(client_writer, 403, "Forbidden")
             return
-        if not _matches_allowlist(host, self.allowlist):
+        if self.allow_public_https and port != 443:
+            logger.warning(
+                "Egress proxy refused public HTTPS request on non-HTTPS port",
+                host=host,
+                port=port,
+                peer=peer,
+            )
+            await self._reply_and_close(client_writer, 403, "Forbidden")
+            return
+        if not self.allow_public_https and not _matches_allowlist(host, self.allowlist):
             logger.warning(
                 "Egress proxy refused non-allowlisted host", host=host, peer=peer
             )

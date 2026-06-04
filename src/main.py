@@ -177,6 +177,7 @@ async def _startup_egress_proxy(app: FastAPI) -> None:
     proxy = EgressProxy(
         port=settings.sandbox_egress_port,
         allowlist=list(DEFAULT_ALLOWLIST) + extra,
+        allow_public_https=settings.sandbox_egress_mode == "public_https",
     )
     await proxy.start()
     app.state.egress_proxy = proxy
@@ -207,6 +208,7 @@ async def _startup_egress_proxy(app: FastAPI) -> None:
     logger.info(
         "Sandbox network access ENABLED via egress proxy + firewall",
         port=settings.sandbox_egress_port,
+        egress_mode=settings.sandbox_egress_mode,
         skill_deps_path=str(deps_root),
         sandbox_uid=sandbox_uid,
         allowlist_extra=extra or None,

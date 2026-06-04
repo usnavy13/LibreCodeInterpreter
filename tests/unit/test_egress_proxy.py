@@ -119,6 +119,63 @@ async def test_private_ip_literal_returns_403():
 
 
 @pytest.mark.asyncio
+async def test_public_https_mode_accepts_non_allowlisted_host():
+    """Public HTTPS mode should permit arbitrary public hostnames.
+
+    The test uses an unresolvable hostname so a successful allow check produces
+    502 from DNS resolution, not 403 from the allowlist.
+    """
+    port = _free_port()
+    proxy = EgressProxy(
+        port=port,
+        allowlist={"good.test"},
+        allow_public_https=True,
+    )
+    await proxy.start()
+    try:
+        status, _r, w = await _send_connect(port, "arbitrary-public-api.test:443")
+        w.close()
+        assert b"403" not in status, status
+        assert b"502" in status, status
+    finally:
+        await proxy.stop()
+
+
+@pytest.mark.asyncio
+async def test_public_https_mode_still_rejects_private_ip_literal():
+    port = _free_port()
+    proxy = EgressProxy(
+        port=port,
+        allowlist={"good.test"},
+        allow_public_https=True,
+    )
+    await proxy.start()
+    try:
+        status, _r, w = await _send_connect(port, "10.0.0.1:443")
+        w.close()
+        assert b"403" in status, status
+    finally:
+        await proxy.stop()
+
+
+@pytest.mark.asyncio
+async def test_public_https_mode_rejects_non_https_ports():
+    port = _free_port()
+    proxy = EgressProxy(
+        port=port,
+        allowlist={"good.test"},
+        allow_public_https=True,
+    )
+    await proxy.start()
+    try:
+        status, _r, w = await _send_connect(port, "arbitrary-public-api.test:22")
+        w.close()
+        assert b"403" in status, status
+    finally:
+        await proxy.stop()
+
+
+@pytest.mark.asyncio
 async def test_loopback_literal_returns_403():
     port = _free_port()
     proxy = EgressProxy(port=port, allowlist={"good.test"})
