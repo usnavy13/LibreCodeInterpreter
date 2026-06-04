@@ -20,7 +20,7 @@ Usage:
 
 import secrets
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 import structlog
 from pydantic import Field, validator
@@ -109,6 +109,15 @@ class Settings(BaseSettings):
             "Required for skills that pip/npm/go/cargo install dependencies at "
             "runtime. Outbound traffic is restricted to package registries; "
             "everything else is refused."
+        ),
+    )
+    sandbox_egress_mode: Literal["allowlist", "public_https"] = Field(
+        default="allowlist",
+        description=(
+            "Sandbox egress proxy mode. 'allowlist' permits default package "
+            "registries plus SANDBOX_EGRESS_ALLOWLIST hosts. 'public_https' "
+            "permits arbitrary public HTTPS hosts while still blocking "
+            "private, loopback, link-local, reserved, and multicast IPs."
         ),
     )
     sandbox_egress_port: int = Field(
