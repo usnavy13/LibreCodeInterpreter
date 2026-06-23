@@ -5,7 +5,7 @@ uvicorn[standard]==0.42.0
 
 # Data validation and serialization
 pydantic==2.12.5
-pydantic-settings==2.13.1
+pydantic-settings==2.14.2
 
 # HTTP client for external requests
 httpx==0.28.1
