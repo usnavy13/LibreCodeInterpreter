@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import re
 import shlex
 import signal
 from datetime import datetime, timedelta
@@ -564,7 +565,12 @@ class CodeExecutionRunner:
         extension = lang_config.file_extension
         code_filename = f"code.{extension}"
         if language == "java":
-            code_filename = "Code.java"
+            match = re.search(
+                r"(?:public\s+)?(?:final\s+|abstract\s+)?class\s+(\w+)", code
+            )
+            java_class = match.group(1) if match else "Code"
+            code_filename = f"{java_class}.java"
+            exec_command = f"javac {code_filename} && java {java_class}"
         elif language == "ts":
             code_filename = "code.ts"
 
